@@ -507,9 +507,10 @@ function ScenarioSettingsSection({ s, onChange }: { s: Scenario; onChange: (s: S
 }
 
 // ===== Main KeyframeEditor =====
-export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, baseScenario }: {
+export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, baseScenario, sirPct }: {
   s: Scenario; onChange: (s: Scenario) => void; idx: number;
   currentAge: number; retirementAge: number; baseScenario?: Scenario | null;
+  sirPct?: number;
 }) {
   const isBase = idx === 0;
   const isLinked = s.linkedToBase && !isBase && !!baseScenario;
@@ -555,12 +556,12 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
       {/* 本人設定: MemberEditorを使用 */}
       <MemberEditor
         label={`本人${isLinked ? " 🔗A" : ""}`} color="#374151"
-        data={{ incomeKF: s.incomeKF, expenseKF: s.expenseKF, dcTotalKF: s.dcTotalKF, companyDCKF: s.companyDCKF, idecoKF: s.idecoKF, salaryGrowthRate: s.salaryGrowthRate, sirPct: 15.75, hasFurusato: s.hasFurusato, dcReceiveMethod: s.dcReceiveMethod }}
+        data={{ incomeKF: s.incomeKF, expenseKF: s.expenseKF, dcTotalKF: s.dcTotalKF, companyDCKF: s.companyDCKF, idecoKF: s.idecoKF, salaryGrowthRate: s.salaryGrowthRate, sirPct: sirPct ?? 15.75, hasFurusato: s.hasFurusato, dcReceiveMethod: s.dcReceiveMethod }}
         onUpdate={(patch) => onChange({ ...s, ...patch })}
         currentAge={currentAge} retirementAge={retirementAge}
         linked={isLinked}
         readOnly={isLinked}
-        baseData={baseScenario ? { incomeKF: baseScenario.incomeKF, expenseKF: baseScenario.expenseKF, dcTotalKF: baseScenario.dcTotalKF, companyDCKF: baseScenario.companyDCKF, idecoKF: baseScenario.idecoKF, salaryGrowthRate: baseScenario.salaryGrowthRate, sirPct: 15.75, hasFurusato: baseScenario.hasFurusato, dcReceiveMethod: baseScenario.dcReceiveMethod } : undefined}
+        baseData={baseScenario ? { incomeKF: baseScenario.incomeKF, expenseKF: baseScenario.expenseKF, dcTotalKF: baseScenario.dcTotalKF, companyDCKF: baseScenario.companyDCKF, idecoKF: baseScenario.idecoKF, salaryGrowthRate: baseScenario.salaryGrowthRate, sirPct: sirPct ?? 15.75, hasFurusato: baseScenario.hasFurusato, dcReceiveMethod: baseScenario.dcReceiveMethod } : undefined}
         trackLinked={isLinked ? isTrackLinked : undefined}
         onToggleTrack={isLinked ? toggleTrack : undefined}
       />

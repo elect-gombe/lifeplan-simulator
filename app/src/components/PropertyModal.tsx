@@ -1,21 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { LifeEvent, PropertyParams } from "../lib/types";
-
-function calcMonthlyPayment(principal: number, annualRate: number, years: number): number {
-  if (annualRate <= 0 || years <= 0) return years > 0 ? Math.round(principal / (years * 12)) : 0;
-  const r = annualRate / 100 / 12;
-  const n = years * 12;
-  return Math.round(principal * r * Math.pow(1 + r, n) / (Math.pow(1 + r, n) - 1));
-}
-
-function loanBalance(principal: number, rate: number, totalYears: number, elapsed: number): number {
-  if (rate <= 0) return Math.max(principal - (principal / totalYears) * elapsed, 0);
-  const r = rate / 100 / 12;
-  const n = totalYears * 12;
-  const m = elapsed * 12;
-  const monthly = principal * r * Math.pow(1 + r, n) / (Math.pow(1 + r, n) - 1);
-  return Math.max(Math.round(principal * Math.pow(1 + r, m) - monthly * (Math.pow(1 + r, m) - 1) / r), 0);
-}
+import { calcMonthlyPaymentEqual, loanBalanceAfterYears } from "../lib/calc";
 
 export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent }: {
   isOpen: boolean;
@@ -53,24 +38,24 @@ export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementA
   const isPrincipalEqual = pp.repaymentType === "equal_principal";
   const fixedMonthly = isPrincipalEqual
     ? Math.round((loanAmount / (pp.loanYears * 12)) + loanAmount * (pp.fixedRate / 100 / 12))
-    : calcMonthlyPayment(loanAmount, pp.fixedRate, pp.loanYears);
+    : calcMonthlyPaymentEqual(loanAmount, pp.fixedRate, pp.loanYears);
   const varInitMonthly = isPrincipalEqual
     ? Math.round((loanAmount / (pp.loanYears * 12)) + loanAmount * (pp.variableInitRate / 100 / 12))
-    : calcMonthlyPayment(loanAmount, pp.variableInitRate, pp.loanYears);
+    : calcMonthlyPaymentEqual(loanAmount, pp.variableInitRate, pp.loanYears);
   const varRiskMonthly = isPrincipalEqual
     ? Math.round((loanAmount / (pp.loanYears * 12)) + loanAmount * (pp.variableRiskRate / 100 / 12))
-    : calcMonthlyPayment(loanAmount, pp.variableRiskRate, pp.loanYears);
+    : calcMonthlyPaymentEqual(loanAmount, pp.variableRiskRate, pp.loanYears);
   const displayMonthly = pp.rateType === "fixed" ? fixedMonthly : varInitMonthly;
 
   // Loan balance at various points for preview
   const rate0 = pp.rateType === "fixed" ? pp.fixedRate : pp.variableInitRate;
-  const bal5 = loanBalance(loanAmount, rate0, pp.loanYears, 5);
-  const bal10 = loanBalance(loanAmount, rate0, pp.loanYears, 10);
-  const bal13 = loanBalance(loanAmount, rate0, pp.loanYears, 13);
+  const bal5 = loanBalanceAfterYears(loanAmount, rate0, pp.loanYears, 5);
+  const bal10 = loanBalanceAfterYears(loanAmount, rate0, pp.loanYears, 10);
+  const bal13 = loanBalanceAfterYears(loanAmount, rate0, pp.loanYears, 13);
   const deductionYear1 = Math.min(Math.round(loanAmount * 0.007), 350000);
   const deductionYear13 = Math.min(Math.round(bal13 * 0.007), 350000);
   const totalDeduction13 = Array.from({ length: 13 }, (_, i) =>
-    Math.min(Math.round(loanBalance(loanAmount, rate0, pp.loanYears, i) * 0.007), 350000)
+    Math.min(Math.round(loanBalanceAfterYears(loanAmount, rate0, pp.loanYears, i) * 0.007), 350000)
   ).reduce((a, b) => a + b, 0);
 
   const handleSave = () => {

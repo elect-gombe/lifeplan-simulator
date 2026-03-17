@@ -280,7 +280,8 @@ export default function App() {
               <KeyframeEditor key={s.id ?? i} s={s} idx={i}
                 onChange={(ns) => updS(i, ns)}
                 currentAge={currentAge} retirementAge={retirementAge}
-                baseScenario={i === 0 ? null : scenarios[0]} />
+                baseScenario={i === 0 ? null : scenarios[0]}
+                sirPct={sirPct} />
             ))}
           </div>
         </details>

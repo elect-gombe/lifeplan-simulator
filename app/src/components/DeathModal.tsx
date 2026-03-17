@@ -22,6 +22,7 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
   const [target, setTarget] = useState<EventTarget>("self");
   const [childCount, setChildCount] = useState(2);
   const [avgAnnualSalaryMan, setAvgAnnualSalaryMan] = useState(700);
+  const [survivorAge, setSurvivorAge] = useState(deathAge - 2);
 
   useEffect(() => {
     if (existingEvent?.deathParams) {
@@ -47,7 +48,7 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
     const contributionMonths = Math.max((deathAge - 22) * 12, 300);
     const employeePension = Math.round(avgMonthly * 5.481 / 1000 * contributionMonths * 3 / 4);
     // 中高齢寡婦加算（子なし、遺族40-65歳）
-    const widowSupplement = childCount === 0 && deathAge >= 40 && deathAge < 65 ? 612000 : 0;
+    const widowSupplement = childCount === 0 && survivorAge >= 40 && survivorAge < 65 ? 612000 : 0;
     const total = basicPension + employeePension + widowSupplement;
     return { basicPension, employeePension, widowSupplement, total, totalMan: Math.round(total / 10000) };
   };
@@ -126,7 +127,7 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
           {/* 遺族年金（自動計算） */}
           <div className="rounded border p-3 space-y-2">
             <label className="block font-semibold text-gray-600">遺族年金（自動計算・令和6年度基準）</label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="block text-gray-500 mb-0.5">18歳未満の子の数（プレビュー用）</label>
                 <input type="number" value={childCount} min={0} max={10} step={1}
@@ -136,6 +137,11 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
                 <label className="block text-gray-500 mb-0.5">平均年収（プレビュー用・万円）</label>
                 <input type="number" value={avgAnnualSalaryMan} min={0} step={50}
                   onChange={e => setAvgAnnualSalaryMan(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
+              </div>
+              <div>
+                <label className="block text-gray-500 mb-0.5">遺族の年齢（プレビュー用）</label>
+                <input type="number" value={survivorAge} min={18} max={80} step={1}
+                  onChange={e => setSurvivorAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
               </div>
             </div>
             <div className="rounded bg-blue-50 p-2 text-gray-600 space-y-0.5">
