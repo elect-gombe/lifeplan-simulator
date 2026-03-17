@@ -3,10 +3,13 @@ export interface Keyframe {
   value: number;
 }
 
+export type LoanStructure = "single" | "pair"; // 単独ローン | ペアローン
+
 export interface PropertyParams {
   priceMan: number;         // 物件価格（万円）
   downPaymentMan: number;   // 頭金（万円）
   loanYears: number;
+  repaymentType: "equal_payment" | "equal_principal"; // 元利均等 | 元金均等
   rateType: "fixed" | "variable";
   fixedRate: number;        // %
   variableInitRate: number; // %
@@ -15,6 +18,45 @@ export interface PropertyParams {
   maintenanceMonthlyMan: number; // 管理費（万円/月）
   taxAnnualMan: number;     // 固定資産税（万円/年）
   hasLoanDeduction: boolean;
+  loanStructure: LoanStructure;    // 単独 or ペアローン
+  pairRatio: number;               // ペアローン時の本人負担割合 (0-100%)
+  deductionTarget: "self" | "spouse" | "both"; // 住宅ローン控除の対象
+  danshinTarget: "self" | "spouse" | "both";   // 団信の対象
+}
+
+export interface InsuranceParams {
+  insuranceType: "term_life" | "income_protection";
+  premiumMonthlyMan: number;    // 保険料（万円/月）
+  lumpSumPayoutMan: number;     // 死亡一時金（万円）— term_life
+  monthlyPayoutMan: number;     // 月額保障（万円/月）— income_protection
+  payoutUntilAge: number;       // 保障期間（歳まで）
+  coverageEndAge: number;       // 保険期間（何歳まで保険料を払うか）
+}
+
+export interface SpouseConfig {
+  enabled: boolean;
+  currentAge: number;
+  incomeKF: Keyframe[];         // 年収KF（万円）
+  expenseKF: Keyframe[];        // 配偶者分の生活費KF（万円/月）— 空の場合は世帯共通
+  dcTotalKF: Keyframe[];        // DC合計KF（円/月）
+  companyDCKF: Keyframe[];      // 会社DC KF（円/月）
+  idecoKF: Keyframe[];          // iDeCo KF（円/月）
+  salaryGrowthRate: number;     // 昇給率（%）
+  sirPct: number;               // 社保料率（%）— 男女でわずかに違う場合
+  hasFurusato: boolean;         // ふるさと納税
+}
+
+export interface NISAConfig {
+  enabled: boolean;
+  accounts: 1 | 2;             // 口座数（1=本人のみ, 2=夫婦2口座）
+  annualLimitMan: number;       // 1人あたり年間投資枠（万円）default 360
+  lifetimeLimitMan: number;     // 1人あたり生涯投資枠（万円）default 1800
+  returnRate: number;           // 運用利回り（%）NISA=非課税, 特定口座=20.315%課税
+}
+
+export interface BalancePolicy {
+  cashReserveMonths: number;    // 生活防衛資金（月数）
+  nisaPriority: boolean;        // 余剰はNISA優先
 }
 
 export interface DeathParams {
@@ -34,6 +76,8 @@ export interface CarParams {
   replaceEveryYears: number; // 買い替えサイクル（0=一度のみ）
 }
 
+export type EventTarget = "self" | "spouse";
+
 export interface LifeEvent {
   id: number;
   age: number;
@@ -44,10 +88,12 @@ export interface LifeEvent {
   durationYears: number;
   parentId?: number;
   ageOffset?: number;
+  target?: EventTarget;           // 対象者（death/insurance用: "self"=本人, "spouse"=配偶者）
   // Structured params for complex events (parent only)
   propertyParams?: PropertyParams;
   carParams?: CarParams;
   deathParams?: DeathParams;
+  insuranceParams?: InsuranceParams;
 }
 
 // Computed cost breakdown for a single year from a structured event
@@ -102,6 +148,12 @@ export interface Scenario {
   overrideTracks: TrackKey[];
   years: number;
   hasFurusato: boolean;
+  dependentDeductionHolder: "self" | "spouse"; // 扶養控除を適用する世帯主
+  // Spouse
+  spouse?: SpouseConfig;
+  // NISA / Balance policy
+  nisa?: NISAConfig;
+  balancePolicy?: BalancePolicy;
 }
 
 export interface YearResult {
@@ -146,6 +198,31 @@ export interface YearResult {
   childAllowance: number;     // 児童手当合計（円/年）
   // Housing loan balance (for graph)
   loanBalance: number;
+  // NISA / 特定口座 / Cash split
+  nisaContribution: number;
+  nisaWithdrawal: number;
+  nisaAsset: number;
+  taxableContribution: number;
+  taxableWithdrawal: number;
+  taxableAsset: number;        // 特定口座（税引前評価額）
+  taxableGain: number;         // 特定口座の含み益
+  cashSavings: number;
+  // Spouse (individual breakdown — same framework as 本人)
+  spouseGross: number;
+  spouseIncomeTax: number;
+  spouseResidentTax: number;
+  spouseSocialInsurance: number;
+  spouseDCContribution: number;
+  spouseIDeCoContribution: number;
+  spouseIncomeTaxSaving: number;
+  spouseResidentTaxSaving: number;
+  spouseFurusatoLimit: number;
+  spouseFurusatoDonation: number;
+  spouseTakeHome: number;
+  spouseDCAsset: number;
+  // Insurance
+  insurancePremiumTotal: number;
+  insurancePayoutTotal: number;
   // Active events & cost breakdown
   activeEvents: LifeEvent[];
   eventCostBreakdown: EventYearCost[];
@@ -215,7 +292,7 @@ export const EVENT_TYPES: Record<string, { label: string; icon: string; color: s
   property:  { label: "住宅購入",   icon: "🏠", color: "#3b82f6", defaultAnnual: 120, defaultOnetime: 500, defaultDuration: 35 },
   car:       { label: "車",         icon: "🚗", color: "#10b981", defaultAnnual: 30,  defaultOnetime: 300, defaultDuration: 7 },
   marriage:  { label: "結婚",       icon: "💍", color: "#ec4899", defaultAnnual: 0,   defaultOnetime: 300, defaultDuration: 0 },
-  insurance: { label: "保険",       icon: "🛡️", color: "#6366f1", defaultAnnual: 24,  defaultOnetime: 0,   defaultDuration: 0 },
+  insurance: { label: "保険",       icon: "🛡️", color: "#6366f1", defaultAnnual: 0,  defaultOnetime: 0,   defaultDuration: 0 },
   travel:    { label: "旅行・趣味", icon: "✈️", color: "#14b8a6", defaultAnnual: 30,  defaultOnetime: 0,   defaultDuration: 0 },
   rent:      { label: "家賃",       icon: "🏢", color: "#64748b", defaultAnnual: 120, defaultOnetime: 0,   defaultDuration: 0 },
   death:     { label: "死亡",       icon: "⚰️", color: "#1e293b", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },

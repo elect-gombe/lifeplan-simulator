@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import type { LifeEvent, DeathParams } from "../lib/types";
+import type { LifeEvent, DeathParams, EventTarget } from "../lib/types";
 
 export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent }: {
   isOpen: boolean;
@@ -19,11 +19,13 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
 
   const [deathAge, setDeathAge] = useState(currentAge + 10);
   const [dp, setDP] = useState<DeathParams>(defaults);
+  const [target, setTarget] = useState<EventTarget>("self");
 
   useEffect(() => {
     if (existingEvent?.deathParams) {
       setDP(existingEvent.deathParams);
       setDeathAge(existingEvent.age);
+      setTarget(existingEvent.target || "self");
     }
   }, [existingEvent]);
 
@@ -34,13 +36,15 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
   const protectionYears = Math.max(dp.incomeProtectionUntilAge - deathAge, 0);
   const protectionTotal = protectionAnnual * protectionYears;
 
+  const targetLabel = target === "spouse" ? "配偶者" : "本人";
   const handleSave = () => {
     onSave({
       id: existingEvent?.id || Date.now(),
       age: deathAge,
       type: "death",
-      label: `死亡(${deathAge}歳)`,
+      label: `${targetLabel}死亡(${deathAge}歳)`,
       oneTimeCostMan: 0, annualCostMan: 0, durationYears: 0,
+      target,
       deathParams: dp,
     });
     onClose();
@@ -55,12 +59,26 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
         <div className="p-4 space-y-4 text-xs">
 
           <div className="rounded bg-gray-50 p-2 text-gray-600">
-            主な収入源が死亡した場合の家計シミュレーションです。収入保障保険の必要保障額を検討するために使います。
+            世帯メンバーが死亡した場合の家計シミュレーションです。収入保障保険の必要保障額を検討するために使います。
+          </div>
+
+          {/* 対象者選択 */}
+          <div className="rounded border p-3 space-y-2">
+            <label className="block font-semibold text-gray-600">対象者</label>
+            <div className="flex gap-2">
+              <button onClick={() => setTarget("self")}
+                className={`rounded px-3 py-1.5 ${target === "self" ? "bg-slate-700 text-white" : "bg-gray-100"}`}>本人</button>
+              <button onClick={() => setTarget("spouse")}
+                className={`rounded px-3 py-1.5 ${target === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"}`}>配偶者</button>
+            </div>
+            <div className="text-gray-400 text-[10px]">
+              {target === "self" ? "本人死亡: 本人の収入→0、DC/iDeCo停止。配偶者は継続。" : "配偶者死亡: 配偶者の収入→0、配偶者DC/iDeCo停止。本人は継続。"}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-gray-600 mb-1">死亡時年齢</label>
+              <label className="block font-semibold text-gray-600 mb-1">死亡時年齢（{targetLabel}）</label>
               <input type="number" value={deathAge} min={currentAge} max={retirementAge - 1}
                 onChange={e => setDeathAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
             </div>

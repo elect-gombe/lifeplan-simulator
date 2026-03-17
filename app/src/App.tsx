@@ -116,6 +116,10 @@ function mkScenario(id: number, currentAge: number, retirementAge: number, gross
     overrideTracks: isBase ? [] : [...DEFAULT_OVERRIDE_TRACKS],
     years: retirementAge - currentAge,
     hasFurusato: true,
+    dependentDeductionHolder: "self",
+    spouse: { enabled: false, currentAge: 30, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true },
+    nisa: { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 },
+    balancePolicy: { cashReserveMonths: 6, nisaPriority: true },
   };
 }
 
@@ -130,25 +134,17 @@ export default function App() {
   const [PY, setPY] = useState(saved?.PY ?? 20);
   const [sirPct, setSirPct] = useState(saved?.sirPct ?? 15.75);
   const [scenarios, setScenarios] = useState<Scenario[]>(() => saved?.scenarios?.length ? saved.scenarios : [mkScenario(0, 30, 65, 700), mkScenario(1, 30, 65, 700)]);
-  const [dependentsCount, setDependentsCount] = useState(saved?.dependentsCount ?? 0);
-  const [hasSpouseDeduction, setHasSpouseDeduction] = useState(saved?.hasSpouseDeduction ?? false);
-  const [lifeInsuranceDeduction, setLifeInsuranceDeduction] = useState(saved?.lifeInsuranceDeduction ?? 0);
-  const [useHousingLoanDeduction, setUseHousingLoanDeduction] = useState(saved?.useHousingLoanDeduction ?? false);
-  const [housingLoanDeductionAmount, setHousingLoanDeductionAmount] = useState(saved?.housingLoanDeductionAmount ?? 0);
   const [modalAge, setModalAge] = useState<number | null>(null);
   const [inflationRate, setInflationRate] = useState(saved?.inflationRate ?? 1.5);
-  const [currentAssetsMan, setCurrentAssetsMan] = useState(saved?.currentAssetsMan ?? 500);
-  const [salaryGrowthRate, setSalaryGrowthRate] = useState(saved?.salaryGrowthRate ?? 2);
-  const [dcYears, setDcYears] = useState(saved?.dcYears ?? 35);
-  const [hasFurusato, setHasFurusato] = useState(saved?.hasFurusato ?? true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Build state object for save/export
   const currentState: SavedState = useMemo(() => ({
     currentAge, retirementAge, grossMan, rr, hasRet, retAmt, PY, sirPct, inflationRate,
-    dependentsCount, hasSpouseDeduction, lifeInsuranceDeduction, useHousingLoanDeduction, housingLoanDeductionAmount,
-    currentAssetsMan, salaryGrowthRate, dcYears, hasFurusato, scenarios,
-  }), [currentAge, retirementAge, grossMan, rr, hasRet, retAmt, PY, sirPct, inflationRate, dependentsCount, hasSpouseDeduction, lifeInsuranceDeduction, useHousingLoanDeduction, housingLoanDeductionAmount, currentAssetsMan, salaryGrowthRate, dcYears, hasFurusato, scenarios]);
+    dependentsCount: 0, hasSpouseDeduction: false, lifeInsuranceDeduction: 0,
+    useHousingLoanDeduction: false, housingLoanDeductionAmount: 0,
+    currentAssetsMan: 500, salaryGrowthRate: 2, dcYears: 35, hasFurusato: true, scenarios,
+  }), [currentAge, retirementAge, grossMan, rr, hasRet, retAmt, PY, sirPct, inflationRate, scenarios]);
 
   // Auto-save to localStorage on every change
   useEffect(() => { saveToStorage(currentState); }, [currentState]);
@@ -165,15 +161,6 @@ export default function App() {
     setPY(data.PY ?? 20);
     setSirPct(data.sirPct ?? 15.75);
     setInflationRate(data.inflationRate ?? 1.5);
-    setDependentsCount(data.dependentsCount ?? 0);
-    setHasSpouseDeduction(data.hasSpouseDeduction ?? false);
-    setLifeInsuranceDeduction(data.lifeInsuranceDeduction ?? 0);
-    setUseHousingLoanDeduction(data.useHousingLoanDeduction ?? false);
-    setHousingLoanDeductionAmount(data.housingLoanDeductionAmount ?? 0);
-    setCurrentAssetsMan(data.currentAssetsMan ?? 500);
-    setSalaryGrowthRate(data.salaryGrowthRate ?? 2);
-    setDcYears(data.dcYears ?? 35);
-    setHasFurusato(data.hasFurusato ?? true);
     if (data.scenarios?.length) setScenarios(data.scenarios);
   };
 
@@ -191,23 +178,18 @@ export default function App() {
   }, []);
 
   const totalYears = retirementAge - currentAge;
-  const housingLoanDed = useHousingLoanDeduction ? Math.max(housingLoanDeductionAmount, 0) : 0;
-  const taxOpts = { dependentsCount, hasSpouseDeduction, lifeInsuranceDeduction };
+  const taxOpts = { dependentsCount: 0, hasSpouseDeduction: false, lifeInsuranceDeduction: 0 };
 
   const calcParams = useMemo(() => ({
-    currentAge, retirementAge, defaultGrossMan: grossMan, rr, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed, inflationRate,
-  }), [currentAge, retirementAge, grossMan, rr, sirPct, hasRet, retAmt, PY, dependentsCount, hasSpouseDeduction, lifeInsuranceDeduction, housingLoanDed, inflationRate]);
+    currentAge, retirementAge, defaultGrossMan: grossMan, rr, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed: 0, inflationRate,
+  }), [currentAge, retirementAge, grossMan, rr, sirPct, hasRet, retAmt, PY, inflationRate]);
 
   const { base, res } = useMemo(() => {
     const base = computeBase(calcParams);
-    // Apply global settings to all scenarios
-    const effectiveScenarios = scenarios.map(s => ({
-      ...s, currentAssetsMan, salaryGrowthRate, years: dcYears, hasFurusato,
-    }));
-    const baseScenario = effectiveScenarios[0] || null;
-    const res = effectiveScenarios.map((s, i) => computeScenario(s, base, calcParams, i === 0 ? null : baseScenario));
+    const baseScenario = scenarios[0] || null;
+    const res = scenarios.map((s, i) => computeScenario(s, base, calcParams, i === 0 ? null : baseScenario));
     return { base, res };
-  }, [scenarios, calcParams, currentAssetsMan, salaryGrowthRate, dcYears, hasFurusato]);
+  }, [scenarios, calcParams]);
 
   const bestIdx = res.length > 0 ? res.reduce((bi, s, i, a) => s.finalWealth > a[bi].finalWealth ? i : bi, 0) : 0;
   const scenarioGridClass = scenarios.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2";
@@ -239,31 +221,13 @@ export default function App() {
             <Slider label="年金受給期間" value={PY} onChange={setPY} min={10} max={30} step={1} unit="年" />
             <Slider label="インフレ率" value={inflationRate} onChange={setInflationRate} min={0} max={5} step={0.25} unit="%" help="生活費・イベント費に年次適用" />
           </div>
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <NumIn label="現在の資産" value={currentAssetsMan} onChange={setCurrentAssetsMan} step={100} unit="万円" />
-            <Slider label="昇給率" value={salaryGrowthRate} onChange={setSalaryGrowthRate} min={-2} max={10} step={0.5} unit="%" />
-            <NumIn label="退職所得控除の通算期間" value={dcYears} onChange={setDcYears} step={1} unit="年" help="DC/iDeCoの通算加入期間" />
-          </div>
           <div className="mt-2 flex flex-wrap items-center gap-4">
-            <Tog label="ふるさと納税を利用" checked={hasFurusato} onChange={setHasFurusato} />
             <Tog label="会社退職金あり" checked={hasRet} onChange={setHasRet} />
             {hasRet && <NumIn label="" value={retAmt} onChange={setRetAmt} step={1000000} unit="円" small />}
           </div>
           <div className="mt-2 text-xs text-gray-600">
-            積立期間: <b>{totalYears}年</b>（{currentAge}〜{retirementAge}歳）／ 課税所得: <b>¥{fmt(base.bTI)}</b> ／ 最高税率: <b>{base.bMR}%</b>
+            積立期間: <b>{totalYears}年</b>（{currentAge}〜{retirementAge}歳）
           </div>
-          <details className="mt-3 rounded border border-blue-200 bg-white/70 p-3">
-            <summary className="cursor-pointer text-xs font-bold text-blue-700">税務の詳細設定</summary>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <NumIn label="扶養人数" value={dependentsCount} onChange={setDependentsCount} step={1} unit="人" />
-              <div className="flex items-end"><Tog label="配偶者控除" checked={hasSpouseDeduction} onChange={setHasSpouseDeduction} /></div>
-              <NumIn label="生命保険料控除" value={lifeInsuranceDeduction} onChange={setLifeInsuranceDeduction} step={1000} unit="円" />
-              <div className="space-y-2">
-                <Tog label="住宅ローン控除" checked={useHousingLoanDeduction} onChange={setUseHousingLoanDeduction} />
-                {useHousingLoanDeduction && <NumIn label="控除額" value={housingLoanDeductionAmount} onChange={setHousingLoanDeductionAmount} step={10000} unit="円" />}
-              </div>
-            </div>
-          </details>
         </details>
 
         {/* Scenario headers */}

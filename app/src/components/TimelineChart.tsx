@@ -1,9 +1,23 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { fmtMan } from "../lib/format";
 import { EVENT_TYPES, resolveEventAge } from "../lib/types";
 import type { ScenarioResult, LifeEvent, EventYearCost } from "../lib/types";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
+
+function usePersistedSet(key: string): [Set<number>, (fn: (prev: Set<number>) => Set<number>) => void] {
+  const [set, setSet] = useState<Set<number>>(() => {
+    try { const v = localStorage.getItem(key); return v ? new Set(JSON.parse(v)) : new Set(); } catch { return new Set(); }
+  });
+  const update = useCallback((fn: (prev: Set<number>) => Set<number>) => {
+    setSet(prev => {
+      const next = fn(prev);
+      try { localStorage.setItem(key, JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }, [key]);
+  return [set, update];
+}
 
 export function TimelineChart({ results, currentAge, retirementAge, onYearClick }: {
   results: ScenarioResult[];
@@ -12,18 +26,24 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
   onYearClick?: (age: number) => void;
 }) {
   const [hoverAge, setHoverAge] = useState<number | null>(null);
-  const [collapsedParents, setCollapsedParents] = useState<Set<number>>(new Set());
+  const [collapsedParents, setCollapsedParents] = usePersistedSet("sim-tl-collapsed");
   if (!results.length || !results[0].yearResults.length) return null;
 
   const totalYears = retirementAge - currentAge;
   const s0 = results[0]?.scenario;
   const allEvents: LifeEvent[] = s0 ? [...(s0.events || [])] : [];
 
-  // Build visible events: parents, real children, and virtual sub-events from structured params
+  // Build visible events: grouped by type (子供→住宅→車→保険→その他), then by age within group
   const parentEvents = allEvents.filter(e => !e.parentId);
+  const typeOrder: Record<string, number> = { child: 0, education: 0, property: 1, car: 2, insurance: 3, death: 4, marriage: 5, rent: 6, travel: 7, custom: 8 };
+  const sortedParents = [...parentEvents].sort((a, b) => {
+    const ta = typeOrder[a.type] ?? 8, tb = typeOrder[b.type] ?? 8;
+    if (ta !== tb) return ta - tb;
+    return resolveEventAge(a, allEvents) - resolveEventAge(b, allEvents);
+  });
   const visibleEvents: (LifeEvent & { _virtual?: boolean })[] = [];
 
-  for (const p of parentEvents) {
+  for (const p of sortedParents) {
     visibleEvents.push(p);
     const realChildren = allEvents.filter(c => c.parentId === p.id);
     const hasStructured = !!p.propertyParams || !!p.carParams;
@@ -84,7 +104,7 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
   const xForAge = (age: number) => pL + (age - currentAge) * xStep;
 
   // Y scale: account for both positive (wealth) and negative (loan balance, negative savings)
-  const allValues = results.flatMap(r => r.yearResults.flatMap(yr => [yr.totalWealth, yr.cumulativeDCAsset, yr.cumulativeSavings, -yr.loanBalance]));
+  const allValues = results.flatMap(r => r.yearResults.flatMap(yr => [yr.totalWealth, yr.cumulativeDCAsset, yr.cumulativeSavings, yr.nisaAsset, yr.taxableAsset, yr.cashSavings, -yr.loanBalance]));
   const yMax = Math.max(...allValues, 1);
   const yMin = Math.min(...allValues, 0);
   const yRange = yMax - yMin;
@@ -157,6 +177,11 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
           const dcPath = r.yearResults.map((yr, yi) =>
             `${yi === 0 ? "M" : "L"}${xForAge(yr.age)},${yForVal(yr.cumulativeDCAsset)}`
           ).join(" ");
+          // NISA line
+          const hasNISA = r.yearResults.some(yr => yr.nisaAsset > 0);
+          const nisaPath = hasNISA ? r.yearResults.map((yr, yi) =>
+            `${yi === 0 ? "M" : "L"}${xForAge(yr.age)},${yForVal(yr.nisaAsset)}`
+          ).join(" ") : null;
           // Loan balance (shown as negative, below zero)
           const hasLoan = r.yearResults.some(yr => yr.loanBalance > 0);
           const loanPath = hasLoan ? r.yearResults.map((yr, yi) =>
@@ -178,6 +203,7 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
               <path d={areaPath} fill={COLORS[si]} opacity={0.06} />
               <path d={wealthPath} fill="none" stroke={COLORS[si]} strokeWidth={2} />
               <path d={dcPath} fill="none" stroke={COLORS[si]} strokeWidth={1.5} strokeDasharray="4,2" opacity={0.4} />
+              {nisaPath && <path d={nisaPath} fill="none" stroke="#22c55e" strokeWidth={1.5} strokeDasharray="2,4" opacity={0.6} />}
               {loanFill && <path d={loanFill} fill="#ef4444" opacity={0.06} />}
               {loanPath && <path d={loanPath} fill="none" stroke="#ef4444" strokeWidth={1.5} strokeDasharray="6,3" opacity={0.6} />}
             </g>
@@ -221,6 +247,7 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
           </div>
         ))}
         <span className="text-gray-400">実線=総資産 破線=DC</span>
+        <span className="text-green-500">緑点線=NISA</span>
         <span className="text-red-400">赤破線=ローン残高</span>
       </div>
 
@@ -235,9 +262,16 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
             {hoverData.map((yr, si) => yr && (
               <div key={si} className="space-y-0.5">
                 <div className="font-bold" style={{ color: COLORS[si] }}>{results[si].scenario.name}</div>
-                <div>年収 {Math.round(yr.grossMan)}万 / 手取り {fmtMan(yr.takeHomePay)}</div>
+                <div>年収 {Math.round(yr.grossMan)}万{yr.spouseGross > 0 ? ` + 配偶者${Math.round(yr.spouseGross / 10000)}万` : ""} / 手取り {fmtMan(yr.takeHomePay)}</div>
                 <div>支出 {fmtMan(yr.totalExpense)}（基本{fmtMan(yr.baseLivingExpense)} + イベント{fmtMan(yr.eventOngoing + yr.eventOnetime)}）</div>
                 <div className="font-bold">総資産 {fmtMan(yr.totalWealth)}</div>
+                {(yr.nisaAsset > 0 || yr.taxableAsset > 0) && (
+                  <div className="text-green-600">
+                    {yr.nisaAsset > 0 && `NISA ${fmtMan(yr.nisaAsset)}`}
+                    {yr.taxableAsset > 0 && ` 特定 ${fmtMan(yr.taxableAsset)}`}
+                    {` 現金 ${fmtMan(yr.cashSavings)}`}
+                  </div>
+                )}
                 {yr.loanBalance > 0 && <div className="text-red-500">ローン残高 {fmtMan(yr.loanBalance)}</div>}
                 {yr.activeEvents.length > 0 && (
                   <div className="text-gray-400">

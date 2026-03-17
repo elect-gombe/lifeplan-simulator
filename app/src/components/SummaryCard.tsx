@@ -27,7 +27,18 @@ export function SummaryCard({ s, idx, isBest, rr }: {
               <span className="text-gray-600">再投資将来価値</span>
               <span className="font-mono">{fmtMan(s.fvB)}</span>
             </div>
-            {ly && (
+            {ly && ly.nisaAsset > 0 ? (
+              <>
+                <div className="flex justify-between pl-2">
+                  <span className="text-green-600">NISA資産</span>
+                  <span className="font-mono">{fmtMan(ly.nisaAsset)}</span>
+                </div>
+                <div className="flex justify-between pl-2">
+                  <span className="text-gray-600">現金</span>
+                  <span className="font-mono">{fmtMan(Math.max(ly.cashSavings, 0))}</span>
+                </div>
+              </>
+            ) : ly && (
               <div className="flex justify-between pl-2">
                 <span className="text-gray-600">貯蓄（運用後）</span>
                 <span className="font-mono">{fmtMan(Math.max(ly.cumulativeSavings, 0))}</span>

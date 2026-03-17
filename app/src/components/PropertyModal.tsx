@@ -27,9 +27,12 @@ export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementA
 }) {
   const defaults: PropertyParams = {
     priceMan: 5000, downPaymentMan: 500, loanYears: 35,
+    repaymentType: "equal_payment",
     rateType: "variable", fixedRate: 1.8,
     variableInitRate: 0.5, variableRiskRate: 1.5, variableRiseAfter: 10,
     maintenanceMonthlyMan: 2, taxAnnualMan: 15, hasLoanDeduction: true,
+    loanStructure: "single", pairRatio: 50,
+    deductionTarget: "self", danshinTarget: "self",
   };
 
   const [purchaseAge, setPurchaseAge] = useState(currentAge + 5);
@@ -47,9 +50,16 @@ export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementA
   const u = (patch: Partial<PropertyParams>) => setPP(prev => ({ ...prev, ...patch }));
   const loanAmount = (pp.priceMan - pp.downPaymentMan) * 10000;
 
-  const fixedMonthly = calcMonthlyPayment(loanAmount, pp.fixedRate, pp.loanYears);
-  const varInitMonthly = calcMonthlyPayment(loanAmount, pp.variableInitRate, pp.loanYears);
-  const varRiskMonthly = calcMonthlyPayment(loanAmount, pp.variableRiskRate, pp.loanYears);
+  const isPrincipalEqual = pp.repaymentType === "equal_principal";
+  const fixedMonthly = isPrincipalEqual
+    ? Math.round((loanAmount / (pp.loanYears * 12)) + loanAmount * (pp.fixedRate / 100 / 12))
+    : calcMonthlyPayment(loanAmount, pp.fixedRate, pp.loanYears);
+  const varInitMonthly = isPrincipalEqual
+    ? Math.round((loanAmount / (pp.loanYears * 12)) + loanAmount * (pp.variableInitRate / 100 / 12))
+    : calcMonthlyPayment(loanAmount, pp.variableInitRate, pp.loanYears);
+  const varRiskMonthly = isPrincipalEqual
+    ? Math.round((loanAmount / (pp.loanYears * 12)) + loanAmount * (pp.variableRiskRate / 100 / 12))
+    : calcMonthlyPayment(loanAmount, pp.variableRiskRate, pp.loanYears);
   const displayMonthly = pp.rateType === "fixed" ? fixedMonthly : varInitMonthly;
 
   // Loan balance at various points for preview
@@ -109,6 +119,22 @@ export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementA
 
           <div className="text-gray-500">借入額: <b>{(pp.priceMan - pp.downPaymentMan).toLocaleString()}万円</b>　諸費用: 約{Math.round(pp.priceMan * 0.07)}万円（7%概算）</div>
 
+          {/* Repayment type */}
+          <div className="rounded border p-3 space-y-2">
+            <label className="block font-semibold text-gray-600">返済方式</label>
+            <div className="flex gap-2">
+              <button onClick={() => u({ repaymentType: "equal_payment" })}
+                className={`rounded px-3 py-1 ${pp.repaymentType !== "equal_principal" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>元利均等</button>
+              <button onClick={() => u({ repaymentType: "equal_principal" })}
+                className={`rounded px-3 py-1 ${pp.repaymentType === "equal_principal" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>元金均等</button>
+            </div>
+            <div className="text-gray-400 text-[10px]">
+              {pp.repaymentType === "equal_principal"
+                ? "元金均等: 毎月の元金返済額が一定。初期は返済額が大きいが総利息が少ない。"
+                : "元利均等: 毎月の返済額が一定。返済額は変わらないが総利息が多い。"}
+            </div>
+          </div>
+
           {/* Rate type */}
           <div className="rounded border p-3 space-y-2">
             <label className="block font-semibold text-gray-600">金利タイプ</label>
@@ -166,10 +192,72 @@ export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementA
             </div>
           </div>
 
+          {/* ローン構造: 単独 / ペアローン */}
+          <div className="rounded border p-3 space-y-2">
+            <label className="block font-semibold text-gray-600">ローン構造</label>
+            <div className="flex gap-2">
+              <button onClick={() => u({ loanStructure: "single" })}
+                className={`rounded px-3 py-1 ${(pp.loanStructure || "single") === "single" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>単独ローン</button>
+              <button onClick={() => u({ loanStructure: "pair" })}
+                className={`rounded px-3 py-1 ${pp.loanStructure === "pair" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>ペアローン</button>
+            </div>
+            {pp.loanStructure === "pair" && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">本人負担</span>
+                  <input type="number" value={pp.pairRatio ?? 50} min={1} max={99} step={5}
+                    onChange={e => u({ pairRatio: Number(e.target.value) })} className="w-16 rounded border px-2 py-1" />
+                  <span className="text-gray-400">% / 配偶者 {100 - (pp.pairRatio ?? 50)}%</span>
+                </div>
+                <div className="text-gray-400 text-[10px]">
+                  本人: {Math.round((pp.priceMan - pp.downPaymentMan) * (pp.pairRatio ?? 50) / 100)}万円
+                  ／ 配偶者: {Math.round((pp.priceMan - pp.downPaymentMan) * (100 - (pp.pairRatio ?? 50)) / 100)}万円
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 団信の対象 */}
+          <div className="rounded border p-3 space-y-2">
+            <label className="block font-semibold text-gray-600">団信の対象</label>
+            <div className="flex gap-2">
+              {(["self", "spouse", "both"] as const).map(v => (
+                <button key={v} onClick={() => u({ danshinTarget: v })}
+                  className={`rounded px-3 py-1 ${(pp.danshinTarget || "self") === v ? "bg-blue-600 text-white" : "bg-gray-100"}`}>
+                  {v === "self" ? "本人のみ" : v === "spouse" ? "配偶者のみ" : "両方"}
+                </button>
+              ))}
+            </div>
+            <div className="text-gray-400 text-[10px]">
+              {pp.loanStructure === "pair"
+                ? "ペアローンの場合、それぞれの負担分に対して団信が適用されます"
+                : "単独ローンの場合、ローン名義人のみが対象です"}
+            </div>
+          </div>
+
+          {/* 住宅ローン控除 */}
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={pp.hasLoanDeduction} onChange={e => u({ hasLoanDeduction: e.target.checked })} className="accent-blue-600" />
             <span className="font-semibold text-gray-600">住宅ローン控除（13年間）</span>
           </label>
+          {pp.hasLoanDeduction && (
+            <div className="rounded border p-2 space-y-1">
+              <label className="block text-gray-600 font-semibold text-[11px]">控除の対象</label>
+              <div className="flex gap-2">
+                {(["self", "spouse", "both"] as const).map(v => (
+                  <button key={v} onClick={() => u({ deductionTarget: v })}
+                    className={`rounded px-2 py-0.5 text-[10px] ${(pp.deductionTarget || "self") === v ? "bg-green-600 text-white" : "bg-gray-100"}`}>
+                    {v === "self" ? "本人" : v === "spouse" ? "配偶者" : "両方"}
+                  </button>
+                ))}
+              </div>
+              <div className="text-gray-400 text-[10px]">
+                {pp.loanStructure === "pair" && (pp.deductionTarget === "both" || !pp.deductionTarget)
+                  ? `本人: 残高×${pp.pairRatio ?? 50}%×0.7% / 配偶者: 残高×${100 - (pp.pairRatio ?? 50)}%×0.7%`
+                  : "単独の場合は名義人のみ。ペアローンでは各自の負担分に適用。"}
+              </div>
+            </div>
+          )}
 
           {/* Loan deduction detail */}
           {pp.hasLoanDeduction && (

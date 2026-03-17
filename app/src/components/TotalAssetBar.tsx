@@ -23,7 +23,12 @@ export function TotalAssetBar({ res, bestIdx }: { res: ScenarioResult[]; bestIdx
               <div className="flex items-center gap-1 text-[10px] text-gray-400">
                 <span>DC: {fmtMan(s.finalAssetNet)}</span>
                 <span>+再投資: {fmtMan(s.fvB)}</span>
-                {ly && <span>+貯蓄: {fmtMan(Math.max(ly.cumulativeSavings, 0))}</span>}
+                {ly && ly.nisaAsset > 0 ? (
+                  <>
+                    <span className="text-green-500">+NISA: {fmtMan(ly.nisaAsset)}</span>
+                    <span>+現金: {fmtMan(Math.max(ly.cashSavings, 0))}</span>
+                  </>
+                ) : ly && <span>+貯蓄: {fmtMan(Math.max(ly.cumulativeSavings, 0))}</span>}
               </div>
               <div className="mt-0.5 h-3 w-full overflow-hidden rounded-full bg-gray-100">
                 <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: COLORS[i] }} />
