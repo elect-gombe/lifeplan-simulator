@@ -28,15 +28,6 @@ interface SavedState {
   PY: number;
   sirPct: number;
   inflationRate: number;
-  dependentsCount: number;
-  hasSpouseDeduction: boolean;
-  lifeInsuranceDeduction: number;
-  useHousingLoanDeduction: boolean;
-  housingLoanDeductionAmount: number;
-  currentAssetsMan: number;
-  salaryGrowthRate: number;
-  dcYears: number;
-  hasFurusato: boolean;
   scenarios: Scenario[];
 }
 
@@ -44,12 +35,42 @@ function saveToStorage(state: SavedState) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
 }
 
+function migrateScenario(s: any, oldFields?: any): Scenario {
+  return {
+    ...s,
+    currentAssetsMan: s.currentAssetsMan ?? oldFields?.currentAssetsMan ?? 500,
+    salaryGrowthRate: s.salaryGrowthRate ?? oldFields?.salaryGrowthRate ?? 2,
+    years: s.years ?? oldFields?.dcYears ?? 35,
+    hasFurusato: s.hasFurusato ?? oldFields?.hasFurusato ?? true,
+    dependentDeductionHolder: s.dependentDeductionHolder ?? "self",
+    dcReceiveMethod: s.dcReceiveMethod ?? { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 },
+    spouse: s.spouse ?? { enabled: false, currentAge: 30, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true },
+    nisa: s.nisa ?? { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 },
+    balancePolicy: s.balancePolicy ?? { cashReserveMonths: 6, nisaPriority: true },
+    overrideTracks: s.overrideTracks ?? [],
+    excludedBaseEventIds: s.excludedBaseEventIds ?? [],
+    events: (s.events || []).map((e: any) => ({
+      ...e,
+      propertyParams: e.propertyParams ? {
+        loanStructure: "single", pairRatio: 50, deductionTarget: "self", danshinTarget: "self",
+        ...e.propertyParams,
+      } : undefined,
+    })),
+  };
+}
+
 function loadFromStorage(): SavedState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    // fallback for missing fields (forward compatibility)
+    const oldFields = {
+      currentAssetsMan: parsed.currentAssetsMan,
+      salaryGrowthRate: parsed.salaryGrowthRate,
+      dcYears: parsed.dcYears,
+      hasFurusato: parsed.hasFurusato,
+    };
+    const scenarios = (parsed.scenarios || []).map((s: any) => migrateScenario(s, oldFields));
     return {
       currentAge: parsed.currentAge ?? 30,
       retirementAge: parsed.retirementAge ?? 65,
@@ -60,16 +81,7 @@ function loadFromStorage(): SavedState | null {
       PY: parsed.PY ?? 20,
       sirPct: parsed.sirPct ?? 15.75,
       inflationRate: parsed.inflationRate ?? 1.5,
-      dependentsCount: parsed.dependentsCount ?? 0,
-      hasSpouseDeduction: parsed.hasSpouseDeduction ?? false,
-      lifeInsuranceDeduction: parsed.lifeInsuranceDeduction ?? 0,
-      useHousingLoanDeduction: parsed.useHousingLoanDeduction ?? false,
-      housingLoanDeductionAmount: parsed.housingLoanDeductionAmount ?? 0,
-      currentAssetsMan: parsed.currentAssetsMan ?? 500,
-      salaryGrowthRate: parsed.salaryGrowthRate ?? 2,
-      dcYears: parsed.dcYears ?? 35,
-      hasFurusato: parsed.hasFurusato ?? true,
-      scenarios: parsed.scenarios ?? [],
+      scenarios,
     };
   } catch { return null; }
 }
@@ -90,8 +102,26 @@ function importJSON(file: File): Promise<SavedState | null> {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result as string);
-        resolve(loadFromStorage.call(null) !== null ? parsed : null); // reuse validation
-        resolve(parsed as SavedState);
+        if (!parsed || typeof parsed !== "object") { resolve(null); return; }
+        const oldFields = {
+          currentAssetsMan: parsed.currentAssetsMan,
+          salaryGrowthRate: parsed.salaryGrowthRate,
+          dcYears: parsed.dcYears,
+          hasFurusato: parsed.hasFurusato,
+        };
+        const scenarios = (parsed.scenarios || []).map((s: any) => migrateScenario(s, oldFields));
+        resolve({
+          currentAge: parsed.currentAge ?? 30,
+          retirementAge: parsed.retirementAge ?? 65,
+          grossMan: parsed.grossMan ?? 700,
+          rr: parsed.rr ?? 4,
+          hasRet: parsed.hasRet ?? false,
+          retAmt: parsed.retAmt ?? 0,
+          PY: parsed.PY ?? 20,
+          sirPct: parsed.sirPct ?? 15.75,
+          inflationRate: parsed.inflationRate ?? 1.5,
+          scenarios,
+        });
       } catch { resolve(null); }
     };
     reader.readAsText(file);
@@ -141,10 +171,7 @@ export default function App() {
 
   // Build state object for save/export
   const currentState: SavedState = useMemo(() => ({
-    currentAge, retirementAge, grossMan, rr, hasRet, retAmt, PY, sirPct, inflationRate,
-    dependentsCount: 0, hasSpouseDeduction: false, lifeInsuranceDeduction: 0,
-    useHousingLoanDeduction: false, housingLoanDeductionAmount: 0,
-    currentAssetsMan: 500, salaryGrowthRate: 2, dcYears: 35, hasFurusato: true, scenarios,
+    currentAge, retirementAge, grossMan, rr, hasRet, retAmt, PY, sirPct, inflationRate, scenarios,
   }), [currentAge, retirementAge, grossMan, rr, hasRet, retAmt, PY, sirPct, inflationRate, scenarios]);
 
   // Auto-save to localStorage on every change

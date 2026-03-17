@@ -1,6 +1,6 @@
 import type { Scenario, YearResult, ScenarioResult, BaseResult, TaxOpts, Keyframe, LifeEvent, EventYearCost, PropertyParams, CarParams, SpouseConfig, NISAConfig, BalancePolicy } from "./types";
 import { resolveKF, isEventActive, resolveEventAge } from "./types";
-import { txInc, mR, fLm, calcFurusatoDonation, iTx, rTx, apTxCr, rDed, rTxC, empDed, annuityTax } from "./tax";
+import { txInc, mR, fLm, calcFurusatoDonation, iTx, rTx, apTxCr, rDed, rTxC, annuityTax } from "./tax";
 
 // ===== Mortgage helpers =====
 // 元利均等 (equal payment)
@@ -496,6 +496,8 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   // Track cumulative salary for survivor pension calculation
   let cumulativeSalary = 0;
   let salaryYears = 0;
+  let spouseCumulativeSalary = 0;
+  let spouseSalaryYears = 0;
 
   for (let age = currentAge; age < retirementAge; age++) {
     const yearsFromStart = age - currentAge;
@@ -580,6 +582,10 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     }
     const spouseGross = spouseTaxResult.gross;
     const spouseTakeHome = spouseTaxResult.takeHome;
+    if (spouseGross > 0) {
+      spouseCumulativeSalary += spouseGross;
+      spouseSalaryYears++;
+    }
 
     // Base living expense (万円/月 → 年額, with inflation)
     const baseLivingMonthlyMan = resolveKF(expenseKF, age, 15);
@@ -607,10 +613,11 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         const pp = e.propertyParams;
         // 団信: check if the dead person is covered by danshin
         const danshinTarget = pp.danshinTarget || "self";
-        const danshinTriggered = (
-          (isSelfDead && (danshinTarget === "self" || danshinTarget === "both")) ||
-          (isSpouseDead && (danshinTarget === "spouse" || danshinTarget === "both"))
-        ) && dp?.hasDanshin;
+        const selfDP = selfDeathEvent?.deathParams;
+        const spouseDP = spouseDeathEvent?.deathParams;
+        const danshinTriggered =
+          (isSelfDead && selfDP?.hasDanshin && (danshinTarget === "self" || danshinTarget === "both")) ||
+          (isSpouseDead && (spouseDP?.hasDanshin || selfDP?.hasDanshin) && (danshinTarget === "spouse" || danshinTarget === "both"));
         // ペアローン: 団信が片方のみの場合、その人の負担分のみ免除
         const isPair = pp.loanStructure === "pair";
         const selfRatio = isPair ? (pp.pairRatio ?? 50) / 100 : 1;
@@ -736,15 +743,25 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         if (ys < pp.loanYears && loanAmt > 0) {
           const dTarget = pp.danshinTarget || "self";
           let coverRatio = 0;
-          if (dp?.hasDanshin) {
-            if (isSelfDead && (dTarget === "self" || dTarget === "both")) coverRatio += pp.loanStructure === "pair" ? (pp.pairRatio ?? 50) / 100 : 1;
-            if (isSpouseDead && (dTarget === "spouse" || dTarget === "both")) coverRatio += pp.loanStructure === "pair" ? (1 - (pp.pairRatio ?? 50) / 100) : 0;
+          const selfDP = selfDeathEvent?.deathParams;
+          const spouseDP = spouseDeathEvent?.deathParams;
+          if (isSelfDead && selfDP?.hasDanshin && (dTarget === "self" || dTarget === "both")) {
+            coverRatio += pp.loanStructure === "pair" ? (pp.pairRatio ?? 50) / 100 : 1;
+          }
+          if (isSpouseDead && (spouseDP?.hasDanshin || selfDP?.hasDanshin) && (dTarget === "spouse" || dTarget === "both")) {
+            coverRatio += pp.loanStructure === "pair" ? (1 - (pp.pairRatio ?? 50) / 100) : 0;
           }
           const rate = pp.rateType === "fixed" ? pp.fixedRate : (ys < pp.variableRiseAfter ? pp.variableInitRate : pp.variableRiskRate);
           const bal = loanBalanceAfterYears(loanAmt, rate, pp.loanYears, ys, pp.repaymentType);
           loanBalance += Math.round(bal * (1 - Math.min(coverRatio, 1)));
         }
       }
+    }
+
+    // Spouse death: 配偶者死亡時の生活費削減 (BEFORE totalExpense calculation)
+    if (isSpouseDead && spouseDeathEvent?.deathParams) {
+      const sdp = spouseDeathEvent.deathParams;
+      baseLivingExpense = baseLivingExpense * sdp.expenseReductionPct / 100;
     }
 
     // Survivor income (after death) — auto-calculate survivor pension
@@ -754,11 +771,9 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       const contribYears = salaryYears;
       const childEvtsForPension = events.filter(e => e.type === "child" && isEventActive(e, age, events));
       const childAgesForPension = childEvtsForPension.map(ce => age - resolveEventAge(ce, events));
-      // 遺族の年齢（配偶者がいれば配偶者の年齢、なければ本人の年齢を目安）
       const survivorAge = spouse ? spouse.currentAge + (age - currentAge) : age;
       const pensionCalc = calcSurvivorPension(avgSalary, contribYears, childAgesForPension, survivorAge);
 
-      // 常に自動計算（年齢・子の数・年収から毎年動的に算出）
       const pensionAmount = pensionCalc.total;
       survivorIncome += pensionAmount;
       eventCostBreakdown.push({
@@ -768,17 +783,36 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         detail: `${pensionCalc.detail} = ${Math.round(pensionAmount / 10000)}万/年`,
       });
 
-      // Legacy income protection from DeathParams (backward compat)
       if (dp.incomeProtectionManPerMonth > 0 && age < dp.incomeProtectionUntilAge) {
         const protAnnual = dp.incomeProtectionManPerMonth * 12 * 10000;
         survivorIncome += protAnnual;
         eventCostBreakdown.push({ label: "収入保障保険(死亡設定)", icon: "🛡️", color: "#16a34a", amount: -protAnnual });
       }
     }
-    // Spouse death: 配偶者死亡時の生活費削減
+    // Spouse death: survivor pension based on SPOUSE's salary history
     if (isSpouseDead && spouseDeathEvent?.deathParams) {
       const sdp = spouseDeathEvent.deathParams;
-      baseLivingExpense = baseLivingExpense * sdp.expenseReductionPct / 100;
+      const avgSpouseSalary = spouseSalaryYears > 0 ? spouseCumulativeSalary / spouseSalaryYears : 0;
+      if (avgSpouseSalary > 0) {
+        const contribYears = spouseSalaryYears;
+        const childEvtsForPension = events.filter(e => e.type === "child" && isEventActive(e, age, events));
+        const childAgesForPension = childEvtsForPension.map(ce => age - resolveEventAge(ce, events));
+        const selfAge = age;
+        const pensionCalc = calcSurvivorPension(avgSpouseSalary, contribYears, childAgesForPension, selfAge);
+        const pensionAmount = pensionCalc.total;
+        survivorIncome += pensionAmount;
+        eventCostBreakdown.push({
+          label: "遺族年金(配偶者分)",
+          icon: "🏛️", color: "#16a34a",
+          amount: -pensionAmount,
+          detail: `${pensionCalc.detail} = ${Math.round(pensionAmount / 10000)}万/年`,
+        });
+      }
+      if (sdp.incomeProtectionManPerMonth > 0 && age < sdp.incomeProtectionUntilAge) {
+        const protAnnual = sdp.incomeProtectionManPerMonth * 12 * 10000;
+        survivorIncome += protAnnual;
+        eventCostBreakdown.push({ label: "収入保障保険(配偶者死亡設定)", icon: "🛡️", color: "#16a34a", amount: -protAnnual });
+      }
     }
 
     const totalExpense = baseLivingExpense + eventOngoing + eventOnetime;
@@ -842,33 +876,45 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
 
     // ===== DC/iDeCo死亡一時金 =====
     // 加入者死亡時、DC資産は継続運用不可 → 死亡一時金として遺族に支給
-    // みなし相続財産: 500万×法定相続人数 が非課税枠
-    // 超過分は相続税対象だが、ここでは簡易的に非課税枠のみ考慮
-    if (isDeathYear && cumulativeDCAsset > 0) {
-      const legalHeirs = 1 + childEvents.length; // 配偶者 + 子
+    if (isDeathYear && selfDCAsset > 0) {
+      const legalHeirs = 1 + childEvents.length;
       const taxFreeLimit = 5000000 * Math.max(legalHeirs, 1);
-      const taxableAmount = Math.max(cumulativeDCAsset - taxFreeLimit, 0);
-      // 相続税は簡易計算（税率10-55%だが、基礎控除3000万+600万×相続人数 があるため多くの場合は非課税）
+      const taxableAmount = Math.max(selfDCAsset - taxFreeLimit, 0);
       const inheritanceBasicDeduction = 30000000 + 6000000 * Math.max(legalHeirs, 1);
       const inheritanceTax = Math.max(taxableAmount - inheritanceBasicDeduction, 0) > 0
-        ? Math.round(Math.max(taxableAmount - inheritanceBasicDeduction, 0) * 0.1) // 簡易: 10%
+        ? Math.round(Math.max(taxableAmount - inheritanceBasicDeduction, 0) * 0.1)
         : 0;
-      const dcDeathBenefit = cumulativeDCAsset - inheritanceTax;
+      const dcDeathBenefit = selfDCAsset - inheritanceTax;
       eventCostBreakdown.push({
-        label: "DC/iDeCo死亡一時金",
+        label: "DC/iDeCo死亡一時金(本人)",
         icon: "💰", color: "#16a34a",
         amount: -dcDeathBenefit,
-        detail: `DC資産${Math.round(cumulativeDCAsset / 10000)}万 → 非課税枠${Math.round(taxFreeLimit / 10000)}万(500万×${legalHeirs}人)${inheritanceTax > 0 ? ` 相続税${Math.round(inheritanceTax / 10000)}万` : " 非課税"}`,
+        detail: `DC資産${Math.round(selfDCAsset / 10000)}万 → 非課税枠${Math.round(taxFreeLimit / 10000)}万(500万×${legalHeirs}人)${inheritanceTax > 0 ? ` 相続税${Math.round(inheritanceTax / 10000)}万` : " 非課税"}`,
       });
-      // 現金に振替、DC資産はゼロに
       cumulativeCash += dcDeathBenefit;
       selfDCAsset = 0;
-      spouseDCAsset = 0;
-      cumulativeDCAsset = 0;
+      cumulativeDCAsset = selfDCAsset + spouseDCAsset;
     }
-    // 配偶者死亡時も配偶者分のDCを一時金化（配偶者DCはcumulativeDCAssetに含まれているので、
-    // 配偶者死亡時はspouseDCTotalが0になり以降は本人分のみ積み上がる。
-    // 配偶者の既存DC分は簡易的に本人のDCに含めて継続 — 実際は配偶者のDC口座から死亡一時金として受取）
+    // 配偶者死亡時: 配偶者DC資産を死亡一時金として現金化
+    if (isSpouseDeathYear && spouseDCAsset > 0) {
+      const legalHeirs = 1 + childEvents.length;
+      const taxFreeLimit = 5000000 * Math.max(legalHeirs, 1);
+      const taxableAmount = Math.max(spouseDCAsset - taxFreeLimit, 0);
+      const inheritanceBasicDeduction = 30000000 + 6000000 * Math.max(legalHeirs, 1);
+      const inheritanceTax = Math.max(taxableAmount - inheritanceBasicDeduction, 0) > 0
+        ? Math.round(Math.max(taxableAmount - inheritanceBasicDeduction, 0) * 0.1)
+        : 0;
+      const dcDeathBenefit = spouseDCAsset - inheritanceTax;
+      eventCostBreakdown.push({
+        label: "DC/iDeCo死亡一時金(配偶者)",
+        icon: "💰", color: "#16a34a",
+        amount: -dcDeathBenefit,
+        detail: `配偶者DC資産${Math.round(spouseDCAsset / 10000)}万 → 非課税枠${Math.round(taxFreeLimit / 10000)}万${inheritanceTax > 0 ? ` 相続税${Math.round(inheritanceTax / 10000)}万` : " 非課税"}`,
+      });
+      cumulativeCash += dcDeathBenefit;
+      spouseDCAsset = 0;
+      cumulativeDCAsset = selfDCAsset + spouseDCAsset;
+    }
 
     // ===== NISA / 特定口座 / 現金 の自動配分・取り崩し =====
     // 運用益を先に反映
@@ -973,7 +1019,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       spouseDCContribution: spouseTaxResult.dcContribution, spouseIDeCoContribution: spouseTaxResult.idecoContribution,
       spouseIncomeTaxSaving: spouseTaxResult.incomeTaxSaving, spouseResidentTaxSaving: spouseTaxResult.residentTaxSaving,
       spouseFurusatoLimit: spouseTaxResult.furusatoLimit, spouseFurusatoDonation: spouseTaxResult.furusatoDonation,
-      spouseTakeHome, spouseDCAsset: 0, // tracked in cumulativeDCAsset
+      spouseTakeHome,
       insurancePremiumTotal, insurancePayoutTotal,
       activeEvents: activeEvts, eventCostBreakdown,
     });

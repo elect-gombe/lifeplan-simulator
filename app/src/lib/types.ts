@@ -231,7 +231,6 @@ export interface YearResult {
   spouseFurusatoLimit: number;
   spouseFurusatoDonation: number;
   spouseTakeHome: number;
-  spouseDCAsset: number;
   // Insurance
   insurancePremiumTotal: number;
   insurancePayoutTotal: number;

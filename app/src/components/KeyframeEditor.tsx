@@ -495,6 +495,43 @@ function NISASection({ s, onChange, isLinked, baseScenario }: { s: Scenario; onC
   );
 }
 
+// ===== Scenario Settings Section =====
+function ScenarioSettingsSection({ s, onChange }: { s: Scenario; onChange: (s: Scenario) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t pt-1">
+      <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-xs font-bold text-gray-600">
+        <span className="text-[10px] text-gray-400">{open ? "▼" : "▶"}</span>
+        シナリオ設定
+        <span className="font-normal text-gray-400 text-[10px]">
+          (資産{s.currentAssetsMan}万 DC通算{s.years}年 扶養→{(s.dependentDeductionHolder || "self") === "self" ? "本人" : "配偶者"})
+        </span>
+      </button>
+      {open && (
+        <div className="mt-1 flex flex-wrap gap-2 pl-1 text-xs">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">初期資産</span>
+            <input type="number" value={s.currentAssetsMan} step={100} onChange={e => onChange({ ...s, currentAssetsMan: Number(e.target.value) })} className="w-20 rounded border px-1 py-0.5 text-xs" />
+            <span className="text-[10px] text-gray-400">万</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">DC通算</span>
+            <input type="number" value={s.years} step={1} onChange={e => onChange({ ...s, years: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" />
+            <span className="text-[10px] text-gray-400">年</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">扶養控除</span>
+            <button onClick={() => onChange({ ...s, dependentDeductionHolder: "self" })}
+              className={`rounded px-1.5 py-0.5 text-[10px] ${(s.dependentDeductionHolder || "self") === "self" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>本人</button>
+            <button onClick={() => onChange({ ...s, dependentDeductionHolder: "spouse" })}
+              className={`rounded px-1.5 py-0.5 text-[10px] ${s.dependentDeductionHolder === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"}`}>配偶者</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ===== Main KeyframeEditor =====
 export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, baseScenario }: {
   s: Scenario; onChange: (s: Scenario) => void; idx: number;
@@ -518,7 +555,18 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
   const defaultSp: SpouseConfig = { enabled: false, currentAge: 30, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true };
   const sp = s.spouse || defaultSp;
   const baseS = isLinked && baseScenario ? baseScenario : null;
-  const spInherited = !sp.enabled && !!baseS?.spouse?.enabled;
+  const baseSp = baseS?.spouse;
+  const spInherited = !sp.enabled && !!baseSp?.enabled;
+  const effectiveSp = spInherited ? baseSp! : sp;
+
+  // Spouse track linking: when inherited from base, each track shows base data with toggle
+  const spouseTrackLinked = (key: TrackKey) => spInherited;
+  const spouseToggleTrack = (_key: TrackKey) => {
+    // Switching from inherited to own: copy base spouse data
+    if (spInherited && baseSp) {
+      onChange({ ...s, spouse: { ...baseSp, enabled: true } });
+    }
+  };
 
   return (
     <div className="rounded-lg border-2 p-3 space-y-2" style={{ borderColor: COLORS[idx] }}>
@@ -526,6 +574,9 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
         <span className="text-sm font-bold" style={{ color: COLORS[idx] }}>{s.name}</span>
         {isLinked && <span className="text-[10px] text-gray-400 bg-gray-100 rounded px-2 py-0.5">🔗 Aベース + 差分</span>}
       </div>
+
+      {/* シナリオ設定 */}
+      <ScenarioSettingsSection s={s} onChange={onChange} />
 
       {/* 本人設定: MemberEditorを使用 */}
       <MemberEditor
@@ -538,25 +589,6 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
         baseData={baseScenario ? { incomeKF: baseScenario.incomeKF, expenseKF: baseScenario.expenseKF, dcTotalKF: baseScenario.dcTotalKF, companyDCKF: baseScenario.companyDCKF, idecoKF: baseScenario.idecoKF, salaryGrowthRate: baseScenario.salaryGrowthRate, sirPct: 15.75, hasFurusato: baseScenario.hasFurusato } : undefined}
         trackLinked={isLinked ? isTrackLinked : undefined}
         onToggleTrack={isLinked ? toggleTrack : undefined}
-        extraFields={<>
-          <div className="flex items-center gap-1">
-            <span className="text-gray-500 text-[10px]">資産</span>
-            <input type="number" value={s.currentAssetsMan} step={100} onChange={e => onChange({ ...s, currentAssetsMan: Number(e.target.value) })} className="w-20 rounded border px-1 py-0.5 text-xs" />
-            <span className="text-[10px] text-gray-400">万</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-gray-500 text-[10px]">DC通算</span>
-            <input type="number" value={s.years} step={1} onChange={e => onChange({ ...s, years: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" />
-            <span className="text-[10px] text-gray-400">年</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-gray-500 text-[10px]">扶養控除</span>
-            <button onClick={() => onChange({ ...s, dependentDeductionHolder: "self" })}
-              className={`rounded px-1.5 py-0.5 text-[10px] ${(s.dependentDeductionHolder || "self") === "self" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>本人</button>
-            <button onClick={() => onChange({ ...s, dependentDeductionHolder: "spouse" })}
-              className={`rounded px-1.5 py-0.5 text-[10px] ${s.dependentDeductionHolder === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"}`}>配偶者</button>
-          </div>
-        </>}
       />
 
       <EventSection scenario={s} onChange={onChange} currentAge={currentAge} retirementAge={retirementAge} baseScenario={baseScenario} isLinked={isLinked} />
@@ -564,25 +596,38 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
       {/* DC/iDeCo受取方法 */}
       <DCReceiveSection s={s} onChange={onChange} />
 
-      {/* 配偶者: 同じMemberEditorを使用 */}
+      {/* 配偶者: MemberEditorを使用（リンク時は🔗/✏️トグル） */}
       <div className="border-t pt-1">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs font-bold text-pink-700">配偶者{spInherited ? " 🔗A" : ""}</span>
           <label className="flex items-center gap-1 text-[10px] cursor-pointer">
-            <input type="checkbox" checked={sp.enabled} onChange={e => onChange({ ...s, spouse: { ...sp, enabled: e.target.checked } })} className="accent-pink-600" />
-            <span className="text-gray-500">{spInherited ? "独自設定に切替" : "有効"}</span>
+            <input type="checkbox" checked={sp.enabled || spInherited} onChange={e => {
+              if (spInherited && !e.target.checked) {
+                onChange({ ...s, spouse: { ...defaultSp, enabled: false } });
+              } else if (!sp.enabled && e.target.checked && baseSp?.enabled) {
+                onChange({ ...s, spouse: { ...baseSp, enabled: true } });
+              } else {
+                onChange({ ...s, spouse: { ...sp, enabled: e.target.checked } });
+              }
+            }} className="accent-pink-600" />
+            <span className="text-gray-500">{spInherited ? "🔗A (✏️で独自設定)" : "有効"}</span>
           </label>
         </div>
-        {sp.enabled && (
+        {(sp.enabled || spInherited) && (
           <MemberEditor
             label="配偶者" color="#be185d"
-            data={{ incomeKF: sp.incomeKF || [], expenseKF: sp.expenseKF || [], dcTotalKF: sp.dcTotalKF || [], companyDCKF: sp.companyDCKF || [], idecoKF: sp.idecoKF || [], salaryGrowthRate: sp.salaryGrowthRate, sirPct: sp.sirPct ?? 15.75, hasFurusato: sp.hasFurusato ?? true }}
+            data={{ incomeKF: effectiveSp.incomeKF || [], expenseKF: effectiveSp.expenseKF || [], dcTotalKF: effectiveSp.dcTotalKF || [], companyDCKF: effectiveSp.companyDCKF || [], idecoKF: effectiveSp.idecoKF || [], salaryGrowthRate: effectiveSp.salaryGrowthRate, sirPct: effectiveSp.sirPct ?? 15.75, hasFurusato: effectiveSp.hasFurusato ?? true }}
             onUpdate={(patch) => onChange({ ...s, spouse: { ...sp, ...patch } })}
-            currentAge={sp.currentAge} retirementAge={retirementAge}
+            currentAge={effectiveSp.currentAge} retirementAge={retirementAge}
+            linked={spInherited}
+            readOnly={spInherited}
+            baseData={baseSp ? { incomeKF: baseSp.incomeKF || [], expenseKF: baseSp.expenseKF || [], dcTotalKF: baseSp.dcTotalKF || [], companyDCKF: baseSp.companyDCKF || [], idecoKF: baseSp.idecoKF || [], salaryGrowthRate: baseSp.salaryGrowthRate, sirPct: baseSp.sirPct ?? 15.75, hasFurusato: baseSp.hasFurusato ?? true } : undefined}
+            trackLinked={spInherited ? spouseTrackLinked : undefined}
+            onToggleTrack={spInherited ? spouseToggleTrack : undefined}
             extraFields={
               <div className="flex items-center gap-1">
                 <span className="text-gray-500 text-[10px]">年齢</span>
-                <input type="number" value={sp.currentAge} step={1} onChange={e => onChange({ ...s, spouse: { ...sp, currentAge: Number(e.target.value) } })} className="w-14 rounded border px-1 py-0.5 text-xs" />
+                <input type="number" value={effectiveSp.currentAge} step={1} onChange={e => onChange({ ...s, spouse: { ...sp, currentAge: Number(e.target.value) } })} className="w-14 rounded border px-1 py-0.5 text-xs" disabled={spInherited} />
                 <span className="text-[10px] text-gray-400">歳</span>
               </div>
             }
