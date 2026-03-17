@@ -12,7 +12,7 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
   const defaults: DeathParams = {
     expenseReductionPct: 70,
     hasDanshin: true,
-    survivorPensionManPerYear: 180,
+    survivorPensionManPerYear: 0,  // 0 = 自動計算（calc.tsで年齢・子の数・年収から算出）
     incomeProtectionManPerMonth: 0,
     incomeProtectionUntilAge: 65,
   };
@@ -20,6 +20,8 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
   const [deathAge, setDeathAge] = useState(currentAge + 10);
   const [dp, setDP] = useState<DeathParams>(defaults);
   const [target, setTarget] = useState<EventTarget>("self");
+  const [childCount, setChildCount] = useState(2);
+  const [avgAnnualSalaryMan, setAvgAnnualSalaryMan] = useState(700);
 
   useEffect(() => {
     if (existingEvent?.deathParams) {
@@ -28,6 +30,28 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
       setTarget(existingEvent.target || "self");
     }
   }, [existingEvent]);
+
+  // 遺族年金プレビュー（令和6年度基準、calc.ts calcSurvivorPension と同じ式）
+  const calcPensionPreview = () => {
+    const avgSalary = avgAnnualSalaryMan * 10000;
+    // 遺族基礎年金（子がいる場合のみ）
+    let basicPension = 0;
+    if (childCount > 0) {
+      basicPension = 816000;
+      for (let i = 0; i < childCount; i++) {
+        basicPension += i < 2 ? 234800 : 78300;
+      }
+    }
+    // 遺族厚生年金
+    const avgMonthly = Math.min(avgSalary / 12, 650000); // 標準報酬上限65万
+    const contributionMonths = Math.max((deathAge - 22) * 12, 300);
+    const employeePension = Math.round(avgMonthly * 5.481 / 1000 * contributionMonths * 3 / 4);
+    // 中高齢寡婦加算（子なし、遺族40-65歳）
+    const widowSupplement = childCount === 0 && deathAge >= 40 && deathAge < 65 ? 612000 : 0;
+    const total = basicPension + employeePension + widowSupplement;
+    return { basicPension, employeePension, widowSupplement, total, totalMan: Math.round(total / 10000) };
+  };
+  const pensionPreview = calcPensionPreview();
 
   if (!isOpen) return null;
   const u = (patch: Partial<DeathParams>) => setDP(prev => ({ ...prev, ...patch }));
@@ -99,16 +123,34 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
             <div className="mt-1 text-gray-400">加入の場合、死亡時に住宅ローン残高が免除されます</div>
           </div>
 
-          {/* 遺族年金 */}
+          {/* 遺族年金（自動計算） */}
           <div className="rounded border p-3 space-y-2">
-            <label className="block font-semibold text-gray-600">遺族年金（万円/年）</label>
-            <input type="number" value={dp.survivorPensionManPerYear} step={10} min={0}
-              onChange={e => u({ survivorPensionManPerYear: Number(e.target.value) })} className="w-32 rounded border px-2 py-1.5" />
-            <div className="text-gray-400 space-y-0.5">
-              <div>遺族基礎年金: 約78万 + 子の加算(1-2人目: 各22.4万)</div>
-              <div>遺族厚生年金: 報酬比例部分の3/4（年収700万で約50-60万/年）</div>
-              <div>子が18歳になるまで支給。その後は遺族厚生年金のみ。</div>
-              <div className="font-semibold text-gray-500">目安: 子2人で約180万/年 → 子が独立後は約60万/年</div>
+            <label className="block font-semibold text-gray-600">遺族年金（自動計算・令和6年度基準）</label>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-gray-500 mb-0.5">18歳未満の子の数（プレビュー用）</label>
+                <input type="number" value={childCount} min={0} max={10} step={1}
+                  onChange={e => setChildCount(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
+              </div>
+              <div>
+                <label className="block text-gray-500 mb-0.5">平均年収（プレビュー用・万円）</label>
+                <input type="number" value={avgAnnualSalaryMan} min={0} step={50}
+                  onChange={e => setAvgAnnualSalaryMan(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
+              </div>
+            </div>
+            <div className="rounded bg-blue-50 p-2 text-gray-600 space-y-0.5">
+              <div>遺族基礎年金: <b>{Math.round(pensionPreview.basicPension / 10000)}万円/年</b>
+                {childCount > 0 ? ` (81.6万 + 子${childCount}人加算)` : " (子なし: 支給なし)"}</div>
+              <div>遺族厚生年金: <b>{Math.round(pensionPreview.employeePension / 10000)}万円/年</b>
+                {` (月額${Math.min(Math.round(avgAnnualSalaryMan * 10000 / 12), 650000).toLocaleString()}円×5.481/1000×${Math.max((deathAge - 22) * 12, 300)}月×3/4)`}</div>
+              {pensionPreview.widowSupplement > 0 && (
+                <div>中高齢寡婦加算: <b>{Math.round(pensionPreview.widowSupplement / 10000)}万円/年</b> (子なし・40-65歳)</div>
+              )}
+              <div className="font-bold border-t pt-1 mt-1">プレビュー合計: 約{pensionPreview.totalMan}万円/年</div>
+              <div className="text-[10px] text-gray-400">
+                実行時はシナリオの実際の年収履歴・子の年齢から毎年自動計算されます。
+                子が18歳を超えると基礎年金が終了し、中高齢寡婦加算に切り替わる場合があります。
+              </div>
             </div>
           </div>
 
@@ -137,14 +179,18 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
 
           {/* Summary */}
           <div className="rounded bg-slate-100 p-3 space-y-1 text-gray-700">
-            <div className="font-bold">死亡後の年間収入</div>
-            <div>遺族年金: {dp.survivorPensionManPerYear}万円/年</div>
+            <div className="font-bold">死亡後の年間収入（プレビュー）</div>
+            <div>遺族年金: 約{pensionPreview.totalMan}万円/年（自動計算）</div>
             {dp.incomeProtectionManPerMonth > 0 && <div>収入保障保険: {protectionAnnual}万円/年（{dp.incomeProtectionUntilAge}歳まで）</div>}
-            <div className="font-bold">合計: {dp.survivorPensionManPerYear + protectionAnnual}万円/年</div>
+            <div className="font-bold">合計: 約{pensionPreview.totalMan + protectionAnnual}万円/年</div>
             <div className="border-t pt-1 mt-1">
               <div>生活費: 元の{dp.expenseReductionPct}%に削減</div>
               {dp.hasDanshin && <div className="text-green-600">団信: 住宅ローン残高免除</div>}
               <div>給与収入: 0（DC/iDeCo拠出も停止）</div>
+            </div>
+            <div className="border-t pt-1 mt-1">
+              <div className="font-semibold text-gray-600">対象: {targetLabel}死亡時に発動する保険イベント</div>
+              <div className="text-[10px] text-gray-400">シナリオ内の保険イベントで対象が「{targetLabel}」のものが自動的にトリガーされます（定期保険: 一時金、収入保障: 月額給付）</div>
             </div>
           </div>
 

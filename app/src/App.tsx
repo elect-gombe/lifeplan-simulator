@@ -117,6 +117,7 @@ function mkScenario(id: number, currentAge: number, retirementAge: number, gross
     years: retirementAge - currentAge,
     hasFurusato: true,
     dependentDeductionHolder: "self",
+    dcReceiveMethod: { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 },
     spouse: { enabled: false, currentAge: 30, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true },
     nisa: { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 },
     balancePolicy: { cashReserveMonths: 6, nisaPriority: true },

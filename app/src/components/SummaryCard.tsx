@@ -23,6 +23,11 @@ export function SummaryCard({ s, idx, isBest, rr }: {
               <span className="text-gray-600">DC資産（課税後）</span>
               <span className="font-mono">{fmtMan(s.finalAssetNet)}</span>
             </div>
+            {ly && ly.spouseDCAsset > 0 && (
+              <div className="flex justify-between pl-4 text-[10px]">
+                <span className="text-gray-400">本人{fmtMan(ly.selfDCAsset)} / 配偶者{fmtMan(ly.spouseDCAsset)}</span>
+              </div>
+            )}
             <div className="flex justify-between pl-2">
               <span className="text-gray-600">再投資将来価値</span>
               <span className="font-mono">{fmtMan(s.fvB)}</span>
@@ -47,10 +52,31 @@ export function SummaryCard({ s, idx, isBest, rr }: {
           </div>
         </div>
 
-        {/* Costs */}
+        {/* DC受取・出口課税 */}
         <div className="rounded bg-white p-2 space-y-0.5" style={{ borderLeft: "3px solid #ef4444" }}>
           <div className="flex justify-between pl-2">
-            <span className="text-red-500">出口課税</span>
+            <span className="text-orange-600 text-[10px]">DC受取: {s.dcReceiveDetail.method}</span>
+            <span className="font-mono text-green-600 text-[10px]">手取 {fmtMan(s.dcReceiveDetail.netAmount)}</span>
+          </div>
+          {s.dcReceiveDetail.lumpSumTax > 0 && (
+            <div className="flex justify-between pl-2">
+              <span className="text-red-500">一時金課税</span>
+              <span className="font-mono text-red-500">¥{fmt(s.dcReceiveDetail.lumpSumTax)}</span>
+            </div>
+          )}
+          {s.dcReceiveDetail.annuityTotalTax > 0 && (
+            <div className="flex justify-between pl-2">
+              <span className="text-red-500">年金課税({s.dcReceiveDetail.annuityYears}年計)</span>
+              <span className="font-mono text-red-500">¥{fmt(s.dcReceiveDetail.annuityTotalTax)}</span>
+            </div>
+          )}
+          {s.dcReceiveDetail.annuityAnnual > 0 && (
+            <div className="flex justify-between pl-2 text-[10px]">
+              <span className="text-gray-500">年金年額 {fmtMan(s.dcReceiveDetail.annuityAnnual)} ({s.dcReceiveDetail.annuityStartAge}歳〜{s.dcReceiveDetail.annuityStartAge + s.dcReceiveDetail.annuityYears}歳)</span>
+            </div>
+          )}
+          <div className="flex justify-between pl-2">
+            <span className="text-red-500">出口課税合計</span>
             <span className="font-mono text-red-500">¥{fmt(s.exitDelta)}</span>
           </div>
           <div className="flex justify-between pl-2">

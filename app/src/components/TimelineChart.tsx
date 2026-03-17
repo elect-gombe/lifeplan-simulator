@@ -27,11 +27,24 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
 }) {
   const [hoverAge, setHoverAge] = useState<number | null>(null);
   const [collapsedParents, setCollapsedParents] = usePersistedSet("sim-tl-collapsed");
+  const [selectedScenario, setSelectedScenario] = useState(0);
   if (!results.length || !results[0].yearResults.length) return null;
 
   const totalYears = retirementAge - currentAge;
-  const s0 = results[0]?.scenario;
-  const allEvents: LifeEvent[] = s0 ? [...(s0.events || [])] : [];
+  // Clamp selectedScenario to valid range
+  const selIdx = Math.min(selectedScenario, results.length - 1);
+  const s0 = results[selIdx]?.scenario;
+  const baseScenario = results[0]?.scenario;
+  // Merge events: for linked scenarios, combine base events (minus excluded) + own events
+  const mergedEvents: LifeEvent[] = (() => {
+    if (!s0) return [];
+    if (selIdx === 0 || !s0.linkedToBase || !baseScenario) return [...(s0.events || [])];
+    const excludedIds = s0.excludedBaseEventIds || [];
+    const baseEvts = (baseScenario.events || []).filter(e => !excludedIds.includes(e.id));
+    const ownEvts = s0.events || [];
+    return [...baseEvts, ...ownEvts].sort((a, b) => a.age - b.age);
+  })();
+  const allEvents: LifeEvent[] = mergedEvents;
 
   // Build visible events: grouped by type (子供→住宅→車→保険→その他), then by age within group
   const parentEvents = allEvents.filter(e => !e.parentId);
@@ -121,6 +134,18 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
 
   return (
     <div>
+      {/* Scenario switcher for event display */}
+      {results.length > 1 && (
+        <div className="flex gap-1 mb-1">
+          {results.map((r, i) => (
+            <button key={i} onClick={() => setSelectedScenario(i)}
+              className={`rounded px-2 py-0.5 text-[10px] font-semibold ${i === selIdx ? "text-white" : "bg-gray-100 text-gray-500"}`}
+              style={i === selIdx ? { backgroundColor: COLORS[i] } : undefined}>
+              {r.scenario.name} イベント
+            </button>
+          ))}
+        </div>
+      )}
       <svg viewBox={`0 0 ${cW} ${cH}`} className="block w-full cursor-crosshair" onMouseLeave={() => setHoverAge(null)}>
 
         {/* === Event bars === */}
@@ -265,6 +290,9 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
                 <div>年収 {Math.round(yr.grossMan)}万{yr.spouseGross > 0 ? ` + 配偶者${Math.round(yr.spouseGross / 10000)}万` : ""} / 手取り {fmtMan(yr.takeHomePay)}</div>
                 <div>支出 {fmtMan(yr.totalExpense)}（基本{fmtMan(yr.baseLivingExpense)} + イベント{fmtMan(yr.eventOngoing + yr.eventOnetime)}）</div>
                 <div className="font-bold">総資産 {fmtMan(yr.totalWealth)}</div>
+                {yr.cumulativeDCAsset > 0 && (
+                  <div className="text-gray-500">DC {fmtMan(yr.cumulativeDCAsset)}{yr.spouseDCAsset > 0 ? ` (本人${fmtMan(yr.selfDCAsset)} 配偶者${fmtMan(yr.spouseDCAsset)})` : ""}</div>
+                )}
                 {(yr.nisaAsset > 0 || yr.taxableAsset > 0) && (
                   <div className="text-green-600">
                     {yr.nisaAsset > 0 && `NISA ${fmtMan(yr.nisaAsset)}`}

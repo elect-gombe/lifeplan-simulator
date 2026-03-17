@@ -85,3 +85,36 @@ export function rTxC(amt: number, ded: number): number {
   const h = Math.max(Math.floor((amt - ded) / 2), 0);
   return iTx(h) + Math.floor(h * 0.1);
 }
+
+// 公的年金等控除（令和2年以降、合計所得1000万以下）
+// ref: 国税庁 No.1600
+export function publicPensionDeduction(income: number, age: number): number {
+  if (age >= 65) {
+    if (income <= 1100000) return income; // 全額控除
+    if (income <= 3300000) return 1100000;
+    if (income <= 4100000) return income * 0.25 + 275000;
+    if (income <= 7700000) return income * 0.15 + 685000;
+    if (income <= 10000000) return income * 0.05 + 1455000;
+    return 1955000;
+  } else {
+    if (income <= 600000) return income; // 全額控除
+    if (income <= 1300000) return 600000;
+    if (income <= 4100000) return income * 0.25 + 275000;
+    if (income <= 7700000) return income * 0.15 + 685000;
+    if (income <= 10000000) return income * 0.05 + 1455000;
+    return 1955000;
+  }
+}
+
+// DC/iDeCo年金受取時の年間税額
+// 年金として受け取る場合、雑所得 = 年金額 - 公的年金等控除
+// 所得税 + 住民税(10%)
+export function annuityTax(annualAmount: number, age: number): number {
+  const ded = publicPensionDeduction(annualAmount, age);
+  const taxableIncome = Math.max(annualAmount - ded, 0);
+  // 基礎控除48万は他の所得がない前提で適用
+  const afterBasic = Math.max(taxableIncome - 480000, 0);
+  const it = iTx(afterBasic);
+  const rt = Math.floor(afterBasic * 0.1);
+  return it + rt;
+}

@@ -3,6 +3,14 @@ export interface Keyframe {
   value: number;
 }
 
+// DC/iDeCo受取方法
+export interface DCReceiveMethod {
+  type: "lump_sum" | "annuity" | "combined"; // 一時金 | 年金 | 併用
+  annuityYears: number;     // 年金受取期間（5/10/15/20年）
+  annuityStartAge: number;  // 年金受取開始年齢（60-75）
+  combinedLumpSumRatio: number; // 併用時の一時金割合（%）
+}
+
 export type LoanStructure = "single" | "pair"; // 単独ローン | ペアローン
 
 export interface PropertyParams {
@@ -149,6 +157,8 @@ export interface Scenario {
   years: number;
   hasFurusato: boolean;
   dependentDeductionHolder: "self" | "spouse"; // 扶養控除を適用する世帯主
+  // DC/iDeCo受取方法
+  dcReceiveMethod: DCReceiveMethod;
   // Spouse
   spouse?: SpouseConfig;
   // NISA / Balance policy
@@ -183,7 +193,9 @@ export interface YearResult {
   annualBenefit: number;
   annualNetBenefit: number;
   // Wealth
-  cumulativeDCAsset: number;
+  cumulativeDCAsset: number;      // 世帯合計
+  selfDCAsset: number;            // 本人DC資産
+  spouseDCAsset: number;          // 配偶者DC資産
   cumulativeReinvest: number;
   annualNetCashFlow: number;
   cumulativeSavings: number;
@@ -228,6 +240,18 @@ export interface YearResult {
   eventCostBreakdown: EventYearCost[];
 }
 
+export interface DCReceiveDetail {
+  method: string;
+  lumpSumAmount: number;      // 一時金受取額
+  lumpSumTax: number;         // 一時金にかかる税
+  annuityAnnual: number;      // 年金年額（税引前）
+  annuityTotalTax: number;    // 年金にかかる総税額
+  annuityYears: number;       // 受取年数
+  annuityStartAge: number;    // 受取開始年齢
+  totalTax: number;           // 合計税額
+  netAmount: number;          // 手取り合計
+}
+
 export interface ScenarioResult {
   scenario: Scenario;
   yearResults: YearResult[];
@@ -243,6 +267,7 @@ export interface ScenarioResult {
   finalScore: number;
   multiPhase: boolean;
   hasFuru: boolean;
+  dcReceiveDetail: DCReceiveDetail;
 }
 
 export interface BaseResult {

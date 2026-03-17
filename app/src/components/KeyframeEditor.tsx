@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import type { Keyframe, LifeEvent, Scenario, TrackKey, SpouseConfig, NISAConfig, BalancePolicy } from "../lib/types";
+import type { Keyframe, LifeEvent, Scenario, TrackKey, SpouseConfig, NISAConfig, BalancePolicy, DCReceiveMethod } from "../lib/types";
 import { sortKF, EVENT_TYPES, resolveEventAge } from "../lib/types";
 import { ChildEventModal } from "./ChildEventModal";
 import { PropertyModal } from "./PropertyModal";
@@ -102,14 +102,19 @@ interface MemberData {
   salaryGrowthRate: number; sirPct: number; hasFurusato: boolean;
 }
 
-function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge, extraFields }: {
+function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge, extraFields, linked, readOnly, baseData, trackLinked, onToggleTrack }: {
   label: string; color: string;
   data: MemberData;
   onUpdate: (patch: Partial<MemberData & Record<string, any>>) => void;
   currentAge: number; retirementAge: number;
   extraFields?: React.ReactNode;
+  linked?: boolean; readOnly?: boolean;
+  baseData?: MemberData;
+  trackLinked?: (key: TrackKey) => boolean;
+  onToggleTrack?: (key: TrackKey) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const isRO = readOnly && linked;
 
   return (
     <div className="border-t pt-1">
@@ -127,27 +132,32 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
             {extraFields}
             <div className="flex items-center gap-1">
               <span className="text-gray-500 text-[10px]">昇給率</span>
-              <input type="number" value={data.salaryGrowthRate} step={0.5} onChange={e => onUpdate({ salaryGrowthRate: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" />
+              <input type="number" value={data.salaryGrowthRate} step={0.5} onChange={e => onUpdate({ salaryGrowthRate: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" disabled={isRO} />
               <span className="text-[10px] text-gray-400">%</span>
             </div>
             <div className="flex items-center gap-1">
               <span className="text-gray-500 text-[10px]">社保率</span>
-              <input type="number" value={data.sirPct} step={0.25} onChange={e => onUpdate({ sirPct: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" />
+              <input type="number" value={data.sirPct} step={0.25} onChange={e => onUpdate({ sirPct: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" disabled={isRO} />
               <span className="text-[10px] text-gray-400">%</span>
             </div>
             <label className="flex items-center gap-1 text-[10px] cursor-pointer">
-              <input type="checkbox" checked={data.hasFurusato} onChange={e => onUpdate({ hasFurusato: e.target.checked })} className="accent-blue-600" />
+              <input type="checkbox" checked={data.hasFurusato} onChange={e => onUpdate({ hasFurusato: e.target.checked })} className="accent-blue-600" disabled={isRO} />
               <span className="text-gray-500">ふるさと納税</span>
             </label>
           </div>
-          {/* Track rows — same component as main tracks */}
-          {TRACKS.map(t => (
-            <TrackRow key={t.key} track={t}
-              keyframes={(data as any)[t.key] || []}
-              onChange={(kfs) => onUpdate({ [t.key]: kfs })}
-              currentAge={currentAge} retirementAge={retirementAge}
-              linked={false} />
-          ))}
+          {/* Track rows — with integrated linking toggle */}
+          {TRACKS.map(t => {
+            const isThisTrackLinked = trackLinked ? trackLinked(t.key) : false;
+            return (
+              <TrackRow key={t.key} track={t}
+                keyframes={(data as any)[t.key] || []}
+                onChange={(kfs) => onUpdate({ [t.key]: kfs })}
+                currentAge={currentAge} retirementAge={retirementAge}
+                linked={isThisTrackLinked}
+                onToggleLink={onToggleTrack ? () => onToggleTrack(t.key) : undefined}
+                baseKFs={baseData ? (baseData as any)[t.key] || [] : undefined} />
+            );
+          })}
         </div>
       )}
     </div>
@@ -155,9 +165,10 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
 }
 
 // ===== Collapsible Event List =====
-function EventList({ events, updateEvent, removeEvent, currentAge, retirementAge, label, onEditProperty, onEditCar, onEditDeath, onEditInsurance }: {
+function EventList({ events, updateEvent, updateEventMulti, removeEvent, currentAge, retirementAge, label, onEditProperty, onEditCar, onEditDeath, onEditInsurance }: {
   events: LifeEvent[];
   updateEvent: (id: number, f: string, v: any) => void;
+  updateEventMulti?: (id: number, patch: Record<string, any>) => void;
   removeEvent: (id: number) => void;
   currentAge: number; retirementAge: number;
   label?: string;
@@ -190,11 +201,14 @@ function EventList({ events, updateEvent, removeEvent, currentAge, retirementAge
           {e.deathParams && onEditDeath && <button onClick={() => onEditDeath(e)} className="text-[10px] rounded px-1 py-0.5 bg-gray-200 text-gray-600">✏️</button>}
           {e.insuranceParams && onEditInsurance && <button onClick={() => onEditInsurance(e)} className="text-[10px] rounded px-1 py-0.5 bg-indigo-100 text-indigo-600">✏️</button>}
           <input value={e.label} onChange={ev => updateEvent(e.id, "label", ev.target.value)} className="w-28 rounded border px-1.5 py-1 text-xs" />
-          {e.propertyParams && (
+          {e.propertyParams && updateEventMulti && (
             <span className="flex items-center gap-0.5">
-              <button onClick={() => { const pp = e.propertyParams!; updateEvent(e.id, "propertyParams", { ...pp, priceMan: pp.priceMan - 100 }); updateEvent(e.id, "label", `住宅(${pp.priceMan - 100}万)`); }} className="text-[10px] text-gray-400 hover:text-blue-500 px-0.5">-</button>
-              <span className="text-[10px] text-gray-500 font-mono">{e.propertyParams.priceMan}万</span>
-              <button onClick={() => { const pp = e.propertyParams!; updateEvent(e.id, "propertyParams", { ...pp, priceMan: pp.priceMan + 100 }); updateEvent(e.id, "label", `住宅(${pp.priceMan + 100}万)`); }} className="text-[10px] text-gray-400 hover:text-blue-500 px-0.5">+</button>
+              <button onClick={() => { const pp = e.propertyParams!; const v = pp.priceMan - 100; updateEventMulti(e.id, { propertyParams: { ...pp, priceMan: v }, label: `住宅(${v}万)` }); }} className="text-[10px] text-gray-400 hover:text-blue-500 px-0.5">-</button>
+              <input type="number" value={e.propertyParams.priceMan} step={100}
+                onChange={ev => { const v = Number(ev.target.value); const pp = e.propertyParams!; updateEventMulti(e.id, { propertyParams: { ...pp, priceMan: v }, label: `住宅(${v}万)` }); }}
+                className="w-20 rounded border px-1 py-0.5 text-xs text-center font-mono" />
+              <span className="text-[10px] text-gray-400">万</span>
+              <button onClick={() => { const pp = e.propertyParams!; const v = pp.priceMan + 100; updateEventMulti(e.id, { propertyParams: { ...pp, priceMan: v }, label: `住宅(${v}万)` }); }} className="text-[10px] text-gray-400 hover:text-blue-500 px-0.5">+</button>
             </span>
           )}
           {e.ageOffset != null ? (
@@ -296,6 +310,7 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
   const addChildEvents = (newEvts: LifeEvent[]) => setEvents([...events, ...newEvts].sort((a, b) => a.age - b.age));
   const removeEvent = (id: number) => setEvents(events.filter(e => e.id !== id && e.parentId !== id));
   const updateEvent = (id: number, f: string, v: any) => setEvents(events.map(e => e.id === id ? { ...e, [f]: v } : e));
+  const updateEventMulti = (id: number, patch: Record<string, any>) => setEvents(events.map(e => e.id === id ? { ...e, ...patch } : e));
 
   const unlinkBaseEvent = (e: LifeEvent) => {
     const children = baseEvents.filter(c => c.parentId === e.id);
@@ -351,7 +366,7 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
         <DeathModal isOpen={showDeathModal} onClose={() => { setShowDeathModal(false); setEditingDeathEvent(null); }} onSave={modalSave(setEditingDeathEvent, editingDeathEvent)} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingDeathEvent} />
         <InsuranceModal isOpen={showInsuranceModal} onClose={() => { setShowInsuranceModal(false); setEditingInsuranceEvent(null); }} onSave={modalSave(setEditingInsuranceEvent, editingInsuranceEvent)} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingInsuranceEvent} />
         {isLinked && baseEvents.length > 0 && <BaseEventList baseEvents={baseEvents} excludedIds={excludedIds} onUnlink={unlinkBaseEvent} onRelink={relinkBaseEvent} />}
-        <EventList events={events} updateEvent={updateEvent} removeEvent={removeEvent} currentAge={currentAge} retirementAge={retirementAge}
+        <EventList events={events} updateEvent={updateEvent} updateEventMulti={updateEventMulti} removeEvent={removeEvent} currentAge={currentAge} retirementAge={retirementAge}
           label={isLinked && events.length > 0 ? `${scenario.name}の独自イベント` : undefined}
           onEditProperty={(e) => { setEditingPropertyEvent(e); setShowPropertyModal(true); }} onEditCar={(e) => { setEditingCarEvent(e); setShowCarModal(true); }}
           onEditDeath={(e) => { setEditingDeathEvent(e); setShowDeathModal(true); }} onEditInsurance={(e) => { setEditingInsuranceEvent(e); setShowInsuranceModal(true); }} />
@@ -362,6 +377,74 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
 }
 
 // ===== NISA / Balance Policy Section =====
+// ===== DC/iDeCo受取方法 =====
+function DCReceiveSection({ s, onChange }: { s: Scenario; onChange: (s: Scenario) => void }) {
+  const [open, setOpen] = useState(false);
+  const rm: DCReceiveMethod = s.dcReceiveMethod || { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
+  const setRM = (patch: Partial<DCReceiveMethod>) => onChange({ ...s, dcReceiveMethod: { ...rm, ...patch } });
+
+  return (
+    <div className="border-t pt-1">
+      <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-xs font-bold text-orange-700">
+        <span className="text-[10px] text-gray-400">{open ? "▼" : "▶"}</span>
+        DC/iDeCo受取
+        <span className="font-normal text-gray-400 text-[10px]">
+          ({rm.type === "lump_sum" ? "一時金" : rm.type === "annuity" ? `年金${rm.annuityYears}年` : `併用${rm.combinedLumpSumRatio}%一時金`})
+        </span>
+      </button>
+      {open && (
+        <div className="mt-1 space-y-2 pl-1 text-xs">
+          <div className="flex gap-1">
+            {(["lump_sum", "annuity", "combined"] as const).map(t => (
+              <button key={t} onClick={() => setRM({ type: t })}
+                className={`rounded px-2 py-1 ${rm.type === t ? "bg-orange-600 text-white" : "bg-gray-100"}`}>
+                {t === "lump_sum" ? "一時金" : t === "annuity" ? "年金" : "併用"}
+              </button>
+            ))}
+          </div>
+
+          {(rm.type === "annuity" || rm.type === "combined") && (
+            <div className="flex flex-wrap gap-2">
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 text-[10px]">受取開始</span>
+                <input type="number" value={rm.annuityStartAge} min={60} max={75} step={1}
+                  onChange={e => setRM({ annuityStartAge: Number(e.target.value) })}
+                  className="w-14 rounded border px-1 py-0.5 text-xs" />
+                <span className="text-[10px] text-gray-400">歳</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 text-[10px]">受取期間</span>
+                {[5, 10, 15, 20].map(y => (
+                  <button key={y} onClick={() => setRM({ annuityYears: y })}
+                    className={`rounded px-1.5 py-0.5 text-[10px] ${rm.annuityYears === y ? "bg-orange-600 text-white" : "bg-gray-100"}`}>
+                    {y}年
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {rm.type === "combined" && (
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-[10px]">一時金割合</span>
+              <input type="number" value={rm.combinedLumpSumRatio} min={10} max={90} step={10}
+                onChange={e => setRM({ combinedLumpSumRatio: Number(e.target.value) })}
+                className="w-14 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-[10px] text-gray-400">%（残り{100 - rm.combinedLumpSumRatio}%が年金）</span>
+            </div>
+          )}
+
+          <div className="rounded bg-orange-50 p-2 text-[10px] text-gray-500 space-y-0.5">
+            {rm.type === "lump_sum" && <div>退職所得として課税。退職所得控除後の1/2に所得税+住民税。税負担が最も軽い場合が多い。</div>}
+            {rm.type === "annuity" && <div>雑所得として毎年課税。公的年金等控除が適用（65歳以上: 110万まで非課税）。他の年金と合算されるため税率が上がる場合あり。</div>}
+            {rm.type === "combined" && <div>一時金は退職所得控除、年金部分は公的年金等控除。退職所得控除枠を使い切ったら残りを年金にするのが一般的。</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NISASection({ s, onChange, isLinked, baseScenario }: { s: Scenario; onChange: (s: Scenario) => void; isLinked?: boolean; baseScenario?: Scenario | null }) {
   const defaultNi: NISAConfig = { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 };
   const ni = s.nisa || defaultNi;
@@ -450,6 +533,11 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
         data={{ incomeKF: s.incomeKF, expenseKF: s.expenseKF, dcTotalKF: s.dcTotalKF, companyDCKF: s.companyDCKF, idecoKF: s.idecoKF, salaryGrowthRate: s.salaryGrowthRate, sirPct: 15.75, hasFurusato: s.hasFurusato }}
         onUpdate={(patch) => onChange({ ...s, ...patch })}
         currentAge={currentAge} retirementAge={retirementAge}
+        linked={isLinked}
+        readOnly={isLinked}
+        baseData={baseScenario ? { incomeKF: baseScenario.incomeKF, expenseKF: baseScenario.expenseKF, dcTotalKF: baseScenario.dcTotalKF, companyDCKF: baseScenario.companyDCKF, idecoKF: baseScenario.idecoKF, salaryGrowthRate: baseScenario.salaryGrowthRate, sirPct: 15.75, hasFurusato: baseScenario.hasFurusato } : undefined}
+        trackLinked={isLinked ? isTrackLinked : undefined}
+        onToggleTrack={isLinked ? toggleTrack : undefined}
         extraFields={<>
           <div className="flex items-center gap-1">
             <span className="text-gray-500 text-[10px]">資産</span>
@@ -471,19 +559,10 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
         </>}
       />
 
-      {/* Track linkingボタン (A↔B用、本人トラックのみ) */}
-      {isLinked && (
-        <div className="flex flex-wrap gap-1 text-[10px]">
-          {TRACKS.map(t => (
-            <button key={t.key} onClick={() => toggleTrack(t.key)}
-              className={`rounded px-1.5 py-0.5 ${isTrackLinked(t.key) ? "bg-gray-200 text-gray-500" : "bg-blue-100 text-blue-600"}`}>
-              {isTrackLinked(t.key) ? `🔗${t.label}` : `✏️${t.label}`}
-            </button>
-          ))}
-        </div>
-      )}
-
       <EventSection scenario={s} onChange={onChange} currentAge={currentAge} retirementAge={retirementAge} baseScenario={baseScenario} isLinked={isLinked} />
+
+      {/* DC/iDeCo受取方法 */}
+      <DCReceiveSection s={s} onChange={onChange} />
 
       {/* 配偶者: 同じMemberEditorを使用 */}
       <div className="border-t pt-1">

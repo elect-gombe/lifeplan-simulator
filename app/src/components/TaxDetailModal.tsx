@@ -181,7 +181,12 @@ export function TaxDetailModal({ isOpen, onClose, age, results, base, sirPct }: 
               </>)}
 
               <S bg="bg-teal-100">■ 累積資産</S>
-              <R l="DC資産" fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.cumulativeDCAsset) : "-"} />
+              <R l="DC資産" fn={(yr, s) => {
+                if (!hasSpouse) return Math.round(yr.cumulativeDCAsset);
+                if (s === "本人") return Math.round(yr.selfDCAsset);
+                if (s === "配偶者") return Math.round(yr.spouseDCAsset);
+                return Math.round(yr.cumulativeDCAsset);
+              }} />
               <R l="再投資" fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.cumulativeReinvest) : "-"} />
               {hasNISA ? (<>
                 <R l="NISA" fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.nisaAsset) : "-"} />
