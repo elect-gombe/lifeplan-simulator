@@ -100,7 +100,10 @@ interface MemberData {
   incomeKF: Keyframe[]; expenseKF: Keyframe[];
   dcTotalKF: Keyframe[]; companyDCKF: Keyframe[]; idecoKF: Keyframe[];
   salaryGrowthRate: number; sirPct: number; hasFurusato: boolean;
+  dcReceiveMethod?: DCReceiveMethod;
 }
+
+const DEFAULT_DC_RM: DCReceiveMethod = { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
 
 function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge, extraFields, linked, readOnly, baseData, trackLinked, onToggleTrack }: {
   label: string; color: string;
@@ -115,6 +118,8 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
 }) {
   const [open, setOpen] = useState(false);
   const isRO = readOnly && linked;
+  const rm = data.dcReceiveMethod || DEFAULT_DC_RM;
+  const setRM = (patch: Partial<DCReceiveMethod>) => onUpdate({ dcReceiveMethod: { ...rm, ...patch } });
 
   return (
     <div className="border-t pt-1">
@@ -122,12 +127,11 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
         <span className="text-[10px] text-gray-400">{open ? "▼" : "▶"}</span>
         {label}
         <span className="font-normal text-gray-400 text-[10px]">
-          (昇給{data.salaryGrowthRate}% 社保{data.sirPct}% {data.hasFurusato ? "ふるさと納税" : ""})
+          (昇給{data.salaryGrowthRate}% {rm.type === "lump_sum" ? "一時金" : rm.type === "annuity" ? `年金${rm.annuityYears}年` : "併用"})
         </span>
       </button>
       {open && (
         <div className="mt-1 space-y-1.5 pl-1">
-          {/* Scalar settings — shared layout */}
           <div className="flex flex-wrap gap-2 text-xs">
             {extraFields}
             <div className="flex items-center gap-1">
@@ -145,7 +149,7 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
               <span className="text-gray-500">ふるさと納税</span>
             </label>
           </div>
-          {/* Track rows — with integrated linking toggle */}
+          {/* Track rows */}
           {TRACKS.map(t => {
             const isThisTrackLinked = trackLinked ? trackLinked(t.key) : false;
             return (
@@ -158,6 +162,42 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
                 baseKFs={baseData ? (baseData as any)[t.key] || [] : undefined} />
             );
           })}
+          {/* DC/iDeCo受取方法 — 統合 */}
+          <div className="border-t pt-1">
+            <div className="flex items-center gap-1 mb-1">
+              <span className="text-[10px] font-semibold text-gray-600">DC受取</span>
+              {(["lump_sum", "annuity", "combined"] as const).map(t => (
+                <button key={t} onClick={() => setRM({ type: t })} disabled={isRO}
+                  className={`rounded px-1.5 py-0.5 text-[10px] ${rm.type === t ? "bg-orange-600 text-white" : "bg-gray-100"}`}>
+                  {t === "lump_sum" ? "一時金" : t === "annuity" ? "年金" : "併用"}
+                </button>
+              ))}
+            </div>
+            {(rm.type === "annuity" || rm.type === "combined") && (
+              <div className="flex flex-wrap gap-2 pl-2">
+                <div className="flex items-center gap-1">
+                  <span className="text-gray-500 text-[10px]">開始</span>
+                  <input type="number" value={rm.annuityStartAge} min={60} max={75} step={1} disabled={isRO}
+                    onChange={e => setRM({ annuityStartAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+                  <span className="text-[10px] text-gray-400">歳</span>
+                </div>
+                <div className="flex items-center gap-0.5">
+                  {[5, 10, 15, 20].map(y => (
+                    <button key={y} onClick={() => setRM({ annuityYears: y })} disabled={isRO}
+                      className={`rounded px-1 py-0.5 text-[10px] ${rm.annuityYears === y ? "bg-orange-600 text-white" : "bg-gray-100"}`}>{y}年</button>
+                  ))}
+                </div>
+                {rm.type === "combined" && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-500 text-[10px]">一時金</span>
+                    <input type="number" value={rm.combinedLumpSumRatio} min={10} max={90} step={10} disabled={isRO}
+                      onChange={e => setRM({ combinedLumpSumRatio: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+                    <span className="text-[10px] text-gray-400">%</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -377,83 +417,7 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
 }
 
 // ===== NISA / Balance Policy Section =====
-// ===== DC/iDeCo受取方法 =====
-function DCReceiveSection({ s, onChange, label, isSpouse }: { s: Scenario; onChange: (s: Scenario) => void; label?: string; isSpouse?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const defaultRM: DCReceiveMethod = { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
-  const rm: DCReceiveMethod = isSpouse
-    ? (s.spouse?.dcReceiveMethod || defaultRM)
-    : (s.dcReceiveMethod || defaultRM);
-  const setRM = (patch: Partial<DCReceiveMethod>) => {
-    if (isSpouse) {
-      const sp = s.spouse || { enabled: false, currentAge: 30, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true };
-      onChange({ ...s, spouse: { ...sp, dcReceiveMethod: { ...rm, ...patch } } });
-    } else {
-      onChange({ ...s, dcReceiveMethod: { ...rm, ...patch } });
-    }
-  };
 
-  return (
-    <div className="border-t pt-1">
-      <button onClick={() => setOpen(!open)} className={`flex items-center gap-1 text-xs font-bold ${isSpouse ? "text-pink-700" : "text-orange-700"}`}>
-        <span className="text-[10px] text-gray-400">{open ? "▼" : "▶"}</span>
-        {label || "DC/iDeCo受取"}
-        <span className="font-normal text-gray-400 text-[10px]">
-          ({rm.type === "lump_sum" ? "一時金" : rm.type === "annuity" ? `年金${rm.annuityYears}年` : `併用${rm.combinedLumpSumRatio}%一時金`})
-        </span>
-      </button>
-      {open && (
-        <div className="mt-1 space-y-2 pl-1 text-xs">
-          <div className="flex gap-1">
-            {(["lump_sum", "annuity", "combined"] as const).map(t => (
-              <button key={t} onClick={() => setRM({ type: t })}
-                className={`rounded px-2 py-1 ${rm.type === t ? "bg-orange-600 text-white" : "bg-gray-100"}`}>
-                {t === "lump_sum" ? "一時金" : t === "annuity" ? "年金" : "併用"}
-              </button>
-            ))}
-          </div>
-
-          {(rm.type === "annuity" || rm.type === "combined") && (
-            <div className="flex flex-wrap gap-2">
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 text-[10px]">受取開始</span>
-                <input type="number" value={rm.annuityStartAge} min={60} max={75} step={1}
-                  onChange={e => setRM({ annuityStartAge: Number(e.target.value) })}
-                  className="w-14 rounded border px-1 py-0.5 text-xs" />
-                <span className="text-[10px] text-gray-400">歳</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 text-[10px]">受取期間</span>
-                {[5, 10, 15, 20].map(y => (
-                  <button key={y} onClick={() => setRM({ annuityYears: y })}
-                    className={`rounded px-1.5 py-0.5 text-[10px] ${rm.annuityYears === y ? "bg-orange-600 text-white" : "bg-gray-100"}`}>
-                    {y}年
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {rm.type === "combined" && (
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">一時金割合</span>
-              <input type="number" value={rm.combinedLumpSumRatio} min={10} max={90} step={10}
-                onChange={e => setRM({ combinedLumpSumRatio: Number(e.target.value) })}
-                className="w-14 rounded border px-1 py-0.5 text-xs" />
-              <span className="text-[10px] text-gray-400">%（残り{100 - rm.combinedLumpSumRatio}%が年金）</span>
-            </div>
-          )}
-
-          <div className="rounded bg-orange-50 p-2 text-[10px] text-gray-500 space-y-0.5">
-            {rm.type === "lump_sum" && <div>退職所得として課税。退職所得控除後の1/2に所得税+住民税。税負担が最も軽い場合が多い。</div>}
-            {rm.type === "annuity" && <div>雑所得として毎年課税。公的年金等控除が適用（65歳以上: 110万まで非課税）。他の年金と合算されるため税率が上がる場合あり。</div>}
-            {rm.type === "combined" && <div>一時金は退職所得控除、年金部分は公的年金等控除。退職所得控除枠を使い切ったら残りを年金にするのが一般的。</div>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function NISASection({ s, onChange, isLinked, baseScenario }: { s: Scenario; onChange: (s: Scenario) => void; isLinked?: boolean; baseScenario?: Scenario | null }) {
   const defaultNi: NISAConfig = { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 };
@@ -591,20 +555,18 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
       {/* 本人設定: MemberEditorを使用 */}
       <MemberEditor
         label={`本人${isLinked ? " 🔗A" : ""}`} color="#374151"
-        data={{ incomeKF: s.incomeKF, expenseKF: s.expenseKF, dcTotalKF: s.dcTotalKF, companyDCKF: s.companyDCKF, idecoKF: s.idecoKF, salaryGrowthRate: s.salaryGrowthRate, sirPct: 15.75, hasFurusato: s.hasFurusato }}
+        data={{ incomeKF: s.incomeKF, expenseKF: s.expenseKF, dcTotalKF: s.dcTotalKF, companyDCKF: s.companyDCKF, idecoKF: s.idecoKF, salaryGrowthRate: s.salaryGrowthRate, sirPct: 15.75, hasFurusato: s.hasFurusato, dcReceiveMethod: s.dcReceiveMethod }}
         onUpdate={(patch) => onChange({ ...s, ...patch })}
         currentAge={currentAge} retirementAge={retirementAge}
         linked={isLinked}
         readOnly={isLinked}
-        baseData={baseScenario ? { incomeKF: baseScenario.incomeKF, expenseKF: baseScenario.expenseKF, dcTotalKF: baseScenario.dcTotalKF, companyDCKF: baseScenario.companyDCKF, idecoKF: baseScenario.idecoKF, salaryGrowthRate: baseScenario.salaryGrowthRate, sirPct: 15.75, hasFurusato: baseScenario.hasFurusato } : undefined}
+        baseData={baseScenario ? { incomeKF: baseScenario.incomeKF, expenseKF: baseScenario.expenseKF, dcTotalKF: baseScenario.dcTotalKF, companyDCKF: baseScenario.companyDCKF, idecoKF: baseScenario.idecoKF, salaryGrowthRate: baseScenario.salaryGrowthRate, sirPct: 15.75, hasFurusato: baseScenario.hasFurusato, dcReceiveMethod: baseScenario.dcReceiveMethod } : undefined}
         trackLinked={isLinked ? isTrackLinked : undefined}
         onToggleTrack={isLinked ? toggleTrack : undefined}
       />
 
       <EventSection scenario={s} onChange={onChange} currentAge={currentAge} retirementAge={retirementAge} baseScenario={baseScenario} isLinked={isLinked} />
 
-      {/* DC/iDeCo受取方法（本人） */}
-      <DCReceiveSection s={s} onChange={onChange} label="本人DC受取" />
 
       {/* 配偶者: MemberEditorを使用（リンク時は🔗/✏️トグル） */}
       <div className="border-t pt-1">
@@ -626,12 +588,12 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
         {(sp.enabled || spInherited) && (
           <MemberEditor
             label="配偶者" color="#be185d"
-            data={{ incomeKF: effectiveSp.incomeKF || [], expenseKF: effectiveSp.expenseKF || [], dcTotalKF: effectiveSp.dcTotalKF || [], companyDCKF: effectiveSp.companyDCKF || [], idecoKF: effectiveSp.idecoKF || [], salaryGrowthRate: effectiveSp.salaryGrowthRate, sirPct: effectiveSp.sirPct ?? 15.75, hasFurusato: effectiveSp.hasFurusato ?? true }}
+            data={{ incomeKF: effectiveSp.incomeKF || [], expenseKF: effectiveSp.expenseKF || [], dcTotalKF: effectiveSp.dcTotalKF || [], companyDCKF: effectiveSp.companyDCKF || [], idecoKF: effectiveSp.idecoKF || [], salaryGrowthRate: effectiveSp.salaryGrowthRate, sirPct: effectiveSp.sirPct ?? 15.75, hasFurusato: effectiveSp.hasFurusato ?? true, dcReceiveMethod: effectiveSp.dcReceiveMethod }}
             onUpdate={(patch) => onChange({ ...s, spouse: { ...sp, ...patch } })}
             currentAge={effectiveSp.currentAge} retirementAge={retirementAge}
             linked={spInherited}
             readOnly={spInherited}
-            baseData={baseSp ? { incomeKF: baseSp.incomeKF || [], expenseKF: baseSp.expenseKF || [], dcTotalKF: baseSp.dcTotalKF || [], companyDCKF: baseSp.companyDCKF || [], idecoKF: baseSp.idecoKF || [], salaryGrowthRate: baseSp.salaryGrowthRate, sirPct: baseSp.sirPct ?? 15.75, hasFurusato: baseSp.hasFurusato ?? true } : undefined}
+            baseData={baseSp ? { incomeKF: baseSp.incomeKF || [], expenseKF: baseSp.expenseKF || [], dcTotalKF: baseSp.dcTotalKF || [], companyDCKF: baseSp.companyDCKF || [], idecoKF: baseSp.idecoKF || [], salaryGrowthRate: baseSp.salaryGrowthRate, sirPct: baseSp.sirPct ?? 15.75, hasFurusato: baseSp.hasFurusato ?? true, dcReceiveMethod: baseSp.dcReceiveMethod } : undefined}
             trackLinked={spInherited ? spouseTrackLinked : undefined}
             onToggleTrack={spInherited ? spouseToggleTrack : undefined}
             extraFields={
@@ -644,11 +606,6 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
           />
         )}
       </div>
-
-      {/* 配偶者DC受取方法（配偶者有効時のみ） */}
-      {(sp.enabled || spInherited) && (
-        <DCReceiveSection s={s} onChange={onChange} label="配偶者DC受取" isSpouse />
-      )}
 
       <NISASection s={s} onChange={onChange} isLinked={isLinked} baseScenario={baseScenario} />
     </div>

@@ -925,6 +925,24 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       cumulativeDCAsset = selfDCAsset + spouseDCAsset;
     }
 
+    // ===== NISA死亡時処理 =====
+    // NISA口座は相続時に閉鎖。非課税のまま相続（取得価額は死亡時の時価に引き上げ）
+    // 相続後は一般口座扱い。簡易的には現金化して特定口座に移管する想定
+    if (isDeathYear && selfNISAAsset > 0) {
+      eventCostBreakdown.push({ label: "NISA相続(本人)", icon: "📊", color: "#22c55e", amount: -selfNISAAsset,
+        detail: `NISA${Math.round(selfNISAAsset / 10000)}万 → 口座閉鎖・現金化(非課税)` });
+      cumulativeCash += selfNISAAsset;
+      selfNISACumulContrib = 0;
+      selfNISAAsset = 0;
+    }
+    if (isSpouseDeathYear && spouseNISAAsset > 0) {
+      eventCostBreakdown.push({ label: "NISA相続(配偶者)", icon: "📊", color: "#22c55e", amount: -spouseNISAAsset,
+        detail: `配偶者NISA${Math.round(spouseNISAAsset / 10000)}万 → 口座閉鎖・現金化(非課税)` });
+      cumulativeCash += spouseNISAAsset;
+      spouseNISACumulContrib = 0;
+      spouseNISAAsset = 0;
+    }
+
     // ===== NISA（個人別）/ 特定口座 / 現金 の自動配分・取り崩し =====
     // 運用益を先に反映
     selfNISAAsset = selfNISAAsset * (1 + nisaReturnRate);
