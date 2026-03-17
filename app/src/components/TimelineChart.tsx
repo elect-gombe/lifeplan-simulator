@@ -295,7 +295,7 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
                 )}
                 {(yr.nisaAsset > 0 || yr.taxableAsset > 0) && (
                   <div className="text-green-600">
-                    {yr.nisaAsset > 0 && `NISA ${fmtMan(yr.nisaAsset)}`}
+                    {yr.nisaAsset > 0 && `NISA ${fmtMan(yr.nisaAsset)}${yr.spouseNISAAsset > 0 ? ` (本人${fmtMan(yr.selfNISAAsset)} 配偶者${fmtMan(yr.spouseNISAAsset)})` : ""}`}
                     {yr.taxableAsset > 0 && ` 特定 ${fmtMan(yr.taxableAsset)}`}
                     {` 現金 ${fmtMan(yr.cashSavings)}`}
                   </div>

@@ -189,7 +189,12 @@ export function TaxDetailModal({ isOpen, onClose, age, results, base, sirPct }: 
               }} />
               <R l="再投資" fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.cumulativeReinvest) : "-"} />
               {hasNISA ? (<>
-                <R l="NISA" fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.nisaAsset) : "-"} />
+                <R l="NISA" fn={(yr, s) => {
+                  if (!hasSpouse) return Math.round(yr.nisaAsset);
+                  if (s === "本人") return Math.round(yr.selfNISAAsset);
+                  if (s === "配偶者") return Math.round(yr.spouseNISAAsset);
+                  return Math.round(yr.nisaAsset);
+                }} />
                 {yrs.some(yr => yr && yr.nisaContribution > 0) && <R l="  投入" sub fn={(yr, s) => (s === "世帯" || !hasSpouse) && yr.nisaContribution > 0 ? Math.round(yr.nisaContribution) : "-"} />}
                 {yrs.some(yr => yr && yr.nisaWithdrawal > 0) && <R l="  取崩" sub fn={(yr, s) => (s === "世帯" || !hasSpouse) && yr.nisaWithdrawal > 0 ? `▲${Math.round(yr.nisaWithdrawal).toLocaleString()}` : "-"} />}
                 <R l="特定口座" fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.taxableAsset) : "-"} />

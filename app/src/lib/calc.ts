@@ -463,21 +463,29 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   // Balance policy: use own if set, else inherit
   const bpConfig = s.balancePolicy || (linked ? base_.balancePolicy : undefined);
 
-  // NISA config — 口座数に応じて枠を倍
+  // NISA config — 個人別に枠を管理
   const nisa: NISAConfig | undefined = nisaConfig;
   const nisaAccounts = nisa ? (nisa.accounts || 1) : 1;
   const nisaReturnRate = nisa ? nisa.returnRate / 100 : 0;
-  const nisaAnnualLimit = nisa ? nisa.annualLimitMan * 10000 * nisaAccounts : 0;
-  const nisaLifetimeLimit = nisa ? nisa.lifetimeLimitMan * 10000 * nisaAccounts : 0;
-  let nisaCumulativeContribution = 0;
+  // 本人NISA枠
+  const selfNISAAnnualLimit = nisa ? nisa.annualLimitMan * 10000 : 0;
+  const selfNISALifetimeLimit = nisa ? nisa.lifetimeLimitMan * 10000 : 0;
+  // 配偶者NISA枠（2口座の場合）
+  const spouseNISAAnnualLimit = nisa && nisaAccounts === 2 ? (nisa.spouseAnnualLimitMan ?? nisa.annualLimitMan) * 10000 : 0;
+  const spouseNISALifetimeLimit = nisa && nisaAccounts === 2 ? (nisa.spouseLifetimeLimitMan ?? nisa.lifetimeLimitMan) * 10000 : 0;
+  let selfNISACumulContrib = 0;
+  let spouseNISACumulContrib = 0;
   // 特定口座 (taxable): same return rate, but gains taxed at 20.315%
   const TAXABLE_TAX_RATE = 0.20315;
-  const taxableReturnRate = nisaReturnRate; // same investment strategy
+  const taxableReturnRate = nisaReturnRate;
 
   // Balance policy
   const bp: BalancePolicy | undefined = bpConfig;
   const cashReserveMonths = bp ? bp.cashReserveMonths : 6;
   const nisaPriority = bp ? bp.nisaPriority : (nisa ? true : false);
+
+  // 配偶者DC受取方法
+  const spouseRM = spouse?.dcReceiveMethod || { type: "lump_sum" as const, annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
 
   const yearResults: YearResult[] = [];
   let cumulativeDCAsset = 0;
@@ -485,8 +493,9 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   let spouseDCAsset = 0;
   let cumulativeReinvest = 0;
   let cumulativeCash = effectiveCurrentAssets * 10000;
-  let cumulativeNISA = 0;
-  let cumulativeTaxable = 0;        // 特定口座 評価額
+  let selfNISAAsset = 0;
+  let spouseNISAAsset = 0;
+  let cumulativeTaxable = 0;
   let cumulativeTaxableCost = 0;    // 特定口座 取得原価（含み益計算用）
   let totalC = 0;
   let totalPensionLoss = 0;
@@ -916,84 +925,82 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       cumulativeDCAsset = selfDCAsset + spouseDCAsset;
     }
 
-    // ===== NISA / 特定口座 / 現金 の自動配分・取り崩し =====
+    // ===== NISA（個人別）/ 特定口座 / 現金 の自動配分・取り崩し =====
     // 運用益を先に反映
-    cumulativeNISA = cumulativeNISA * (1 + nisaReturnRate);
+    selfNISAAsset = selfNISAAsset * (1 + nisaReturnRate);
+    spouseNISAAsset = spouseNISAAsset * (1 + nisaReturnRate);
     cumulativeTaxable = cumulativeTaxable * (1 + taxableReturnRate);
+    const cumulativeNISA = selfNISAAsset + spouseNISAAsset;
 
     let nisaContribution = 0;
     let taxableContribution = 0;
     let nisaWithdrawal = 0;
     let taxableWithdrawal = 0;
 
-    // 現金に今年のキャッシュフローを加算
     cumulativeCash += annualNetCashFlow;
 
-    // 生活防衛資金ライン（NISA有無に関わらず適用）
     const monthlyExpense = baseLivingExpense / 12;
     const cashReserveTarget = monthlyExpense * cashReserveMonths;
 
-    // 特定口座→NISAの順で取り崩すヘルパー
+    // 取り崩しヘルパー: 特定口座 → 配偶者NISA → 本人NISA の順
     const withdrawToTarget = (targetCash: number) => {
       let deficit = targetCash - cumulativeCash;
       if (deficit <= 0) return;
 
-      // 1. 特定口座から取り崩し（含み益に20.315%課税）
       if (deficit > 0 && cumulativeTaxable > 0) {
         const gainRatio = cumulativeTaxableCost > 0
           ? Math.max(cumulativeTaxable - cumulativeTaxableCost, 0) / cumulativeTaxable : 0;
-        // 課税後の手取り率を考慮して売却額を決定
         const netRatio = 1 - gainRatio * TAXABLE_TAX_RATE;
         const sellNeeded = Math.min(Math.ceil(deficit / netRatio), cumulativeTaxable);
         const tax = Math.round(sellNeeded * gainRatio * TAXABLE_TAX_RATE);
-        const netProceeds = sellNeeded - tax;
-
         taxableWithdrawal += sellNeeded;
         cumulativeTaxable -= sellNeeded;
         cumulativeTaxableCost = Math.max(cumulativeTaxableCost * (cumulativeTaxable / (cumulativeTaxable + sellNeeded) || 0), 0);
-        cumulativeCash += netProceeds;
+        cumulativeCash += sellNeeded - tax;
         deficit = Math.max(targetCash - cumulativeCash, 0);
       }
-
-      // 2. NISAから取り崩し（非課税、全額が手取り）
-      if (deficit > 0 && cumulativeNISA > 0) {
-        const sellAmount = Math.min(deficit, cumulativeNISA);
-        nisaWithdrawal += sellAmount;
-        cumulativeNISA -= sellAmount;
-        nisaCumulativeContribution = Math.max(nisaCumulativeContribution - sellAmount, 0);
-        cumulativeCash += sellAmount;
+      // 配偶者NISA → 本人NISA
+      if (deficit > 0 && spouseNISAAsset > 0) {
+        const sell = Math.min(deficit, spouseNISAAsset);
+        nisaWithdrawal += sell; spouseNISAAsset -= sell; spouseNISACumulContrib = Math.max(spouseNISACumulContrib - sell, 0);
+        cumulativeCash += sell; deficit = Math.max(targetCash - cumulativeCash, 0);
+      }
+      if (deficit > 0 && selfNISAAsset > 0) {
+        const sell = Math.min(deficit, selfNISAAsset);
+        nisaWithdrawal += sell; selfNISAAsset -= sell; selfNISACumulContrib = Math.max(selfNISACumulContrib - sell, 0);
+        cumulativeCash += sell;
       }
     };
 
     if (nisa && nisaPriority) {
       if (cumulativeCash > cashReserveTarget) {
-        // === 余剰あり: NISA→特定口座 の順で投入 ===
         const excess = cumulativeCash - cashReserveTarget;
-        const nisaYearlyRoom = Math.max(Math.min(nisaAnnualLimit, nisaLifetimeLimit - nisaCumulativeContribution), 0);
-        nisaContribution = Math.min(excess, nisaYearlyRoom);
+        // 本人NISA枠 → 配偶者NISA枠 → 特定口座 の順で投入
+        const selfRoom = Math.max(Math.min(selfNISAAnnualLimit, selfNISALifetimeLimit - selfNISACumulContrib), 0);
+        const spouseRoom = Math.max(Math.min(spouseNISAAnnualLimit, spouseNISALifetimeLimit - spouseNISACumulContrib), 0);
+        const selfContrib = Math.min(excess, selfRoom);
+        const spouseContrib = Math.min(excess - selfContrib, spouseRoom);
+        nisaContribution = selfContrib + spouseContrib;
         const remaining = excess - nisaContribution;
         if (remaining > 0) taxableContribution = remaining;
+        selfNISAAsset += selfContrib; selfNISACumulContrib += selfContrib;
+        spouseNISAAsset += spouseContrib; spouseNISACumulContrib += spouseContrib;
         cumulativeCash -= nisaContribution + taxableContribution;
       } else if (cumulativeCash < cashReserveTarget) {
-        // === 防衛資金割れ: 投資口座から取り崩して防衛資金を維持 ===
         withdrawToTarget(cashReserveTarget);
       }
     } else {
-      // NISA無効でも、防衛資金割れなら特定口座等から取り崩し
-      if (cumulativeCash < cashReserveTarget) {
-        withdrawToTarget(cashReserveTarget);
-      }
+      if (cumulativeCash < cashReserveTarget) withdrawToTarget(cashReserveTarget);
     }
 
-    nisaCumulativeContribution += nisaContribution;
-    cumulativeNISA += nisaContribution;
     cumulativeTaxable += taxableContribution;
     cumulativeTaxableCost += taxableContribution;
 
     const taxableGain = Math.max(cumulativeTaxable - cumulativeTaxableCost, 0);
     const taxableUnrealizedTax = Math.round(taxableGain * TAXABLE_TAX_RATE);
     const taxableAfterTax = cumulativeTaxable - taxableUnrealizedTax;
-    const cumulativeSavings = cumulativeCash + cumulativeNISA + taxableAfterTax;
+    const totalNISA = selfNISAAsset + spouseNISAAsset;
+    const cumulativeSavings = cumulativeCash + totalNISA + taxableAfterTax;
 
     totalC += aT;
     totalPensionLoss += pensionLossAnnual;
@@ -1010,7 +1017,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       furusatoLimit: nFL, furusatoDonation: furuDonNew,
       pensionLossAnnual, loanBalance,
       childCount: childEvents.length, dependentDeduction: dependentDeductionTotal, childAllowance,
-      nisaContribution, nisaWithdrawal, nisaAsset: cumulativeNISA,
+      nisaContribution, nisaWithdrawal, nisaAsset: totalNISA, selfNISAAsset, spouseNISAAsset,
       taxableContribution, taxableWithdrawal, taxableAsset: cumulativeTaxable, taxableGain,
       cashSavings: cumulativeCash,
       spouseGross,
@@ -1030,11 +1037,18 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   const lPL = totalPensionLoss * PY;
   const dcRetDed = rDed(s.years);
 
-  // ===== DC/iDeCo受取方法に応じた税計算 =====
+  // ===== DC/iDeCo受取方法に応じた税計算（本人・配偶者別） =====
   const rm = s.dcReceiveMethod || { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
-  const dcReceiveDetail = calcDCReceiveTax(assetFV, otherRet, dcRetDed, rm, retirementAge);
+  const dcReceiveDetail = calcDCReceiveTax(selfDCAsset, otherRet, dcRetDed, rm, retirementAge);
 
-  const exitDelta = dcReceiveDetail.totalTax;
+  let spouseDCReceiveDetail: import("./types").DCReceiveDetail | undefined;
+  if (spouseDCAsset > 0 && spouse) {
+    const spYears = spouse.dcTotalKF?.length ? Math.max(retirementAge - currentAge, 1) : s.years;
+    const spRetDed = rDed(spYears);
+    spouseDCReceiveDetail = calcDCReceiveTax(spouseDCAsset, 0, spRetDed, spouseRM, retirementAge);
+  }
+
+  const exitDelta = dcReceiveDetail.totalTax + (spouseDCReceiveDetail?.totalTax || 0);
   const finalAssetNet = Math.max(assetFV - exitDelta, 0);
   const ly = yearResults[yearResults.length - 1];
   const finalSavings = ly ? ly.cumulativeSavings : effectiveCurrentAssets * 10000;
@@ -1046,6 +1060,6 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     totalC, assetFV, fvB, lPL, pvPL: lPL,
     dcRetDed, exitDelta, finalAssetNet, finalWealth, finalScore,
     multiPhase: dcTotalKF.length > 1 || idecoKF.length > 1 || incomeKF.length > 1,
-    hasFuru, dcReceiveDetail,
+    hasFuru, dcReceiveDetail, spouseDCReceiveDetail,
   };
 }

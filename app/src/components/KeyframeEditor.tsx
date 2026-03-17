@@ -378,16 +378,26 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
 
 // ===== NISA / Balance Policy Section =====
 // ===== DC/iDeCo受取方法 =====
-function DCReceiveSection({ s, onChange }: { s: Scenario; onChange: (s: Scenario) => void }) {
+function DCReceiveSection({ s, onChange, label, isSpouse }: { s: Scenario; onChange: (s: Scenario) => void; label?: string; isSpouse?: boolean }) {
   const [open, setOpen] = useState(false);
-  const rm: DCReceiveMethod = s.dcReceiveMethod || { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
-  const setRM = (patch: Partial<DCReceiveMethod>) => onChange({ ...s, dcReceiveMethod: { ...rm, ...patch } });
+  const defaultRM: DCReceiveMethod = { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
+  const rm: DCReceiveMethod = isSpouse
+    ? (s.spouse?.dcReceiveMethod || defaultRM)
+    : (s.dcReceiveMethod || defaultRM);
+  const setRM = (patch: Partial<DCReceiveMethod>) => {
+    if (isSpouse) {
+      const sp = s.spouse || { enabled: false, currentAge: 30, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true };
+      onChange({ ...s, spouse: { ...sp, dcReceiveMethod: { ...rm, ...patch } } });
+    } else {
+      onChange({ ...s, dcReceiveMethod: { ...rm, ...patch } });
+    }
+  };
 
   return (
     <div className="border-t pt-1">
-      <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-xs font-bold text-orange-700">
+      <button onClick={() => setOpen(!open)} className={`flex items-center gap-1 text-xs font-bold ${isSpouse ? "text-pink-700" : "text-orange-700"}`}>
         <span className="text-[10px] text-gray-400">{open ? "▼" : "▶"}</span>
-        DC/iDeCo受取
+        {label || "DC/iDeCo受取"}
         <span className="font-normal text-gray-400 text-[10px]">
           ({rm.type === "lump_sum" ? "一時金" : rm.type === "annuity" ? `年金${rm.annuityYears}年` : `併用${rm.combinedLumpSumRatio}%一時金`})
         </span>
@@ -593,8 +603,8 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
 
       <EventSection scenario={s} onChange={onChange} currentAge={currentAge} retirementAge={retirementAge} baseScenario={baseScenario} isLinked={isLinked} />
 
-      {/* DC/iDeCo受取方法 */}
-      <DCReceiveSection s={s} onChange={onChange} />
+      {/* DC/iDeCo受取方法（本人） */}
+      <DCReceiveSection s={s} onChange={onChange} label="本人DC受取" />
 
       {/* 配偶者: MemberEditorを使用（リンク時は🔗/✏️トグル） */}
       <div className="border-t pt-1">
@@ -634,6 +644,11 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
           />
         )}
       </div>
+
+      {/* 配偶者DC受取方法（配偶者有効時のみ） */}
+      {(sp.enabled || spInherited) && (
+        <DCReceiveSection s={s} onChange={onChange} label="配偶者DC受取" isSpouse />
+      )}
 
       <NISASection s={s} onChange={onChange} isLinked={isLinked} baseScenario={baseScenario} />
     </div>

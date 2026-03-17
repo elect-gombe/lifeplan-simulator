@@ -50,8 +50,9 @@ export interface SpouseConfig {
   companyDCKF: Keyframe[];      // 会社DC KF（円/月）
   idecoKF: Keyframe[];          // iDeCo KF（円/月）
   salaryGrowthRate: number;     // 昇給率（%）
-  sirPct: number;               // 社保料率（%）— 男女でわずかに違う場合
+  sirPct: number;               // 社保料率（%）
   hasFurusato: boolean;         // ふるさと納税
+  dcReceiveMethod?: DCReceiveMethod; // 配偶者のDC/iDeCo受取方法
 }
 
 export interface NISAConfig {
@@ -60,6 +61,8 @@ export interface NISAConfig {
   annualLimitMan: number;       // 1人あたり年間投資枠（万円）default 360
   lifetimeLimitMan: number;     // 1人あたり生涯投資枠（万円）default 1800
   returnRate: number;           // 運用利回り（%）NISA=非課税, 特定口座=20.315%課税
+  spouseAnnualLimitMan?: number;   // 配偶者の年間枠（未設定なら本人と同じ）
+  spouseLifetimeLimitMan?: number; // 配偶者の生涯枠（未設定なら本人と同じ）
 }
 
 export interface BalancePolicy {
@@ -213,7 +216,9 @@ export interface YearResult {
   // NISA / 特定口座 / Cash split
   nisaContribution: number;
   nisaWithdrawal: number;
-  nisaAsset: number;
+  nisaAsset: number;           // 世帯合計
+  selfNISAAsset: number;       // 本人NISA
+  spouseNISAAsset: number;     // 配偶者NISA
   taxableContribution: number;
   taxableWithdrawal: number;
   taxableAsset: number;        // 特定口座（税引前評価額）
@@ -266,7 +271,8 @@ export interface ScenarioResult {
   finalScore: number;
   multiPhase: boolean;
   hasFuru: boolean;
-  dcReceiveDetail: DCReceiveDetail;
+  dcReceiveDetail: DCReceiveDetail;       // 本人
+  spouseDCReceiveDetail?: DCReceiveDetail; // 配偶者
 }
 
 export interface BaseResult {
