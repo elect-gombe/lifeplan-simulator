@@ -520,6 +520,34 @@ function ScenarioSettingsSection({ s, onChange }: { s: Scenario; onChange: (s: S
                 className={`rounded px-1.5 py-0.5 text-[10px] ${s.dependentDeductionHolder === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"}`}>配偶者</button>
             </div>
           </div>
+          <div className="flex flex-wrap gap-2 border-t pt-1">
+            <span className="text-gray-500 text-[10px] font-semibold">老齢年金</span>
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-[10px]">本人</span>
+              <input type="number" value={s.pensionAnnualMan ?? 180} step={10} min={0} onChange={e => onChange({ ...s, pensionAnnualMan: Number(e.target.value) })} className="w-16 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-[10px] text-gray-400">万/年</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-[10px]">開始</span>
+              <input type="number" value={s.pensionStartAge ?? 65} step={1} min={60} max={75} onChange={e => onChange({ ...s, pensionStartAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-[10px] text-gray-400">歳</span>
+            </div>
+            {sp?.enabled && (<>
+              <div className="flex items-center gap-1">
+                <span className="text-pink-600 text-[10px]">配偶者</span>
+                <input type="number" value={sp.pensionAnnualMan ?? 100} step={10} min={0}
+                  onChange={e => onChange({ ...s, spouse: { ...sp, pensionAnnualMan: Number(e.target.value) } })} className="w-16 rounded border px-1 py-0.5 text-xs" />
+                <span className="text-[10px] text-gray-400">万/年</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-pink-600 text-[10px]">開始</span>
+                <input type="number" value={sp.pensionStartAge ?? 65} step={1} min={60} max={75}
+                  onChange={e => onChange({ ...s, spouse: { ...sp, pensionStartAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+                <span className="text-[10px] text-gray-400">歳</span>
+              </div>
+            </>)}
+            <div className="text-[10px] text-gray-400">厚生年金+基礎年金の合計。ねんきん定期便等で確認。</div>
+          </div>
         </div>
       )}
     </div>

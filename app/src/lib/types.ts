@@ -53,7 +53,9 @@ export interface SpouseConfig {
   salaryGrowthRate: number;     // 昇給率（%）
   sirPct: number;               // 社保料率（%）
   hasFurusato: boolean;         // ふるさと納税
-  dcReceiveMethod?: DCReceiveMethod; // 配偶者のDC/iDeCo受取方法
+  pensionStartAge?: number;     // 年金受給開始年齢
+  pensionAnnualMan?: number;    // 配偶者の老齢年金年額（万円）
+  dcReceiveMethod?: DCReceiveMethod;
 }
 
 export interface NISAConfig {
@@ -164,7 +166,10 @@ export interface Scenario {
   overrideTracks: TrackKey[];
   years: number;             // DC通算期間
   hasFurusato: boolean;
-  dependentDeductionHolder: "self" | "spouse"; // 扶養控除を適用する世帯主
+  dependentDeductionHolder: "self" | "spouse";
+  // 公的年金
+  pensionStartAge: number;          // 受給開始年齢（デフォ65）
+  pensionAnnualMan: number;         // 本人の老齢年金年額（万円）
   // DC/iDeCo受取方法
   dcReceiveMethod: DCReceiveMethod;
   // Spouse
@@ -216,6 +221,10 @@ export interface YearResult {
   childCount: number;
   dependentDeduction: number;  // 扶養控除合計（円）
   childAllowance: number;     // 児童手当合計（円/年）
+  // 公的年金
+  selfPensionIncome: number;    // 本人の年金収入
+  spousePensionIncome: number;  // 配偶者の年金収入
+  pensionTax: number;           // 年金にかかる税
   // Housing loan balance (for graph)
   loanBalance: number;
   // NISA / 特定口座 / Cash split

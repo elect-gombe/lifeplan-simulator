@@ -575,8 +575,20 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     const isDeathYear = deathEvent && age === deathAge;
     const isSpouseDeathYear = spouseDeathEvent && age === resolveEventAge(spouseDeathEvent, events);
 
-    // Income (退職後は0)
+    // Income (退職後は給与0、年金開始後は年金収入)
     const selfRetired = age >= selfRetirementAge;
+    const selfPensionStartAge = s.pensionStartAge ?? 65;
+    const selfPensionAnnual = (s.pensionAnnualMan ?? 0) * 10000;
+    const selfReceivingPension = !isSelfDead && age >= selfPensionStartAge;
+    const selfPensionIncome = selfReceivingPension ? selfPensionAnnual : 0;
+
+    // 配偶者年金
+    const spPensionStartAge = spouse?.pensionStartAge ?? 65;
+    const spPensionAnnual = (spouse?.pensionAnnualMan ?? 0) * 10000;
+    const spouseAge = spouse ? spouse.currentAge + yearsFromStart : 0;
+    const spouseReceivingPension = spouse && !isSpouseDead && spouseAge >= spPensionStartAge;
+    const spousePensionIncome = spouseReceivingPension ? spPensionAnnual : 0;
+
     let gross: number;
     let grownGrossMan: number;
     if (isSelfDead || selfRetired) {
@@ -928,7 +940,27 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     const aBen = itSv + rtSv + siSv;
     const aNet = aBen;
 
-    const takeHomePay = gross - incomeTax - residentTax - socialInsurance - selfDC - aI + childAllowance + survivorIncome + spouseTakeHome;
+    // 年金の課税（公的年金等控除適用）
+    const totalPensionReceived = selfPensionIncome + spousePensionIncome;
+    let pensionTax = 0;
+    if (selfPensionIncome > 0) pensionTax += annuityTax(selfPensionIncome, age);
+    if (spousePensionIncome > 0) pensionTax += annuityTax(spousePensionIncome, spouseAge);
+    const pensionNetIncome = totalPensionReceived - pensionTax;
+
+    if (selfPensionIncome > 0) {
+      eventCostBreakdown.push({ label: "老齢年金(本人)", icon: "🏛️", color: "#16a34a", amount: -selfPensionIncome,
+        detail: `${selfPensionStartAge}歳〜 ${Math.round(selfPensionIncome/10000)}万/年` });
+    }
+    if (spousePensionIncome > 0) {
+      eventCostBreakdown.push({ label: "老齢年金(配偶者)", icon: "🏛️", color: "#16a34a", amount: -spousePensionIncome,
+        detail: `${spPensionStartAge}歳〜 ${Math.round(spousePensionIncome/10000)}万/年` });
+    }
+    if (pensionTax > 0) {
+      eventCostBreakdown.push({ label: "年金課税", icon: "🏛️", color: "#ef4444", amount: pensionTax,
+        detail: `公的年金等控除適用後の所得税+住民税` });
+    }
+
+    const takeHomePay = gross - incomeTax - residentTax - socialInsurance - selfDC - aI + childAllowance + survivorIncome + spouseTakeHome + pensionNetIncome;
     const pensionLossAnnual = (ds * PENSION_RATE_PER_MILLE) / 1000 * 12;
     const spousePensionLossAnnual = spouse ? (spouseTaxResult.selfDCContribution / 12 * PENSION_RATE_PER_MILLE) / 1000 * 12 : 0;
     const annualNetCashFlow = takeHomePay - totalExpense;
@@ -1152,7 +1184,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       cumulativeDCAsset, selfDCAsset, spouseDCAsset, cumulativeReinvest, annualNetCashFlow,
       cumulativeSavings: finalCumulativeSavings, totalWealth: finalCumulativeSavings + cumulativeDCAsset + cumulativeReinvest,
       furusatoLimit: nFL, furusatoDonation: furuDonNew,
-      pensionLossAnnual, loanBalance,
+      pensionLossAnnual, selfPensionIncome, spousePensionIncome, pensionTax, loanBalance,
       childCount: childEvents.length, dependentDeduction: dependentDeductionTotal, childAllowance,
       nisaContribution, nisaWithdrawal, nisaAsset: totalNISA, selfNISAAsset, spouseNISAAsset,
       selfNISACostBasis, spouseNISACostBasis, nisaGain: totalNISA - selfNISACostBasis - spouseNISACostBasis,
