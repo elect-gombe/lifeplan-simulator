@@ -173,14 +173,14 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
                 </button>
               ))}
             </div>
-            {(rm.type === "annuity" || rm.type === "combined") && (
-              <div className="flex flex-wrap gap-2 pl-2">
-                <div className="flex items-center gap-1">
-                  <span className="text-gray-500 text-[10px]">開始</span>
-                  <input type="number" value={rm.annuityStartAge} min={60} max={75} step={1} disabled={isRO}
-                    onChange={e => setRM({ annuityStartAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
-                  <span className="text-[10px] text-gray-400">歳</span>
-                </div>
+            <div className="flex flex-wrap gap-2 pl-2">
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 text-[10px]">受取開始</span>
+                <input type="number" value={rm.annuityStartAge} min={60} max={75} step={1} disabled={isRO}
+                  onChange={e => setRM({ annuityStartAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+                <span className="text-[10px] text-gray-400">歳</span>
+              </div>
+            {(rm.type === "annuity" || rm.type === "combined") && (<>
                 <div className="flex items-center gap-0.5">
                   {[5, 10, 15, 20].map(y => (
                     <button key={y} onClick={() => setRM({ annuityYears: y })} disabled={isRO}
@@ -195,8 +195,8 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
                     <span className="text-[10px] text-gray-400">%</span>
                   </div>
                 )}
-              </div>
-            )}
+              </>)}
+            </div>
           </div>
         </div>
       )}
