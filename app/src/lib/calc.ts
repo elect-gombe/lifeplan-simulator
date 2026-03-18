@@ -1161,11 +1161,11 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       cumulativeDCAsset = selfDCAsset + spouseDCAsset;
     }
 
-    // 退職年の振替後に再計算
-    const finalTotalNISA = selfNISAAsset + spouseNISAAsset;
-    const finalCumulativeSavings = age === retirementAge - 1
-      ? cumulativeCash + finalTotalNISA + (cumulativeTaxable - Math.round(Math.max(cumulativeTaxable - cumulativeTaxableCost, 0) * TAXABLE_TAX_RATE))
-      : cumulativeSavings;
+    // DC受取後の値で cumulativeSavings を再計算
+    const postTotalNISA = selfNISAAsset + spouseNISAAsset;
+    const postTaxableGain = Math.max(cumulativeTaxable - cumulativeTaxableCost, 0);
+    const postTaxableAfterTax = cumulativeTaxable - Math.round(postTaxableGain * TAXABLE_TAX_RATE);
+    const postCumulativeSavings = cumulativeCash + postTotalNISA + postTaxableAfterTax;
 
     yearResults.push({
       age, gross, grossMan: grownGrossMan,
@@ -1175,7 +1175,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       incomeTaxSaving: itSv, residentTaxSaving: rtSv, socialInsuranceSaving: siSv,
       annualBenefit: aBen, annualNetBenefit: aNet,
       cumulativeDCAsset, selfDCAsset, spouseDCAsset, cumulativeReinvest, annualNetCashFlow,
-      cumulativeSavings: finalCumulativeSavings, totalWealth: finalCumulativeSavings + cumulativeDCAsset + cumulativeReinvest,
+      cumulativeSavings: postCumulativeSavings, totalWealth: postCumulativeSavings + cumulativeDCAsset + cumulativeReinvest,
       furusatoLimit: nFL, furusatoDonation: furuDonNew,
       pensionLossAnnual, selfPensionIncome, spousePensionIncome, pensionTax, survivorIncome, loanBalance,
       childCount: childEvents.length, dependentDeduction: dependentDeductionTotal, childAllowance,
