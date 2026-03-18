@@ -145,6 +145,9 @@ export default function App() {
   const [scenarios, setScenarios] = useState<Scenario[]>(() => saved?.scenarios?.length ? saved.scenarios : [mkScenario(0), mkScenario(1)]);
   const [modalAge, setModalAge] = useState<number | null>(null);
   const [inflationRate, setInflationRate] = useState(saved?.inflationRate ?? 1.5);
+  const [jsonModal, setJsonModal] = useState<"export" | "import" | null>(null);
+  const [jsonText, setJsonText] = useState("");
+  const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentState: SavedState = useMemo(() => ({
@@ -204,9 +207,10 @@ export default function App() {
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold">資産シミュレーター</h1>
           <div className="flex items-center gap-2">
-            <button onClick={() => exportJSON(currentState)} className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">JSONエクスポート</button>
-            <button onClick={() => fileInputRef.current?.click()} className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">インポート</button>
-            <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = ""; }} />
+            <button onClick={() => { setJsonText(JSON.stringify(currentState, null, 2)); setCopied(false); setJsonModal("export"); }}
+              className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">共有・エクスポート</button>
+            <button onClick={() => { setJsonText(""); setJsonModal("import"); }}
+              className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">インポート</button>
           </div>
         </div>
 
@@ -280,6 +284,56 @@ export default function App() {
 
       <TaxDetailModal isOpen={modalAge != null} onClose={() => setModalAge(null)} age={modalAge}
         results={res} base={base} sirPct={sirPct} />
+
+      {/* JSON共有モーダル */}
+      {jsonModal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/40 p-4 pt-8" onClick={() => setJsonModal(null)}>
+          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <p className="text-sm font-bold">{jsonModal === "export" ? "シナリオ共有" : "シナリオ読込"}</p>
+              <button onClick={() => setJsonModal(null)} className="rounded px-3 py-1 text-xs text-gray-500 hover:bg-gray-100">閉じる</button>
+            </div>
+            <div className="p-4 space-y-3">
+              {jsonModal === "export" ? (<>
+                <div className="text-xs text-gray-500">以下のJSONをコピーして共有できます。</div>
+                <textarea value={jsonText} readOnly rows={15}
+                  className="w-full rounded border bg-gray-50 p-2 font-mono text-[10px] leading-tight text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  onClick={e => (e.target as HTMLTextAreaElement).select()} />
+                <div className="flex gap-2">
+                  <button onClick={() => { navigator.clipboard.writeText(jsonText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                    className="rounded bg-blue-600 px-4 py-1.5 text-xs text-white font-bold hover:bg-blue-700">
+                    {copied ? "コピーしました!" : "クリップボードにコピー"}
+                  </button>
+                  <button onClick={() => exportJSON(currentState)}
+                    className="rounded border px-4 py-1.5 text-xs text-gray-600 hover:bg-gray-50">ファイルとしてダウンロード</button>
+                </div>
+              </>) : (<>
+                <div className="text-xs text-gray-500">共有されたJSONを貼り付けるか、ファイルを選択してください。</div>
+                <textarea value={jsonText} onChange={e => setJsonText(e.target.value)} rows={15} placeholder="JSONをここに貼り付け..."
+                  className="w-full rounded border p-2 font-mono text-[10px] leading-tight text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                <div className="flex gap-2">
+                  <button onClick={() => {
+                    try {
+                      const parsed = JSON.parse(jsonText);
+                      const oldFields = { currentAge: parsed.currentAge, retirementAge: parsed.retirementAge, currentAssetsMan: parsed.currentAssetsMan, salaryGrowthRate: parsed.salaryGrowthRate, dcYears: parsed.dcYears, hasFurusato: parsed.hasFurusato };
+                      const data = { rr: parsed.rr ?? 4, hasRet: parsed.hasRet ?? false, retAmt: parsed.retAmt ?? 0, PY: parsed.PY ?? 20, sirPct: parsed.sirPct ?? 15.75, inflationRate: parsed.inflationRate ?? 1.5, scenarios: (parsed.scenarios || []).map((s: any) => migrateScenario(s, oldFields)) };
+                      setRR(data.rr); setHasRet(data.hasRet); setRetAmt(data.retAmt); setPY(data.PY); setSirPct(data.sirPct); setInflationRate(data.inflationRate);
+                      if (data.scenarios.length) setScenarios(data.scenarios);
+                      setJsonModal(null);
+                    } catch { alert("JSONの形式が正しくありません"); }
+                  }} className="rounded bg-blue-600 px-4 py-1.5 text-xs text-white font-bold hover:bg-blue-700" disabled={!jsonText.trim()}>
+                    読み込む
+                  </button>
+                  <button onClick={() => fileInputRef.current?.click()}
+                    className="rounded border px-4 py-1.5 text-xs text-gray-600 hover:bg-gray-50">ファイルから読込</button>
+                  <input ref={fileInputRef} type="file" accept=".json" className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) { handleImport(f); setJsonModal(null); } e.target.value = ""; }} />
+                </div>
+              </>)}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
