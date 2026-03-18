@@ -93,6 +93,33 @@ function exportJSON(state: SavedState) {
   a.click(); URL.revokeObjectURL(url);
 }
 
+// gzip + base64 encode/decode for URL sharing
+async function encodeStateToURL(state: SavedState): Promise<string> {
+  const json = JSON.stringify(state);
+  const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
+  const compressed = await new Response(stream).arrayBuffer();
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(compressed)));
+  // URL-safe base64
+  const urlSafe = base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return urlSafe;
+}
+
+async function decodeStateFromURL(encoded: string): Promise<SavedState | null> {
+  try {
+    // Restore standard base64
+    let base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    while (base64.length % 4) base64 += "=";
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+    const json = await new Response(stream).text();
+    const parsed = JSON.parse(json);
+    const oldFields = { currentAge: parsed.currentAge, retirementAge: parsed.retirementAge, currentAssetsMan: parsed.currentAssetsMan, salaryGrowthRate: parsed.salaryGrowthRate, dcYears: parsed.dcYears, hasFurusato: parsed.hasFurusato };
+    return { rr: parsed.rr ?? 4, hasRet: parsed.hasRet ?? false, retAmt: parsed.retAmt ?? 0, PY: parsed.PY ?? 20, sirPct: parsed.sirPct ?? 15.75, inflationRate: parsed.inflationRate ?? 1.5, scenarios: (parsed.scenarios || []).map((s: any) => migrateScenario(s, oldFields)) };
+  } catch { return null; }
+}
+
 function importJSON(file: File): Promise<SavedState | null> {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -148,7 +175,22 @@ export default function App() {
   const [jsonModal, setJsonModal] = useState<"export" | "import" | null>(null);
   const [jsonText, setJsonText] = useState("");
   const [copied, setCopied] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // URLハッシュからデータを読み込む（初回のみ）
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash) return;
+    decodeStateFromURL(hash).then(data => {
+      if (!data) return;
+      setRR(data.rr); setHasRet(data.hasRet); setRetAmt(data.retAmt);
+      setPY(data.PY); setSirPct(data.sirPct); setInflationRate(data.inflationRate);
+      if (data.scenarios.length) setScenarios(data.scenarios);
+      // ハッシュをクリア（再読み込み防止）
+      window.history.replaceState(null, "", window.location.pathname);
+    });
+  }, []);
 
   const currentState: SavedState = useMemo(() => ({
     rr, hasRet, retAmt, PY, sirPct, inflationRate, scenarios,
@@ -295,18 +337,42 @@ export default function App() {
             </div>
             <div className="p-4 space-y-3">
               {jsonModal === "export" ? (<>
-                <div className="text-xs text-gray-500">以下のJSONをコピーして共有できます。</div>
-                <textarea value={jsonText} readOnly rows={15}
-                  className="w-full rounded border bg-gray-50 p-2 font-mono text-[10px] leading-tight text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  onClick={e => (e.target as HTMLTextAreaElement).select()} />
-                <div className="flex gap-2">
-                  <button onClick={() => { navigator.clipboard.writeText(jsonText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-                    className="rounded bg-blue-600 px-4 py-1.5 text-xs text-white font-bold hover:bg-blue-700">
-                    {copied ? "コピーしました!" : "クリップボードにコピー"}
-                  </button>
-                  <button onClick={() => exportJSON(currentState)}
-                    className="rounded border px-4 py-1.5 text-xs text-gray-600 hover:bg-gray-50">ファイルとしてダウンロード</button>
+                {/* 共有リンク */}
+                <div className="rounded border border-blue-200 bg-blue-50 p-3 space-y-2">
+                  <div className="text-xs font-bold text-blue-700">共有リンク</div>
+                  {shareUrl ? (
+                    <div className="space-y-1">
+                      <input value={shareUrl} readOnly className="w-full rounded border bg-white px-2 py-1.5 font-mono text-[10px] text-gray-600" onClick={e => (e.target as HTMLInputElement).select()} />
+                      <div className="flex gap-2">
+                        <button onClick={() => { navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                          className="rounded bg-blue-600 px-3 py-1 text-xs text-white font-bold hover:bg-blue-700">
+                          {copied ? "コピーしました!" : "リンクをコピー"}
+                        </button>
+                        <span className="text-[10px] text-gray-400 self-center">URLを共有するだけで同じシナリオを再現できます</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={async () => {
+                      const encoded = await encodeStateToURL(currentState);
+                      setShareUrl(`${window.location.origin}${window.location.pathname}#${encoded}`);
+                    }} className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white font-bold hover:bg-blue-700">共有リンクを生成</button>
+                  )}
                 </div>
+                {/* JSON */}
+                <details className="rounded border p-3">
+                  <summary className="cursor-pointer text-xs text-gray-500">JSON（詳細）</summary>
+                  <div className="mt-2 space-y-2">
+                    <textarea value={jsonText} readOnly rows={12}
+                      className="w-full rounded border bg-gray-50 p-2 font-mono text-[10px] leading-tight text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      onClick={e => (e.target as HTMLTextAreaElement).select()} />
+                    <div className="flex gap-2">
+                      <button onClick={() => { navigator.clipboard.writeText(jsonText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                        className="rounded border px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">JSONをコピー</button>
+                      <button onClick={() => exportJSON(currentState)}
+                        className="rounded border px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">ファイル保存</button>
+                    </div>
+                  </div>
+                </details>
               </>) : (<>
                 <div className="text-xs text-gray-500">共有されたJSONを貼り付けるか、ファイルを選択してください。</div>
                 <textarea value={jsonText} onChange={e => setJsonText(e.target.value)} rows={15} placeholder="JSONをここに貼り付け..."
