@@ -287,7 +287,9 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
             {hoverData.map((yr, si) => yr && (
               <div key={si} className="space-y-0.5">
                 <div className="font-bold" style={{ color: COLORS[si] }}>{results[si].scenario.name}</div>
-                <div>年収 {Math.round(yr.grossMan)}万{yr.spouseGross > 0 ? ` + 配偶者${Math.round(yr.spouseGross / 10000)}万` : ""} / 手取り {fmtMan(yr.takeHomePay)}</div>
+                <div>年収 {Math.round(yr.grossMan)}万{yr.spouseGross > 0 ? ` + 配偶者${Math.round(yr.spouseGross / 10000)}万` : ""}
+                  {(yr.selfPensionIncome > 0 || yr.spousePensionIncome > 0) && ` 年金${fmtMan(yr.selfPensionIncome + yr.spousePensionIncome)}`}
+                  {" / "}手取り {fmtMan(yr.takeHomePay)}</div>
                 <div>支出 {fmtMan(yr.totalExpense)}（基本{fmtMan(yr.baseLivingExpense)} + イベント{fmtMan(yr.eventOngoing + yr.eventOnetime)}）</div>
                 <div className="font-bold">総資産 {fmtMan(yr.totalWealth)}</div>
                 {yr.cumulativeDCAsset > 0 && (

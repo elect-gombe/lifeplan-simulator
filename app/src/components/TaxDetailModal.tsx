@@ -11,7 +11,7 @@ export function TaxDetailModal({ isOpen, onClose, age, results, base, sirPct }: 
   if (!isOpen || age == null) return null;
 
   const yrs = results.map(r => r.yearResults.find(yr => yr.age === age));
-  const hasSpouse = yrs.some(yr => yr && yr.spouseGross > 0);
+  const hasSpouse = results.some(r => r.scenario.spouse?.enabled);
   const hasNISA = yrs.some(yr => yr && (yr.nisaAsset > 0 || yr.taxableAsset > 0));
   const hasInsurance = yrs.some(yr => yr && (yr.insurancePremiumTotal > 0 || yr.insurancePayoutTotal > 0));
 
