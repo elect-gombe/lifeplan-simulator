@@ -966,18 +966,8 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     if (spousePensionIncome > 0) pensionTax += annuityTax(spousePensionIncome, spouseAge);
     const pensionNetIncome = totalPensionReceived - pensionTax;
 
-    if (selfPensionIncome > 0) {
-      eventCostBreakdown.push({ label: "老齢年金(本人)", icon: "🏛️", color: "#16a34a", amount: -selfPensionIncome,
-        detail: selfPensionDetail || `${Math.round(selfPensionIncome/10000)}万/年` });
-    }
-    if (spousePensionIncome > 0) {
-      eventCostBreakdown.push({ label: "老齢年金(配偶者)", icon: "🏛️", color: "#16a34a", amount: -spousePensionIncome,
-        detail: spousePensionDetail || `${Math.round(spousePensionIncome/10000)}万/年` });
-    }
-    if (pensionTax > 0) {
-      eventCostBreakdown.push({ label: "年金課税", icon: "🏛️", color: "#ef4444", amount: pensionTax,
-        detail: `公的年金等控除適用後の所得税+住民税` });
-    }
+    // 年金はeventCostBreakdownには入れない（専用セクションで表示）
+    // takeHomePayに直接加算済み
 
     const takeHomePay = gross - incomeTax - residentTax - socialInsurance - selfDC - aI + childAllowance + survivorIncome + spouseTakeHome + pensionNetIncome;
     const pensionLossAnnual = (ds * PENSION_RATE_PER_MILLE) / 1000 * 12;

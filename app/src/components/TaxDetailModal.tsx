@@ -158,14 +158,36 @@ export function TaxDetailModal({ isOpen, onClose, age, results, base, sirPct }: 
               <R l="扶養控除" hint="16-18歳:38万 19-22歳:63万(特定扶養)" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.dependentDeduction : "-"} />
               <R l="児童手当" hint="0-2歳:1.5万/月 3-18歳:1万/月 第3子以降:3万/月" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.childAllowance : "-"} />
               <R l="年金減少" neg hint="DC自己負担月額×5.481/1000×12(年額)" fn={(yr, s) => s === "本人" ? yr.pensionLossAnnual : "-"} />
-              <R l="老齢年金" hint="受給開始年齢から。公的年金等控除後に課税" fn={(yr, s) => {
-                if (!hasSpouse) return yr.selfPensionIncome + yr.spousePensionIncome;
-                if (s === "本人") return yr.selfPensionIncome || "-";
-                if (s === "配偶者") return yr.spousePensionIncome || "-";
-                return (yr.selfPensionIncome + yr.spousePensionIncome) || "-";
-              }} />
-              {yrs.some(yr => yr && yr.pensionTax > 0) &&
-                <R l="  年金課税" sub neg hint="公的年金等控除後の所得税+住民税" fn={(yr, s) => (s === "世帯" || !hasSpouse) ? yr.pensionTax : "-"} />}
+
+              {/* 老齢年金セクション（受給中の場合のみ表示） */}
+              {yrs.some(yr => yr && (yr.selfPensionIncome > 0 || yr.spousePensionIncome > 0)) && (<>
+                <S bg="bg-emerald-50">■ 老齢年金</S>
+                <R l="本人年金" hint="基礎年金+厚生年金。繰上げ/繰下げ反映" fn={(yr, s) => {
+                  if (s === "配偶者") return "-";
+                  return yr.selfPensionIncome > 0 ? yr.selfPensionIncome : "-";
+                }} />
+                {hasSpouse && <R l="配偶者年金" hint="配偶者の基礎+厚生年金" fn={(yr, s) => {
+                  if (s === "本人") return "-";
+                  if (s === "配偶者") return yr.spousePensionIncome > 0 ? yr.spousePensionIncome : "-";
+                  return yr.spousePensionIncome > 0 ? yr.spousePensionIncome : "-";
+                }} />}
+                <R l="年金合計" bold hint="本人+配偶者の年金合計" fn={(yr, s) => {
+                  const total = yr.selfPensionIncome + yr.spousePensionIncome;
+                  if (!hasSpouse) return total || "-";
+                  if (s === "世帯") return total || "-";
+                  if (s === "本人") return yr.selfPensionIncome || "-";
+                  return yr.spousePensionIncome || "-";
+                }} />
+                <R l="年金課税" neg hint="公的年金等控除後の所得税+住民税" fn={(yr, s) => {
+                  if (s === "世帯" || !hasSpouse) return yr.pensionTax > 0 ? yr.pensionTax : "-";
+                  return "-";
+                }} />
+                <R l="年金手取" bold bg="bg-emerald-50" hint="年金合計−課税" fn={(yr, s) => {
+                  const net = yr.selfPensionIncome + yr.spousePensionIncome - yr.pensionTax;
+                  if (!hasSpouse || s === "世帯") return net > 0 ? net : "-";
+                  return "-";
+                }} />
+              </>)}
 
               <S>■ 支出</S>
               <R l="基本生活費" hint="月額KF×12×インフレ率^経過年" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.baseLivingExpense : "-"} />
