@@ -7,8 +7,10 @@ import { Slider, NumIn, Tog } from "./components/ui";
 import { Chart } from "./components/Chart";
 import { KeyframeEditor } from "./components/KeyframeEditor";
 import { TimelineChart } from "./components/TimelineChart";
-import { TaxDetailModal, TaxDetailPanel } from "./components/TaxDetailModal";
+import { TaxDetailModal, TaxDetailPanel, MiniLineChart } from "./components/TaxDetailModal";
+import type { GraphFn } from "./components/TaxDetailModal";
 import { TaxRateCharts } from "./components/TaxRateChart";
+import { IncomeExpenseCharts } from "./components/IncomeExpenseChart";
 
 const STORAGE_KEY = "asset-sim-state-v1";
 
@@ -161,6 +163,35 @@ function mkScenario(id: number): Scenario {
   };
 }
 
+const SCENARIO_COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
+
+function ScenarioBar({ scenarios, onUpdate, onAdd, onDup, onRemove }: {
+  scenarios: Scenario[]; onUpdate: (i: number, s: Scenario) => void;
+  onAdd: () => void; onDup: (i: number) => void; onRemove: (i: number) => void;
+}) {
+  const [sticky, setSticky] = useState(false);
+  return (
+    <div className={`${sticky ? "sticky top-0 z-30 bg-white/95 backdrop-blur-sm shadow-sm py-1 -mx-3 px-3" : ""}`}>
+      <div className="flex items-center gap-2 flex-wrap">
+        {scenarios.map((s, i) => (
+          <div key={s.id ?? i} className="flex items-center gap-1 rounded-lg border-2 px-2 py-1" style={{ borderColor: SCENARIO_COLORS[i] }}>
+            <input value={s.name} onChange={(e) => onUpdate(i, { ...s, name: e.target.value })}
+              className="w-24 border-b border-transparent bg-transparent text-xs font-bold outline-none hover:border-gray-300 focus:border-blue-500"
+              style={{ color: SCENARIO_COLORS[i] }} />
+            {scenarios.length < 4 && <button onClick={() => onDup(i)} className="text-[10px] text-gray-400 hover:text-blue-500">複製</button>}
+            {scenarios.length > 1 && <button onClick={() => onRemove(i)} className="text-[10px] text-gray-400 hover:text-red-500">×</button>}
+          </div>
+        ))}
+        {scenarios.length < 4 && <button onClick={onAdd} className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700">+ シナリオ</button>}
+        <button onClick={() => setSticky(v => !v)}
+          className={`rounded px-2 py-1 text-[10px] ${sticky ? "bg-amber-100 text-amber-700" : "text-gray-400 hover:bg-gray-100"}`}>
+          {sticky ? "📌 固定中" : "📌 固定"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PanelContainer({ children }: { children: (width: number) => React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(0);
@@ -189,6 +220,8 @@ export default function App() {
   const [modalAge, setModalAge] = useState<number | null>(null);
   const [panelAge, setPanelAge] = useState<number | null>(() => saved?.scenarios?.[0]?.currentAge ?? 30);
   const handleHoverAge = useCallback((age: number | null) => { if (age != null) setPanelAge(age); }, []);
+  const [hoveredGraph, setHoveredGraph] = useState<{ label: string; fn: GraphFn } | null>(null);
+  const [pinnedGraphs, setPinnedGraphs] = useState<{ label: string; fn: GraphFn }[]>([]);
   const [inflationRate, setInflationRate] = useState(saved?.inflationRate ?? 1.5);
   const [jsonModal, setJsonModal] = useState<"export" | "import" | null>(null);
   const [jsonText, setJsonText] = useState("");
@@ -293,19 +326,8 @@ export default function App() {
           </div>
         </details>
 
-        {/* Scenario headers */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {scenarios.map((s, i) => (
-            <div key={s.id ?? i} className="flex items-center gap-1 rounded-lg border-2 px-2 py-1" style={{ borderColor: ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"][i] }}>
-              <input value={s.name} onChange={(e) => updS(i, { ...s, name: e.target.value })}
-                className="w-24 border-b border-transparent bg-transparent text-xs font-bold outline-none hover:border-gray-300 focus:border-blue-500"
-                style={{ color: ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"][i] }} />
-              {scenarios.length < 4 && <button onClick={() => dupS(i)} className="text-[10px] text-gray-400 hover:text-blue-500">複製</button>}
-              {scenarios.length > 1 && <button onClick={() => rmS(i)} className="text-[10px] text-gray-400 hover:text-red-500">×</button>}
-            </div>
-          ))}
-          {scenarios.length < 4 && <button onClick={addS} className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700">+ シナリオ</button>}
-        </div>
+        {/* Scenario headers — sticky toggle */}
+        <ScenarioBar scenarios={scenarios} onUpdate={updS} onAdd={addS} onDup={dupS} onRemove={rmS} />
 
         {/* Keyframe editors */}
         <details className="rounded border bg-white p-3" open>
@@ -325,11 +347,48 @@ export default function App() {
         <details className="rounded-lg border bg-white" open>
           <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-gray-700">タイムライン</summary>
           <div className="px-3 pb-3">
-            <TimelineChart results={res} currentAge={currentAge} retirementAge={simEndAge} onYearClick={(age) => setModalAge(age)} onHoverAge={handleHoverAge} />
+            <TimelineChart results={res} currentAge={currentAge} retirementAge={simEndAge} onYearClick={(age) => setModalAge(age)} hoverAge={panelAge} onHoverAge={handleHoverAge} />
           </div>
         </details>
 
-        <TaxRateCharts results={res} />
+        {/* Age slider */}
+        {res.length > 0 && res[0].yearResults.length > 0 && (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="font-bold text-gray-600 whitespace-nowrap">{panelAge ?? currentAge}歳</span>
+            <input type="range" min={currentAge} max={simEndAge - 1} value={panelAge ?? currentAge}
+              onChange={e => setPanelAge(Number(e.target.value))}
+              className="flex-1 h-1.5 accent-blue-600" />
+            <span className="text-gray-400 whitespace-nowrap">{currentAge}〜{simEndAge - 1}歳</span>
+          </div>
+        )}
+
+        {/* Pinned graphs + hovered graph */}
+        {(pinnedGraphs.length > 0 || hoveredGraph) && res.length > 0 && (
+          <div className="rounded-lg border bg-white p-2 space-y-1">
+            {pinnedGraphs.length > 0 && (
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] text-gray-400">クリックで追加/削除</span>
+                <button onClick={() => setPinnedGraphs([])} className="text-[10px] text-gray-400 hover:text-red-500">全削除</button>
+              </div>
+            )}
+            {pinnedGraphs.map((g, i) => (
+              <div key={g.label} className="relative group">
+                <MiniLineChart results={res} label={g.label} graphFn={g.fn} selectedAge={panelAge ?? currentAge} hoverAge={panelAge} onHoverAge={handleHoverAge} />
+                <button onClick={() => setPinnedGraphs(prev => prev.filter((_, j) => j !== i))}
+                  className="absolute top-0 right-0 text-[10px] text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 px-1">×</button>
+              </div>
+            ))}
+            {hoveredGraph && !pinnedGraphs.some(p => p.label === hoveredGraph.label) && (
+              <div className="opacity-60">
+                <MiniLineChart results={res} label={hoveredGraph.label} graphFn={hoveredGraph.fn} selectedAge={panelAge ?? currentAge} hoverAge={panelAge} onHoverAge={handleHoverAge} />
+              </div>
+            )}
+          </div>
+        )}
+
+        <IncomeExpenseCharts results={res} hoverAge={panelAge} onHoverAge={handleHoverAge} />
+
+        <TaxRateCharts results={res} hoverAge={panelAge} onHoverAge={handleHoverAge} />
 
         <div className="text-xs text-gray-400 space-y-0.5">
           <p>※ 節税額はふるさと納税込みベースとの累進差分。社保は概算。</p>
@@ -340,7 +399,8 @@ export default function App() {
       {/* Side panel: hover detail on ultra-wide screens */}
       {panelAge != null && (
         <PanelContainer>
-          {(w) => <TaxDetailPanel age={panelAge} results={res} base={base} sirPct={sirPct} containerWidth={w} />}
+          {(w) => <TaxDetailPanel age={panelAge} results={res} base={base} sirPct={sirPct} containerWidth={w} onHoverGraph={setHoveredGraph}
+            onPinGraph={g => setPinnedGraphs(prev => prev.some(p => p.label === g.label) ? prev.filter(p => p.label !== g.label) : [...prev, g])} />}
         </PanelContainer>
       )}
 

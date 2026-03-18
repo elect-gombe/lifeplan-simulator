@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { fmtMan } from "../lib/format";
 import type { ScenarioResult, YearResult, MemberResult } from "../lib/types";
 
@@ -39,11 +39,12 @@ function maxTotalRate(m: MemberResult): number {
 type Member = "self" | "spouse";
 const getMember = (yr: YearResult, who: Member): MemberResult => who === "self" ? yr.self : yr.spouse;
 
-function SingleChart({ result, color, label, yMax, member }: {
+function SingleChart({ result, color, label, yMax, member, hoverAge, onHoverAge }: {
   result: ScenarioResult; color: string; label: string; yMax: number; member: Member;
+  hoverAge: number | null; onHoverAge: (age: number | null) => void;
 }) {
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const yrs = result.yearResults;
+  const hoverIdx = hoverAge != null ? yrs.findIndex(yr => yr.age === hoverAge) : null;
   const n = yrs.length;
   if (!n) return null;
 
@@ -79,7 +80,7 @@ function SingleChart({ result, color, label, yMax, member }: {
   return (
     <div>
       <div className="text-xs font-bold mb-0.5" style={{ color }}>{label}</div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full cursor-crosshair" onMouseLeave={() => setHoverIdx(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full cursor-crosshair" onMouseLeave={() => onHoverAge(null)}>
         {Array.from({ length: Math.floor(yMax / 10) + 1 }, (_, i) => i * 10).map(v => (
           <g key={v}>
             <line x1={pL} y1={yAt(v)} x2={pL + cW} y2={yAt(v)} stroke="#e2e8f0" strokeWidth={0.5} />
@@ -96,7 +97,7 @@ function SingleChart({ result, color, label, yMax, member }: {
         ))}
         {yrs.map((_, i) => (
           <rect key={i} x={xAt(i) - xStep / 2} y={pT} width={xStep} height={cH}
-            fill="transparent" onMouseEnter={() => setHoverIdx(i)} />
+            fill="transparent" onMouseEnter={() => onHoverAge(yrs[i].age)} />
         ))}
         {hoverIdx != null && (
           <line x1={xAt(hoverIdx)} y1={pT} x2={xAt(hoverIdx)} y2={pT + cH} stroke="#475569" strokeWidth={1} strokeDasharray="2,2" />
@@ -121,7 +122,7 @@ function SingleChart({ result, color, label, yMax, member }: {
   );
 }
 
-export function TaxRateCharts({ results }: { results: ScenarioResult[] }) {
+export function TaxRateCharts({ results, hoverAge, onHoverAge }: { results: ScenarioResult[]; hoverAge: number | null; onHoverAge: (age: number | null) => void }) {
   if (!results.length || !results[0].yearResults.length) return null;
 
   const hasSpouse = results.some(r => r.scenario.spouse?.enabled);
@@ -138,9 +139,9 @@ export function TaxRateCharts({ results }: { results: ScenarioResult[] }) {
       <div className="px-3 pb-3 space-y-3">
         {results.map((r, i) => (
           <div key={i} className={`${hasSpouse ? "grid grid-cols-2 gap-3" : ""}`}>
-            <SingleChart result={r} color={COLORS[i]} label={`${r.scenario.name} — 本人`} yMax={yMax} member="self" />
+            <SingleChart result={r} color={COLORS[i]} label={`${r.scenario.name} — 本人`} yMax={yMax} member="self" hoverAge={hoverAge} onHoverAge={onHoverAge} />
             {hasSpouse && (
-              <SingleChart result={r} color="#ec4899" label={`${r.scenario.name} — 配偶者`} yMax={yMax} member="spouse" />
+              <SingleChart result={r} color="#ec4899" label={`${r.scenario.name} — 配偶者`} yMax={yMax} member="spouse" hoverAge={hoverAge} onHoverAge={onHoverAge} />
             )}
           </div>
         ))}

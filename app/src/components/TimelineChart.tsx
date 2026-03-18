@@ -19,15 +19,54 @@ function usePersistedSet(key: string): [Set<number>, (fn: (prev: Set<number>) =>
   return [set, update];
 }
 
-export function TimelineChart({ results, currentAge, retirementAge, onYearClick, onHoverAge }: {
+// 共通イベントバー描画（SVG内で使用）
+export function EventBars({ events, allEvents, currentAge, endAge, xForAge, pT, barH, barGap, collapsedParents, onToggle }: {
+  events: (LifeEvent & { _virtual?: boolean })[]; allEvents: LifeEvent[];
+  currentAge: number; endAge: number;
+  xForAge: (age: number) => number; pT: number; barH: number; barGap: number;
+  collapsedParents?: Set<number>; onToggle?: (id: number) => void;
+}) {
+  return <>{events.map((evt, ei) => {
+    const et = EVENT_TYPES[evt.type] || EVENT_TYPES.custom;
+    const effectiveAge = resolveEventAge(evt, allEvents);
+    const startX = xForAge(Math.max(effectiveAge, currentAge));
+    const eEnd = evt.durationYears > 0 ? Math.min(effectiveAge + evt.durationYears, endAge) : endAge;
+    const endX = xForAge(eEnd);
+    const barY = pT + ei * barGap;
+    const hasRealChildren = allEvents.some(c => c.parentId === evt.id);
+    const hasStructured = !!(evt as any).propertyParams || !!(evt as any).carParams;
+    const isParent = !evt.parentId && (hasRealChildren || hasStructured);
+    const isChild = !!evt.parentId || !!(evt as any)._virtual;
+    const isCollapsed = collapsedParents?.has(evt.id);
+    const realChildCount = allEvents.filter(c => c.parentId === evt.id).length;
+    const childCount = hasStructured ? (evt.propertyParams ? 4 : 2) : realChildCount;
+    return (
+      <g key={`ev${evt.id}`}
+        style={{ cursor: isParent && onToggle ? "pointer" : undefined }}
+        onClick={isParent && onToggle && !(evt as any)._virtual ? (e) => { e.stopPropagation(); onToggle(evt.id); } : undefined}>
+        <rect x={isChild ? startX + 8 : startX} y={barY} width={Math.max((isChild ? endX - startX - 8 : endX - startX), 4)} height={barH}
+          rx={3} fill={et.color} opacity={isChild ? 0.15 : 0.25} />
+        <rect x={isChild ? startX + 8 : startX} y={barY} width={3} height={barH} rx={1} fill={et.color} opacity={0.8} />
+        <text x={(isChild ? startX + 14 : startX + 6)} y={barY + barH - 3} fontSize={8} fill={et.color} fontWeight="600">
+          {isParent && onToggle ? (isCollapsed ? "▶ " : "▼ ") : ""}{et.icon} {evt.label} {effectiveAge}歳{evt.durationYears > 0 ? `〜${effectiveAge + evt.durationYears}歳` : "〜"}
+          {evt.annualCostMan > 0 ? ` ${evt.annualCostMan}万/年` : ""}
+          {evt.oneTimeCostMan > 0 ? ` +${evt.oneTimeCostMan}万` : ""}
+          {isParent && isCollapsed ? ` (${childCount}件)` : ""}
+        </text>
+      </g>
+    );
+  })}</>;
+}
+
+export function TimelineChart({ results, currentAge, retirementAge, onYearClick, hoverAge, onHoverAge }: {
   results: ScenarioResult[];
   currentAge: number;
   retirementAge: number;
   onYearClick?: (age: number) => void;
+  hoverAge?: number | null;
   onHoverAge?: (age: number | null) => void;
 }) {
-  const [hoverAge, setHoverAge] = useState<number | null>(null);
-  const handleHover = (age: number | null) => { setHoverAge(age); onHoverAge?.(age); };
+  const handleHover = (age: number | null) => { onHoverAge?.(age); };
   const [collapsedParents, setCollapsedParents] = usePersistedSet("sim-tl-collapsed");
   const [selectedScenario, setSelectedScenario] = useState(0);
   if (!results.length || !results[0].yearResults.length) return null;
@@ -151,37 +190,9 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
       <svg viewBox={`0 0 ${cW} ${cH}`} className="block w-full cursor-crosshair" onMouseLeave={() => handleHover(null)}>
 
         {/* === Event bars === */}
-        {visibleEvents.map((evt, ei) => {
-          const et = EVENT_TYPES[evt.type] || EVENT_TYPES.custom;
-          const effectiveAge = resolveEventAge(evt, allEvents);
-          const startX = xForAge(Math.max(effectiveAge, currentAge));
-          const endAge = evt.durationYears > 0 ? Math.min(effectiveAge + evt.durationYears, retirementAge) : retirementAge;
-          const endX = xForAge(endAge);
-          const barY = pT + ei * 16;
-          const barH = 12;
-          const hasRealChildren = allEvents.some(c => c.parentId === evt.id);
-          const hasStructured = !!(evt as any).propertyParams || !!(evt as any).carParams;
-          const isParent = !evt.parentId && (hasRealChildren || hasStructured);
-          const isChild = !!evt.parentId || !!(evt as any)._virtual;
-          const isCollapsed = collapsedParents.has(evt.id);
-          const realChildCount = allEvents.filter(c => c.parentId === evt.id).length;
-          const childCount = hasStructured ? (evt.propertyParams ? 4 : 2) : realChildCount;
-          return (
-            <g key={`ev${evt.id}`}
-              style={{ cursor: isParent ? "pointer" : undefined }}
-              onClick={isParent && !(evt as any)._virtual ? (e) => { e.stopPropagation(); toggleParent(evt.id); } : undefined}>
-              <rect x={isChild ? startX + 8 : startX} y={barY} width={Math.max((isChild ? endX - startX - 8 : endX - startX), 4)} height={barH}
-                rx={3} fill={et.color} opacity={isChild ? 0.15 : 0.25} />
-              <rect x={isChild ? startX + 8 : startX} y={barY} width={3} height={barH} rx={1} fill={et.color} opacity={0.8} />
-              <text x={(isChild ? startX + 14 : startX + 6)} y={barY + 9} fontSize={8} fill={et.color} fontWeight="600">
-                {isParent ? (isCollapsed ? "▶ " : "▼ ") : ""}{et.icon} {evt.label} {effectiveAge}歳{evt.durationYears > 0 ? `〜${effectiveAge + evt.durationYears}歳` : "〜"}
-                {evt.annualCostMan > 0 ? ` ${evt.annualCostMan}万/年` : ""}
-                {evt.oneTimeCostMan > 0 ? ` +${evt.oneTimeCostMan}万` : ""}
-                {isParent && isCollapsed ? ` (${childCount}件)` : ""}
-              </text>
-            </g>
-          );
-        })}
+        <EventBars events={visibleEvents} allEvents={allEvents} currentAge={currentAge} endAge={retirementAge}
+          xForAge={xForAge} pT={pT} barH={12} barGap={16}
+          collapsedParents={collapsedParents} onToggle={toggleParent} />
 
         {/* === Chart Y grid === */}
         {yTicks.map((v, i) => (

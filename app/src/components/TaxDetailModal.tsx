@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { fmt, fmtMan } from "../lib/format";
 import type { ScenarioResult, BaseResult, YearResult, MemberResult } from "../lib/types";
+import { EVENT_TYPES } from "../lib/types";
 import { BRACKETS } from "../lib/tax";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
@@ -33,12 +34,12 @@ export function TaxDetailModal({ isOpen, onClose, age, results, base, sirPct }: 
 }
 
 /** Inline panel version (for side panel on wide screens) */
-export function TaxDetailPanel({ age, results, base, sirPct, containerWidth }: TaxDetailProps & { containerWidth?: number }) {
+export function TaxDetailPanel({ age, results, base, sirPct, containerWidth, onHoverGraph, onPinGraph }: TaxDetailProps & { containerWidth?: number; onHoverGraph?: (g: { label: string; fn: GraphFn } | null) => void; onPinGraph?: (g: { label: string; fn: GraphFn }) => void }) {
   if (age == null) return null;
   return (
     <div className="h-full overflow-auto p-1">
       <p className="text-xs font-bold text-gray-600 mb-1 sticky top-0 bg-white/90 backdrop-blur-sm py-1">{age}歳時点の詳細</p>
-      <TaxDetailContent age={age} results={results} base={base} sirPct={sirPct} compact containerWidth={containerWidth} />
+      <TaxDetailContent age={age} results={results} base={base} sirPct={sirPct} compact containerWidth={containerWidth} onHoverGraph={onHoverGraph} onPinGraph={onPinGraph} />
     </div>
   );
 }
@@ -89,25 +90,27 @@ function TaxBracketChart({ taxableIncome, color, label }: { taxableIncome: numbe
 }
 
 // ===== ミニラインチャート（行ホバーで表示） =====
-type GraphFn = (yr: YearResult) => number;
+export type GraphFn = (yr: YearResult) => number;
 
-function MiniLineChart({ results, label, graphFn, selectedAge }: {
+export function MiniLineChart({ results, label, graphFn, selectedAge, hoverAge, onHoverAge }: {
   results: ScenarioResult[]; label: string; graphFn: GraphFn; selectedAge: number;
+  hoverAge?: number | null; onHoverAge?: (age: number | null) => void;
 }) {
-  const W = 400, H = 80, pL = 45, pR = 8, pT = 14, pB = 16;
-  const cW = W - pL - pR, cH = H - pT - pB;
-
+  const [localHover, setLocalHover] = useState<number | null>(null);
   const allYrs = results[0]?.yearResults || [];
   const n = allYrs.length;
   if (!n) return null;
 
+  const activeHover = hoverAge ?? localHover;
+  const setHover = onHoverAge ?? setLocalHover;
+
+  const W = 500, H = 80, pL = 45, pR = 8, pT = 4, pB = 16;
+  const cW = W - pL - pR, cH = H - pT - pB;
+
   const series = results.map(r => r.yearResults.map(yr => graphFn(yr)));
   const allVals = series.flat();
-  const vMin = Math.min(...allVals, 0);
-  const vMax = Math.max(...allVals, 1);
-  // 0を原点に: 正の値のみなら0〜vMax、負もあるなら vMin〜vMax
-  const yBottom = Math.min(vMin, 0);
-  const yTop = Math.max(vMax, 0);
+  const yBottom = Math.min(...allVals, 0);
+  const yTop = Math.max(...allVals, 0, 1);
   const range = yTop - yBottom || 1;
 
   const xStep = cW / Math.max(n - 1, 1);
@@ -115,16 +118,16 @@ function MiniLineChart({ results, label, graphFn, selectedAge }: {
   const y = (v: number) => pT + (yTop - v) / range * cH;
 
   const selIdx = allYrs.findIndex(yr => yr.age === selectedAge);
+  const hIdx = activeHover != null ? allYrs.findIndex(yr => yr.age === activeHover) : -1;
 
-  // Y ticks: 0 + max + min(if negative)
   const yTicks = [yTop, 0];
   if (yBottom < 0) yTicks.push(yBottom);
-  if (yTop > 0 && yBottom >= 0) yTicks.push(Math.round(yTop / 2)); // midpoint
+  if (yTop > 0 && yBottom >= 0) yTicks.push(Math.round(yTop / 2));
 
   return (
-    <div className="rounded border bg-white p-1 mt-2">
+    <div className="rounded border bg-white p-1 mt-1">
       <div className="text-[10px] font-bold text-gray-600 px-1">{label}</div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full cursor-crosshair" onMouseLeave={() => setHover(null)}>
         {/* Y ticks */}
         {yTicks.map((v, i) => (
           <g key={i}>
@@ -139,24 +142,50 @@ function MiniLineChart({ results, label, graphFn, selectedAge }: {
         })}
         {/* Selected age */}
         {selIdx >= 0 && <>
-          <line x1={x(selIdx)} y1={pT} x2={x(selIdx)} y2={pT + cH} stroke="#f59e0b" strokeWidth={1.5} opacity={0.6} />
+          <line x1={x(selIdx)} y1={pT} x2={x(selIdx)} y2={pT + cH} stroke="#f59e0b" strokeWidth={1.5} opacity={0.4} />
           {series.map((vals, si) => (
             <circle key={si} cx={x(selIdx)} cy={y(vals[selIdx])} r={3} fill={COLORS[si]} stroke="white" strokeWidth={1} />
           ))}
         </>}
+        {/* Hover line + dots */}
+        {hIdx >= 0 && <>
+          <line x1={x(hIdx)} y1={pT} x2={x(hIdx)} y2={pT + cH} stroke="#475569" strokeWidth={1} strokeDasharray="2,2" />
+          {series.map((vals, si) => (
+            <circle key={si} cx={x(hIdx)} cy={y(vals[hIdx])} r={3.5} fill={COLORS[si]} stroke="white" strokeWidth={1.5} />
+          ))}
+        </>}
+        {/* Hover zones */}
+        {allYrs.map((yr, i) => (
+          <rect key={i} x={x(i) - xStep / 2} y={pT} width={xStep} height={cH}
+            fill="transparent" onMouseEnter={() => setHover(yr.age)} />
+        ))}
         {/* X axis labels */}
         {allYrs.filter(yr => yr.age % 10 === 0).map(yr => {
           const i = allYrs.indexOf(yr);
           return <text key={yr.age} x={x(i)} y={H - 2} textAnchor="middle" fontSize={7} fill="#94a3b8">{yr.age}</text>;
         })}
       </svg>
+      {/* Tooltip */}
+      {hIdx >= 0 && (
+        <div className="text-[10px] flex flex-wrap gap-x-3 px-1">
+          <span className="font-bold">{allYrs[hIdx].age}歳</span>
+          {series.map((vals, si) => (
+            <span key={si} style={{ color: COLORS[si] }}>{results[si].scenario.name} {fmtMan(vals[hIdx])}</span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth }: TaxDetailProps & { compact?: boolean; containerWidth?: number }) {
-  const [hovered, setHovered] = useState<{ label: string; fn: GraphFn; top: number } | null>(null);
+function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth, onHoverGraph, onPinGraph }: TaxDetailProps & { compact?: boolean; containerWidth?: number; onHoverGraph?: (g: { label: string; fn: GraphFn } | null) => void; onPinGraph?: (g: { label: string; fn: GraphFn }) => void }) {
+  const [hovered, setHovered] = useState<{ label: string; fn: GraphFn; top: number; cx: number; cy: number } | null>(null);
+  const setHoveredAndNotify = (h: { label: string; fn: GraphFn; top: number; cx: number; cy: number } | null) => {
+    setHovered(h);
+    onHoverGraph?.(h ? { label: h.label, fn: h.fn } : null);
+  };
   const tableRef = useRef<HTMLTableElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   if (age == null) return null;
 
   const yrs = results.map(r => r.yearResults.find(yr => yr.age === age));
@@ -225,14 +254,14 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth 
   }) => (
     <tr className={`${bg || ""} ${graphFn ? "cursor-pointer" : ""} ${hovered?.label === l ? "!bg-amber-100/60" : ""}`}
       onMouseEnter={graphFn ? (e) => {
-        const tr = e.currentTarget;
-        const tableEl = tableRef.current;
-        if (tableEl) {
-          const top = tr.offsetTop + tr.offsetHeight;
-          setHovered({ label: l, fn: graphFn, top });
-        }
+        const top = e.currentTarget.offsetTop + e.currentTarget.offsetHeight;
+        setHoveredAndNotify({ label: l, fn: graphFn, top, cx: e.clientX, cy: e.clientY });
       } : undefined}
-      onMouseLeave={graphFn ? () => setHovered(null) : undefined}>
+      onMouseMove={graphFn ? (e) => {
+        setHovered(prev => prev ? { ...prev, cx: e.clientX, cy: e.clientY } : prev);
+      } : undefined}
+      onMouseLeave={graphFn ? () => setHoveredAndNotify(null) : undefined}
+      onClick={graphFn && onPinGraph ? () => onPinGraph({ label: l, fn: graphFn }) : undefined}>
       <td className={`border-y border-gray-200 border-r border-r-gray-200 px-1 py-0.5 text-[11px] whitespace-nowrap ${isSub ? "pl-2 text-gray-500" : ""} ${bold ? "font-bold" : ""}`}>
         {graphFn && <span className="text-[9px] text-amber-400 mr-0.5">📈</span>}{l}
         {hint && !showHintCol && <span className="block text-[10px] font-normal text-blue-500/70 leading-tight whitespace-normal">{hint}</span>}
@@ -264,7 +293,7 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth 
 
 
   return (<>
-          <div className="relative">
+          <div ref={wrapRef} className="relative">
           <table ref={tableRef} className={`border-collapse text-[11px] leading-tight whitespace-nowrap ${compact ? "" : "w-full"}`}>
             <thead className="sticky top-0 z-10">
               <tr>
@@ -559,12 +588,22 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth 
             </div>
           )}
 
-          {/* 行ホバーでミニグラフ（行の真下にオーバーレイ） */}
-          {hovered && (
-            <div className="absolute left-0 right-0 z-20 pointer-events-none" style={{ top: hovered.top }}>
-              <MiniLineChart results={results} label={hovered.label} graphFn={hovered.fn} selectedAge={age} />
-            </div>
-          )}
+          {/* 行ホバーでミニグラフ（マウス位置にオーバーレイ） */}
+          {hovered && (() => {
+            const graphW = 800;
+            const vw = typeof window !== "undefined" ? window.innerWidth : 1920;
+            const vh = typeof window !== "undefined" ? window.innerHeight : 1080;
+            // カーソル右下に表示、画面外にはみ出す場合は左に
+            let left = hovered.cx + 16;
+            if (left + graphW > vw) left = hovered.cx - graphW - 16;
+            left = Math.max(0, left);
+            const top = Math.min(hovered.cy + 8, vh - 120);
+            return (
+              <div className="fixed z-50 pointer-events-none" style={{ top, left, width: graphW }}>
+                <MiniLineChart results={results} label={hovered.label} graphFn={hovered.fn} selectedAge={age} />
+              </div>
+            );
+          })()}
           </div>
   </>);
 }
