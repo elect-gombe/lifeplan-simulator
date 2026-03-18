@@ -770,17 +770,13 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
           eventOngoing += premium;
         }
         // Payout: on insured person's death
+        // 保険金はeventCostBreakdown/eventOngoingには入れない（収入セクションで表示）
+        // takeHomePayに直接加算
         if (insuredDead) {
           if (ip.insuranceType === "term_life" && insuredDeathYear) {
-            const payout = ip.lumpSumPayoutMan * 10000;
-            insurancePayoutTotal += payout;
-            eventCostBreakdown.push({ label: `保険金(${e.label})`, icon: "🛡️", color: "#16a34a", amount: -payout });
-            eventOngoing -= payout;
+            insurancePayoutTotal += ip.lumpSumPayoutMan * 10000;
           } else if (ip.insuranceType === "income_protection" && age < ip.payoutUntilAge) {
-            const payout = ip.monthlyPayoutMan * 12 * 10000;
-            insurancePayoutTotal += payout;
-            eventCostBreakdown.push({ label: `保険金(${e.label})`, icon: "🛡️", color: "#16a34a", amount: -payout });
-            eventOngoing -= payout;
+            insurancePayoutTotal += ip.monthlyPayoutMan * 12 * 10000;
           }
         }
       } else if (!e.parentId) {
@@ -950,7 +946,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     // 年金はeventCostBreakdownには入れない（専用セクションで表示）
     // takeHomePayに直接加算済み
 
-    const takeHomePay = gross - incomeTax - residentTax - socialInsurance - selfDC - aI + childAllowance + survivorIncome + spouseTakeHome + pensionNetIncome;
+    const takeHomePay = gross - incomeTax - residentTax - socialInsurance - selfDC - aI + childAllowance + survivorIncome + spouseTakeHome + pensionNetIncome + insurancePayoutTotal;
     const pensionLossAnnual = (ds * PENSION_RATE_PER_MILLE) / 1000 * 12;
     const spousePensionLossAnnual = spouse ? (spouseTaxResult.selfDCContribution / 12 * PENSION_RATE_PER_MILLE) / 1000 * 12 : 0;
     const annualNetCashFlow = takeHomePay - totalExpense;
