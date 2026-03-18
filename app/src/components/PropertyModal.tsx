@@ -64,7 +64,7 @@ export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementA
       age: purchaseAge,
       type: "property",
       label: `住宅(${pp.priceMan}万)`,
-      oneTimeCostMan: 0, annualCostMan: 0, durationYears: pp.loanYears,
+      oneTimeCostMan: 0, annualCostMan: 0, durationYears: 0, // 0=永続（管理費・固定資産税はローン完済後も継続）
       propertyParams: pp,
     };
     onSave(event);

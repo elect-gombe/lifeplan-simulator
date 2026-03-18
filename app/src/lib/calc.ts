@@ -156,10 +156,8 @@ function computePropertyYearCost(pp: PropertyParams, yearsSincePurchase: number,
     costs.push({ label: "頭金＋諸費用", icon: "🏠", color: "#3b82f6", amount: (pp.downPaymentMan + closingCost) * 10000 });
   }
 
-  if (loanAmount <= 0) return costs;
-
-  // Mortgage payment
-  if (yearsSincePurchase < pp.loanYears) {
+  // Mortgage payment (ローンがある場合のみ)
+  if (loanAmount > 0 && yearsSincePurchase < pp.loanYears) {
     let rate: number;
     let rateLabel: string;
     let isPhaseChange = false;
@@ -213,7 +211,7 @@ function computePropertyYearCost(pp: PropertyParams, yearsSincePurchase: number,
         isPhaseChange: true, phaseLabel: "住宅ローン控除 終了",
       });
     }
-  } else if (yearsSincePurchase === pp.loanYears) {
+  } else if (loanAmount > 0 && yearsSincePurchase === pp.loanYears) {
     costs.push({
       label: "ローン完済", icon: "🎉", color: "#16a34a", amount: 0,
       isPhaseChange: true, phaseLabel: "住宅ローン完済",
