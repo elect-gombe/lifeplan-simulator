@@ -29,8 +29,8 @@ export function SummaryCard({ s, idx, isBest, rr }: {
               </div>
             )}
             <div className="flex justify-between pl-2">
-              <span className="text-gray-600">再投資将来価値</span>
-              <span className="font-mono">{fmtMan(s.fvB)}</span>
+              <span className="text-gray-400">再投資(目安)</span>
+              <span className="font-mono text-gray-400">{fmtMan(s.fvB)}</span>
             </div>
             {ly && ly.nisaAsset > 0 ? (
               <>

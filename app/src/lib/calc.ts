@@ -1266,7 +1266,8 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     selfDCAsset = selfDCAsset * (1 + r) + aT;
     spouseDCAsset = spouseDCAsset * (1 + r) + spouseDCTotal;
     cumulativeDCAsset = selfDCAsset + spouseDCAsset;
-    cumulativeReinvest = cumulativeReinvest * (1 + r) + aBen;
+    // DC節税分は現金に加算（再投資は目安として複利計算のみ維持）
+    cumulativeReinvest = cumulativeReinvest * (1 + r) + aBen; // 目安用
 
     // ===== 死亡年: 相続計算（全資産統合） =====
     const processDeathInheritance = (label: string, dcAsset: number, nisaAssetForEstate: number, hasSpouseSurvivor: boolean) => {
@@ -1483,7 +1484,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       dcMonthly: dcTotal, companyDC, idecoMonthly, annualContribution: aT,
       annualBenefit: aBen, annualNetBenefit: aBen,
       cumulativeDCAsset, cumulativeReinvest, annualNetCashFlow,
-      cumulativeSavings: postCumulativeSavings, totalWealth: postCumulativeSavings + cumulativeDCAsset + cumulativeReinvest,
+      cumulativeSavings: postCumulativeSavings, totalWealth: postCumulativeSavings + cumulativeDCAsset,
       pensionLossAnnual, pensionTax, pensionReduction, survivorIncome,
       survivorBasicPension, survivorEmployeePension, survivorWidowSupplement, survivorIncomeProtection,
       loanBalance,
@@ -1557,7 +1558,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   const finalAssetNet = dcNetTotal;
   const ly = yearResults[yearResults.length - 1];
   const finalSavings = ly ? ly.cumulativeSavings : effectiveCurrentAssets * 10000;
-  const finalWealth = finalAssetNet + fvB + finalSavings;
+  const finalWealth = finalAssetNet + finalSavings; // fvB(再投資)は目安のため総資産に含めない
   const finalScore = fvB - lPL - exitDelta;
 
   return {

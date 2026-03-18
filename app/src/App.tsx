@@ -7,8 +7,6 @@ import { Slider, NumIn, Tog } from "./components/ui";
 import { Chart } from "./components/Chart";
 import { KeyframeEditor } from "./components/KeyframeEditor";
 import { TimelineChart } from "./components/TimelineChart";
-import { TotalAssetBar } from "./components/TotalAssetBar";
-import { SummaryCard } from "./components/SummaryCard";
 import { TaxDetailModal, TaxDetailPanel } from "./components/TaxDetailModal";
 import { TaxRateCharts } from "./components/TaxRateChart";
 
@@ -265,7 +263,6 @@ export default function App() {
     return { base, res };
   }, [scenarios, calcParams]);
 
-  const bestIdx = res.length > 0 ? res.reduce((bi, s, i, a) => s.finalWealth > a[bi].finalWealth ? i : bi, 0) : 0;
   const scenarioGridClass = scenarios.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2";
 
   return (
@@ -331,17 +328,6 @@ export default function App() {
             <TimelineChart results={res} currentAge={currentAge} retirementAge={simEndAge} onYearClick={(age) => setModalAge(age)} onHoverAge={handleHoverAge} />
           </div>
         </details>
-
-        <TotalAssetBar res={res} bestIdx={bestIdx} />
-
-        <div>
-          <p className="mb-2 text-sm font-bold">サマリー</p>
-          <div className={`grid gap-3 ${scenarioGridClass}`}>
-            {res.map((s, i) => (
-              <SummaryCard key={i} s={s} idx={i} isBest={i === bestIdx} rr={rr} />
-            ))}
-          </div>
-        </div>
 
         <TaxRateCharts results={res} />
 
