@@ -86,6 +86,73 @@ export function rTxC(amt: number, ded: number): number {
   return iTx(h) + Math.floor(h * 0.1);
 }
 
+// ===== 老齢年金の自動計算（令和6年度基準） =====
+// ref: 日本年金機構 https://www.nenkin.go.jp/
+
+/** 老齢基礎年金: 816,000円 × (保険料納付月数 / 480月)
+ *  国民年金は20歳〜60歳の40年(480月)が満額
+ *  会社員期間は自動的に納付扱い */
+const BASIC_PENSION_FULL = 816000; // 令和6年度満額
+const BASIC_PENSION_MONTHS = 480;  // 40年
+
+/** 老齢厚生年金(報酬比例部分):
+ *  平均標準報酬額 × 5.481/1000 × 厚生年金加入月数
+ *  標準報酬月額の上限: 65万/月 */
+const EMPLOYEE_PENSION_RATE = 5.481 / 1000;
+const STANDARD_SALARY_CAP_MONTHLY = 650000;
+
+/** 繰上げ/繰下げ係数
+ *  繰上げ(60-64歳): 1月あたり0.4%減額 → 60歳開始で24%減
+ *  繰下げ(66-75歳): 1月あたり0.7%増額 → 75歳開始で84%増 */
+function pensionAdjustmentFactor(startAge: number): number {
+  if (startAge <= 60) return 1 - 0.004 * (65 - 60) * 12; // max 24% reduction
+  if (startAge < 65) return 1 - 0.004 * (65 - startAge) * 12;
+  if (startAge === 65) return 1;
+  if (startAge <= 75) return 1 + 0.007 * (startAge - 65) * 12;
+  return 1 + 0.007 * (75 - 65) * 12; // max 84% increase
+}
+
+export interface PensionEstimate {
+  basicAnnual: number;        // 老齢基礎年金（年額）
+  employeeAnnual: number;     // 老齢厚生年金（年額）
+  adjustmentFactor: number;   // 繰上げ/繰下げ係数
+  totalBeforeAdj: number;     // 調整前合計
+  totalAnnual: number;        // 調整後合計（年額）
+  detail: string;
+}
+
+/** 老齢年金を自動計算
+ * @param avgAnnualSalary 平均年収（円）— 厚生年金加入期間中の平均
+ * @param employeeMonths 厚生年金加入月数（会社員期間×12）
+ * @param totalNationalMonths 国民年金保険料納付月数（会社員期間含む、最大480）
+ * @param startAge 受給開始年齢（60-75）
+ */
+export function estimatePublicPension(
+  avgAnnualSalary: number,
+  employeeMonths: number,
+  totalNationalMonths: number,
+  startAge: number,
+): PensionEstimate {
+  // 老齢基礎年金
+  const cappedNationalMonths = Math.min(totalNationalMonths, BASIC_PENSION_MONTHS);
+  const basicAnnual = Math.round(BASIC_PENSION_FULL * cappedNationalMonths / BASIC_PENSION_MONTHS);
+
+  // 老齢厚生年金（報酬比例部分）
+  const avgMonthly = Math.min(avgAnnualSalary / 12, STANDARD_SALARY_CAP_MONTHLY);
+  const employeeAnnual = Math.round(avgMonthly * EMPLOYEE_PENSION_RATE * employeeMonths);
+
+  const totalBeforeAdj = basicAnnual + employeeAnnual;
+  const factor = pensionAdjustmentFactor(startAge);
+  const totalAnnual = Math.round(totalBeforeAdj * factor);
+
+  const parts: string[] = [];
+  parts.push(`基礎${Math.round(basicAnnual / 10000)}万(${Math.round(cappedNationalMonths / 12)}年)`);
+  parts.push(`厚生${Math.round(employeeAnnual / 10000)}万(${Math.round(employeeMonths / 12)}年)`);
+  if (factor !== 1) parts.push(`${startAge}歳開始(×${(factor * 100).toFixed(1)}%)`);
+
+  return { basicAnnual, employeeAnnual, adjustmentFactor: factor, totalBeforeAdj, totalAnnual, detail: parts.join(" + ") };
+}
+
 // 公的年金等控除（令和2年以降、合計所得1000万以下）
 // ref: 国税庁 No.1600
 export function publicPensionDeduction(income: number, age: number): number {

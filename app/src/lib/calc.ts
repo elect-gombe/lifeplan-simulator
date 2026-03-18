@@ -1,6 +1,6 @@
 import type { Scenario, YearResult, ScenarioResult, BaseResult, TaxOpts, Keyframe, LifeEvent, EventYearCost, PropertyParams, CarParams, SpouseConfig, NISAConfig, BalancePolicy } from "./types";
 import { resolveKF, isEventActive, resolveEventAge } from "./types";
-import { txInc, mR, fLm, calcFurusatoDonation, iTx, rTx, apTxCr, rDed, rTxC, annuityTax } from "./tax";
+import { txInc, mR, fLm, calcFurusatoDonation, iTx, rTx, apTxCr, rDed, rTxC, annuityTax, estimatePublicPension } from "./tax";
 
 // ===== Pension-related constants (令和6年度基準) =====
 /** 遺族基礎年金 基本額（円/年） */
@@ -577,17 +577,36 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
 
     // Income (退職後は給与0、年金開始後は年金収入)
     const selfRetired = age >= selfRetirementAge;
-    const selfPensionStartAge = s.pensionStartAge ?? 65;
-    const selfPensionAnnual = (s.pensionAnnualMan ?? 0) * 10000;
-    const selfReceivingPension = !isSelfDead && age >= selfPensionStartAge;
-    const selfPensionIncome = selfReceivingPension ? selfPensionAnnual : 0;
-
-    // 配偶者年金
-    const spPensionStartAge = spouse?.pensionStartAge ?? 65;
-    const spPensionAnnual = (spouse?.pensionAnnualMan ?? 0) * 10000;
     const spouseAge = spouse ? spouse.currentAge + yearsFromStart : 0;
-    const spouseReceivingPension = spouse && !isSpouseDead && spouseAge >= spPensionStartAge;
-    const spousePensionIncome = spouseReceivingPension ? spPensionAnnual : 0;
+
+    // 本人の老齢年金（自動計算: 平均年収×加入年数から算出）
+    const selfPensionStartAge = s.pensionStartAge ?? 65;
+    const selfWorkStartAge = s.pensionWorkStartAge ?? 22;
+    let selfPensionIncome = 0;
+    let selfPensionDetail = "";
+    if (!isSelfDead && age >= selfPensionStartAge) {
+      const avgSalary = salaryYears > 0 ? cumulativeSalary / salaryYears : 0;
+      const employeeMonths = Math.max(Math.min(selfRetirementAge, 65) - selfWorkStartAge, 0) * 12;
+      const nationalMonths = Math.min((65 - 20) * 12, 480);
+      const pe = estimatePublicPension(avgSalary, employeeMonths, nationalMonths, selfPensionStartAge);
+      selfPensionIncome = pe.totalAnnual;
+      selfPensionDetail = pe.detail;
+    }
+
+    // 配偶者の老齢年金（自動計算）
+    const spPensionStartAge = spouse?.pensionStartAge ?? 65;
+    const spWorkStartAge = spouse?.pensionWorkStartAge ?? 22;
+    let spousePensionIncome = 0;
+    let spousePensionDetail = "";
+    if (spouse && !isSpouseDead && spouseAge >= spPensionStartAge) {
+      const avgSpSalary = spouseSalaryYears > 0 ? spouseCumulativeSalary / spouseSalaryYears : 0;
+      const spRetAge = spouse.retirementAge ?? 65;
+      const spEmployeeMonths = Math.max(Math.min(spRetAge, 65) - spWorkStartAge, 0) * 12;
+      const spNationalMonths = Math.min((65 - 20) * 12, 480);
+      const pe = estimatePublicPension(avgSpSalary, spEmployeeMonths, spNationalMonths, spPensionStartAge);
+      spousePensionIncome = pe.totalAnnual;
+      spousePensionDetail = pe.detail;
+    }
 
     let gross: number;
     let grownGrossMan: number;
@@ -949,11 +968,11 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
 
     if (selfPensionIncome > 0) {
       eventCostBreakdown.push({ label: "老齢年金(本人)", icon: "🏛️", color: "#16a34a", amount: -selfPensionIncome,
-        detail: `${selfPensionStartAge}歳〜 ${Math.round(selfPensionIncome/10000)}万/年` });
+        detail: selfPensionDetail || `${Math.round(selfPensionIncome/10000)}万/年` });
     }
     if (spousePensionIncome > 0) {
       eventCostBreakdown.push({ label: "老齢年金(配偶者)", icon: "🏛️", color: "#16a34a", amount: -spousePensionIncome,
-        detail: `${spPensionStartAge}歳〜 ${Math.round(spousePensionIncome/10000)}万/年` });
+        detail: spousePensionDetail || `${Math.round(spousePensionIncome/10000)}万/年` });
     }
     if (pensionTax > 0) {
       eventCostBreakdown.push({ label: "年金課税", icon: "🏛️", color: "#ef4444", amount: pensionTax,

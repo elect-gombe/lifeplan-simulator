@@ -54,7 +54,7 @@ export interface SpouseConfig {
   sirPct: number;               // 社保料率（%）
   hasFurusato: boolean;         // ふるさと納税
   pensionStartAge?: number;     // 年金受給開始年齢
-  pensionAnnualMan?: number;    // 配偶者の老齢年金年額（万円）
+  pensionWorkStartAge?: number; // 就職年齢
   dcReceiveMethod?: DCReceiveMethod;
 }
 
@@ -169,7 +169,7 @@ export interface Scenario {
   dependentDeductionHolder: "self" | "spouse";
   // 公的年金
   pensionStartAge: number;          // 受給開始年齢（デフォ65）
-  pensionAnnualMan: number;         // 本人の老齢年金年額（万円）
+  pensionWorkStartAge: number;      // 就職年齢（厚生年金加入開始、デフォ22）
   // DC/iDeCo受取方法
   dcReceiveMethod: DCReceiveMethod;
   // Spouse
