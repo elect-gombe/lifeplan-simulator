@@ -443,14 +443,16 @@ function calcDCReceiveTax(
     };
   }
 
-  // 併用
+  // 併用: 受取開始時（annuityStartAge）に一時金+年金を同時に開始
+  // 据置期間は全額DC内で運用継続、開始時点で一時金を受取+年金開始
+  const waitYears = Math.max(annuityStartAge - retirementAge, 0);
+  const grownAsset = dcAsset * Math.pow(1 + r, waitYears);
   const ratio = (method.combinedLumpSumRatio || 50) / 100;
-  const lumpSum = Math.round(dcAsset * ratio);
-  const annuityPortion = dcAsset - lumpSum;
+  const lumpSum = Math.round(grownAsset * ratio);
+  const annuityPortion = grownAsset - lumpSum;
   const lumpSumTax = rTxC(lumpSum + otherRetirement, retirementDeduction) - rTxC(otherRetirement, retirementDeduction);
 
-  const waitYears = Math.max(annuityStartAge - retirementAge, 0);
-  let remaining = annuityPortion * Math.pow(1 + r, waitYears);
+  let remaining = annuityPortion;
   let totalAnnuityTax = 0;
   let totalReceived = lumpSum - lumpSumTax;
   for (let y = 0; y < annuityYears; y++) {
@@ -463,7 +465,7 @@ function calcDCReceiveTax(
   return {
     method: `併用(一時金${Math.round(ratio * 100)}%)`,
     lumpSumAmount: lumpSum, lumpSumTax,
-    annuityAnnual: Math.round(annuityPortion * Math.pow(1 + r, waitYears) / annuityYears),
+    annuityAnnual: Math.round(annuityPortion / annuityYears),
     annuityTotalTax: totalAnnuityTax, annuityYears, annuityStartAge,
     totalTax: lumpSumTax + totalAnnuityTax, netAmount: totalReceived,
   };
@@ -1085,44 +1087,36 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     totalPensionLoss += pensionLossAnnual + spousePensionLossAnnual;
 
     // ===== 退職年（最終年）: DC資産を受取方法に応じて振替 =====
+    // 一時金: 退職時に即時受取（現金化）
+    // 年金/併用: 受取開始(annuityStartAge)まで据置→開始時に一時金+年金同時開始
+    //   退職年にはDC資産はそのまま残す（据置期間の運用をcalcDCReceiveTaxで計算済み）
+    //   ただし一時金のみの場合は退職年に即現金化
     if (age === retirementAge - 1) {
-      const rm = s.dcReceiveMethod || { type: "lump_sum" as const, annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
-      // 本人DC
-      if (selfDCAsset > 0) {
-        const dcRetDedSelf = rDed(s.years);
+      const processDCExit = (label: string, asset: number, rm: DCReceiveMethod, retDed: number, otherRet: number) => {
+        if (asset <= 0) return 0;
         if (rm.type === "lump_sum") {
-          const tax = rTxC(selfDCAsset + otherRet, dcRetDedSelf) - rTxC(otherRet, dcRetDedSelf);
-          eventCostBreakdown.push({ label: "DC一時金受取(本人)", icon: "💰", color: "#ea580c", amount: tax, detail: `DC${Math.round(selfDCAsset/10000)}万→退職所得控除${Math.round(dcRetDedSelf/10000)}万→税${Math.round(tax/10000)}万` });
-          cumulativeCash += selfDCAsset - tax;
-          selfDCAsset = 0;
-        } else if (rm.type === "combined") {
-          const ratio = (rm.combinedLumpSumRatio || 50) / 100;
-          const lumpPart = Math.round(selfDCAsset * ratio);
-          const tax = rTxC(lumpPart + otherRet, dcRetDedSelf) - rTxC(otherRet, dcRetDedSelf);
-          eventCostBreakdown.push({ label: "DC一時金受取(本人)", icon: "💰", color: "#ea580c", amount: tax, detail: `一時金${Math.round(lumpPart/10000)}万(${Math.round(ratio*100)}%)→税${Math.round(tax/10000)}万、残${Math.round((selfDCAsset-lumpPart)/10000)}万は年金受取` });
-          cumulativeCash += lumpPart - tax;
-          selfDCAsset -= lumpPart;
+          // 退職時に全額一時金受取
+          const tax = rTxC(asset + otherRet, retDed) - rTxC(otherRet, retDed);
+          eventCostBreakdown.push({ label: `DC一時金受取(${label})`, icon: "💰", color: "#ea580c", amount: tax,
+            detail: `DC${Math.round(asset/10000)}万→控除${Math.round(retDed/10000)}万→税${Math.round(tax/10000)}万` });
+          cumulativeCash += asset - tax;
+          return 0; // DC残高 → 0
         }
-        // 年金受取の場合: selfDCAssetはそのまま残る（退職後に分割受取される想定）
-      }
-      // 配偶者DC
+        // 年金 or 併用: DC資産は据置→受取開始時に処理（calcDCReceiveTaxで計算済み）
+        // タイムライン上はDC資産として残留表示
+        const startAge = rm.annuityStartAge || 65;
+        eventCostBreakdown.push({ label: `DC${rm.type === "annuity" ? "年金" : "併用"}受取予定(${label})`, icon: "📋", color: "#ea580c", amount: 0,
+          detail: `${startAge}歳から${rm.type === "combined" ? `一時金${rm.combinedLumpSumRatio||50}%+` : ""}年金${rm.annuityYears||20}年受取（据置中は運用継続）` });
+        return asset; // DC残高はそのまま
+      };
+
+      const rm = s.dcReceiveMethod || { type: "lump_sum" as const, annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
+      selfDCAsset = processDCExit("本人", selfDCAsset, rm, rDed(s.years), otherRet);
+
       if (spouseDCAsset > 0 && spouse) {
         const spRM = spouse.dcReceiveMethod || { type: "lump_sum" as const, annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
         const spContribYears = yearResults.filter(yr => yr.spouseDCContribution > 0).length + 1;
-        const spRetDed = rDed(Math.max(spContribYears, 1));
-        if (spRM.type === "lump_sum") {
-          const tax = rTxC(spouseDCAsset, spRetDed);
-          eventCostBreakdown.push({ label: "DC一時金受取(配偶者)", icon: "💰", color: "#ea580c", amount: tax, detail: `配偶者DC${Math.round(spouseDCAsset/10000)}万→税${Math.round(tax/10000)}万` });
-          cumulativeCash += spouseDCAsset - tax;
-          spouseDCAsset = 0;
-        } else if (spRM.type === "combined") {
-          const ratio = (spRM.combinedLumpSumRatio || 50) / 100;
-          const lumpPart = Math.round(spouseDCAsset * ratio);
-          const tax = rTxC(lumpPart, spRetDed);
-          cumulativeCash += lumpPart - tax;
-          spouseDCAsset -= lumpPart;
-          eventCostBreakdown.push({ label: "DC一時金受取(配偶者)", icon: "💰", color: "#ea580c", amount: tax });
-        }
+        spouseDCAsset = processDCExit("配偶者", spouseDCAsset, spRM, rDed(Math.max(spContribYears, 1)), 0);
       }
       cumulativeDCAsset = selfDCAsset + spouseDCAsset;
     }
