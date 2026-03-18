@@ -471,34 +471,54 @@ function NISASection({ s, onChange, isLinked, baseScenario }: { s: Scenario; onC
 
 // ===== Scenario Settings Section =====
 function ScenarioSettingsSection({ s, onChange }: { s: Scenario; onChange: (s: Scenario) => void }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
+  const sp = s.spouse;
   return (
     <div className="border-t pt-1">
       <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-xs font-bold text-gray-600">
         <span className="text-[10px] text-gray-400">{open ? "▼" : "▶"}</span>
         シナリオ設定
         <span className="font-normal text-gray-400 text-[10px]">
-          (資産{s.currentAssetsMan}万 DC通算{s.years}年 扶養→{(s.dependentDeductionHolder || "self") === "self" ? "本人" : "配偶者"})
+          (本人{s.currentAge}歳 退職{s.retirementAge}歳 〜{s.simEndAge}歳{sp?.enabled ? ` 配偶者${sp.currentAge}歳` : ""})
         </span>
       </button>
       {open && (
-        <div className="mt-1 flex flex-wrap gap-2 pl-1 text-xs">
-          <div className="flex items-center gap-1">
-            <span className="text-gray-500 text-[10px]">初期資産</span>
-            <input type="number" value={s.currentAssetsMan} step={100} onChange={e => onChange({ ...s, currentAssetsMan: Number(e.target.value) })} className="w-20 rounded border px-1 py-0.5 text-xs" />
-            <span className="text-[10px] text-gray-400">万</span>
+        <div className="mt-1 space-y-1.5 pl-1 text-xs">
+          <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-[10px]">本人年齢</span>
+              <input type="number" value={s.currentAge} min={18} max={70} step={1} onChange={e => onChange({ ...s, currentAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-[10px] text-gray-400">歳</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-[10px]">本人退職</span>
+              <input type="number" value={s.retirementAge} min={s.currentAge + 1} max={80} step={1} onChange={e => onChange({ ...s, retirementAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-[10px] text-gray-400">歳</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-[10px]">シミュ終了</span>
+              <input type="number" value={s.simEndAge} min={s.retirementAge} max={100} step={5} onChange={e => onChange({ ...s, simEndAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-[10px] text-gray-400">歳</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-[10px]">初期資産</span>
+              <input type="number" value={s.currentAssetsMan} step={100} onChange={e => onChange({ ...s, currentAssetsMan: Number(e.target.value) })} className="w-20 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-[10px] text-gray-400">万</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <span className="text-gray-500 text-[10px]">DC通算</span>
-            <input type="number" value={s.years} step={1} onChange={e => onChange({ ...s, years: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" />
-            <span className="text-[10px] text-gray-400">年</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-gray-500 text-[10px]">扶養控除</span>
-            <button onClick={() => onChange({ ...s, dependentDeductionHolder: "self" })}
-              className={`rounded px-1.5 py-0.5 text-[10px] ${(s.dependentDeductionHolder || "self") === "self" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>本人</button>
-            <button onClick={() => onChange({ ...s, dependentDeductionHolder: "spouse" })}
-              className={`rounded px-1.5 py-0.5 text-[10px] ${s.dependentDeductionHolder === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"}`}>配偶者</button>
+          <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-[10px]">DC通算</span>
+              <input type="number" value={s.years} step={1} onChange={e => onChange({ ...s, years: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-[10px] text-gray-400">年</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-[10px]">扶養控除</span>
+              <button onClick={() => onChange({ ...s, dependentDeductionHolder: "self" })}
+                className={`rounded px-1.5 py-0.5 text-[10px] ${(s.dependentDeductionHolder || "self") === "self" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>本人</button>
+              <button onClick={() => onChange({ ...s, dependentDeductionHolder: "spouse" })}
+                className={`rounded px-1.5 py-0.5 text-[10px] ${s.dependentDeductionHolder === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"}`}>配偶者</button>
+            </div>
           </div>
         </div>
       )}
@@ -527,7 +547,7 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
   };
 
   // Default spouse config
-  const defaultSp: SpouseConfig = { enabled: false, currentAge: 30, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true };
+  const defaultSp: SpouseConfig = { enabled: false, currentAge: 28, retirementAge: 65, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true };
   const sp = s.spouse || defaultSp;
   const baseS = isLinked && baseScenario ? baseScenario : null;
   const baseSp = baseS?.spouse;
@@ -597,13 +617,19 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
             baseData={baseSp ? { incomeKF: baseSp.incomeKF || [], expenseKF: baseSp.expenseKF || [], dcTotalKF: baseSp.dcTotalKF || [], companyDCKF: baseSp.companyDCKF || [], idecoKF: baseSp.idecoKF || [], salaryGrowthRate: baseSp.salaryGrowthRate, sirPct: baseSp.sirPct ?? 15.75, hasFurusato: baseSp.hasFurusato ?? true, dcReceiveMethod: baseSp.dcReceiveMethod } : undefined}
             trackLinked={spInherited ? spouseTrackLinked : undefined}
             onToggleTrack={spInherited ? spouseToggleTrack : undefined}
-            extraFields={
+            extraFields={<>
               <div className="flex items-center gap-1">
                 <span className="text-gray-500 text-[10px]">年齢</span>
-                <input type="number" value={effectiveSp.currentAge} step={1} onChange={e => onChange({ ...s, spouse: { ...sp, currentAge: Number(e.target.value) } })} className="w-14 rounded border px-1 py-0.5 text-xs" disabled={spInherited} />
+                <input type="number" value={effectiveSp.currentAge} step={1} onChange={e => onChange({ ...s, spouse: { ...sp, currentAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" disabled={spInherited} />
                 <span className="text-[10px] text-gray-400">歳</span>
               </div>
-            }
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 text-[10px]">退職</span>
+                <input type="number" value={effectiveSp.retirementAge ?? 65} step={1} min={effectiveSp.currentAge + 1} max={80}
+                  onChange={e => onChange({ ...s, spouse: { ...sp, retirementAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" disabled={spInherited} />
+                <span className="text-[10px] text-gray-400">歳</span>
+              </div>
+            </>}
           />
         )}
       </div>

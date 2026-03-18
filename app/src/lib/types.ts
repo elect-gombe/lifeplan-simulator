@@ -44,6 +44,7 @@ export interface InsuranceParams {
 export interface SpouseConfig {
   enabled: boolean;
   currentAge: number;
+  retirementAge: number;        // 配偶者の退職予定年齢
   incomeKF: Keyframe[];         // 年収KF（万円）
   expenseKF: Keyframe[];        // 配偶者分の生活費KF（万円/月）— 空の場合は世帯共通
   dcTotalKF: Keyframe[];        // DC合計KF（円/月）
@@ -145,6 +146,10 @@ export const DEFAULT_OVERRIDE_TRACKS: TrackKey[] = ["dcTotalKF", "companyDCKF", 
 export interface Scenario {
   id: number;
   name: string;
+  // 本人年齢
+  currentAge: number;         // 本人の現在年齢
+  retirementAge: number;      // 本人の退職予定年齢
+  simEndAge: number;          // シミュレーション終了年齢(デフォ85)
   currentAssetsMan: number;
   incomeKF: Keyframe[];
   expenseKF: Keyframe[];     // 基本生活費（万円/月）
@@ -154,10 +159,10 @@ export interface Scenario {
   salaryGrowthRate: number;
   // Events: own events + which base events to include
   events: LifeEvent[];
-  excludedBaseEventIds: number[];  // IDs of base events to exclude in this scenario
+  excludedBaseEventIds: number[];
   linkedToBase: boolean;
   overrideTracks: TrackKey[];
-  years: number;
+  years: number;             // DC通算期間
   hasFurusato: boolean;
   dependentDeductionHolder: "self" | "spouse"; // 扶養控除を適用する世帯主
   // DC/iDeCo受取方法

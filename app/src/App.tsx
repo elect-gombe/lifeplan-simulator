@@ -5,23 +5,15 @@ import { fmt } from "./lib/format";
 import { computeBase, computeScenario } from "./lib/calc";
 import { Slider, NumIn, Tog } from "./components/ui";
 import { Chart } from "./components/Chart";
-// ScenarioCard removed — settings unified into global panel
 import { KeyframeEditor } from "./components/KeyframeEditor";
 import { TimelineChart } from "./components/TimelineChart";
 import { TotalAssetBar } from "./components/TotalAssetBar";
 import { SummaryCard } from "./components/SummaryCard";
 import { TaxDetailModal } from "./components/TaxDetailModal";
 
-// ===== Save/Load =====
-// NOTE: 互換性について - 現時点ではスキーマバージョン管理は行わない。
-// 今後フィールドの追加・変更を行う場合は、ロード時にデフォルト値でfallbackする方式で対応する。
-// 破壊的変更が必要になった場合はバージョンフィールドを追加してマイグレーションを実装する。
 const STORAGE_KEY = "asset-sim-state-v1";
 
 interface SavedState {
-  currentAge: number;
-  retirementAge: number;
-  grossMan: number;
   rr: number;
   hasRet: boolean;
   retAmt: number;
@@ -38,13 +30,19 @@ function saveToStorage(state: SavedState) {
 function migrateScenario(s: any, oldFields?: any): Scenario {
   return {
     ...s,
+    currentAge: s.currentAge ?? oldFields?.currentAge ?? 30,
+    retirementAge: s.retirementAge ?? oldFields?.retirementAge ?? 65,
+    simEndAge: s.simEndAge ?? 85,
     currentAssetsMan: s.currentAssetsMan ?? oldFields?.currentAssetsMan ?? 500,
     salaryGrowthRate: s.salaryGrowthRate ?? oldFields?.salaryGrowthRate ?? 2,
     years: s.years ?? oldFields?.dcYears ?? 35,
     hasFurusato: s.hasFurusato ?? oldFields?.hasFurusato ?? true,
     dependentDeductionHolder: s.dependentDeductionHolder ?? "self",
     dcReceiveMethod: s.dcReceiveMethod ?? { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 },
-    spouse: s.spouse ?? { enabled: false, currentAge: 30, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true },
+    spouse: s.spouse ? {
+      retirementAge: 65,
+      ...s.spouse,
+    } : { enabled: false, currentAge: 30, retirementAge: 65, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true },
     nisa: s.nisa ?? { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 },
     balancePolicy: s.balancePolicy ?? { cashReserveMonths: 6, nisaPriority: true },
     overrideTracks: s.overrideTracks ?? [],
@@ -65,6 +63,8 @@ function loadFromStorage(): SavedState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     const oldFields = {
+      currentAge: parsed.currentAge,
+      retirementAge: parsed.retirementAge,
       currentAssetsMan: parsed.currentAssetsMan,
       salaryGrowthRate: parsed.salaryGrowthRate,
       dcYears: parsed.dcYears,
@@ -72,9 +72,6 @@ function loadFromStorage(): SavedState | null {
     };
     const scenarios = (parsed.scenarios || []).map((s: any) => migrateScenario(s, oldFields));
     return {
-      currentAge: parsed.currentAge ?? 30,
-      retirementAge: parsed.retirementAge ?? 65,
-      grossMan: parsed.grossMan ?? 700,
       rr: parsed.rr ?? 4,
       hasRet: parsed.hasRet ?? false,
       retAmt: parsed.retAmt ?? 0,
@@ -89,11 +86,9 @@ function loadFromStorage(): SavedState | null {
 function exportJSON(state: SavedState) {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
+  const a = document.createElement("a"); a.href = url;
   a.download = `asset-sim-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  a.click(); URL.revokeObjectURL(url);
 }
 
 function importJSON(file: File): Promise<SavedState | null> {
@@ -103,52 +98,35 @@ function importJSON(file: File): Promise<SavedState | null> {
       try {
         const parsed = JSON.parse(reader.result as string);
         if (!parsed || typeof parsed !== "object") { resolve(null); return; }
-        const oldFields = {
-          currentAssetsMan: parsed.currentAssetsMan,
-          salaryGrowthRate: parsed.salaryGrowthRate,
-          dcYears: parsed.dcYears,
-          hasFurusato: parsed.hasFurusato,
-        };
+        const oldFields = { currentAge: parsed.currentAge, retirementAge: parsed.retirementAge, currentAssetsMan: parsed.currentAssetsMan, salaryGrowthRate: parsed.salaryGrowthRate, dcYears: parsed.dcYears, hasFurusato: parsed.hasFurusato };
         const scenarios = (parsed.scenarios || []).map((s: any) => migrateScenario(s, oldFields));
-        resolve({
-          currentAge: parsed.currentAge ?? 30,
-          retirementAge: parsed.retirementAge ?? 65,
-          grossMan: parsed.grossMan ?? 700,
-          rr: parsed.rr ?? 4,
-          hasRet: parsed.hasRet ?? false,
-          retAmt: parsed.retAmt ?? 0,
-          PY: parsed.PY ?? 20,
-          sirPct: parsed.sirPct ?? 15.75,
-          inflationRate: parsed.inflationRate ?? 1.5,
-          scenarios,
-        });
+        resolve({ rr: parsed.rr ?? 4, hasRet: parsed.hasRet ?? false, retAmt: parsed.retAmt ?? 0, PY: parsed.PY ?? 20, sirPct: parsed.sirPct ?? 15.75, inflationRate: parsed.inflationRate ?? 1.5, scenarios });
       } catch { resolve(null); }
     };
     reader.readAsText(file);
   });
 }
 
-function mkScenario(id: number, currentAge: number, retirementAge: number, grossMan: number): Scenario {
+function mkScenario(id: number): Scenario {
   const isBase = id === 0;
   const isB = id === 1;
   return {
     id, name: `シナリオ${"ABCD"[id] || "X"}`,
+    currentAge: 30, retirementAge: 65, simEndAge: 85,
     currentAssetsMan: 500,
-    incomeKF: isBase ? [{ age: currentAge, value: grossMan }] : [],
-    expenseKF: isBase ? [{ age: currentAge, value: 15 }] : [],
-    dcTotalKF: [{ age: currentAge, value: isB ? 35000 : 55000 }],
-    companyDCKF: [{ age: currentAge, value: 1000 }],
-    idecoKF: [{ age: currentAge, value: isB ? 20000 : 0 }],
+    incomeKF: isBase ? [{ age: 30, value: 700 }] : [],
+    expenseKF: isBase ? [{ age: 30, value: 15 }] : [],
+    dcTotalKF: [{ age: 30, value: isB ? 35000 : 55000 }],
+    companyDCKF: [{ age: 30, value: 1000 }],
+    idecoKF: [{ age: 30, value: isB ? 20000 : 0 }],
     salaryGrowthRate: 2,
-    events: [],
-    excludedBaseEventIds: [],
+    events: [], excludedBaseEventIds: [],
     linkedToBase: !isBase,
     overrideTracks: isBase ? [] : [...DEFAULT_OVERRIDE_TRACKS],
-    years: retirementAge - currentAge,
-    hasFurusato: true,
+    years: 35, hasFurusato: true,
     dependentDeductionHolder: "self",
     dcReceiveMethod: { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 },
-    spouse: { enabled: false, currentAge: 30, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true },
+    spouse: { enabled: false, currentAge: 28, retirementAge: 65, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true },
     nisa: { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 },
     balancePolicy: { cashReserveMonths: 6, nisaPriority: true },
   };
@@ -156,33 +134,25 @@ function mkScenario(id: number, currentAge: number, retirementAge: number, gross
 
 export default function App() {
   const saved = useRef(loadFromStorage()).current;
-  const [currentAge, setCurrentAge] = useState(saved?.currentAge ?? 30);
-  const [retirementAge, setRetirementAge] = useState(saved?.retirementAge ?? 65);
-  const [grossMan, setGrossMan] = useState(saved?.grossMan ?? 700);
   const [rr, setRR] = useState(saved?.rr ?? 4);
   const [hasRet, setHasRet] = useState(saved?.hasRet ?? false);
   const [retAmt, setRetAmt] = useState(saved?.retAmt ?? 0);
   const [PY, setPY] = useState(saved?.PY ?? 20);
   const [sirPct, setSirPct] = useState(saved?.sirPct ?? 15.75);
-  const [scenarios, setScenarios] = useState<Scenario[]>(() => saved?.scenarios?.length ? saved.scenarios : [mkScenario(0, 30, 65, 700), mkScenario(1, 30, 65, 700)]);
+  const [scenarios, setScenarios] = useState<Scenario[]>(() => saved?.scenarios?.length ? saved.scenarios : [mkScenario(0), mkScenario(1)]);
   const [modalAge, setModalAge] = useState<number | null>(null);
   const [inflationRate, setInflationRate] = useState(saved?.inflationRate ?? 1.5);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Build state object for save/export
   const currentState: SavedState = useMemo(() => ({
-    currentAge, retirementAge, grossMan, rr, hasRet, retAmt, PY, sirPct, inflationRate, scenarios,
-  }), [currentAge, retirementAge, grossMan, rr, hasRet, retAmt, PY, sirPct, inflationRate, scenarios]);
+    rr, hasRet, retAmt, PY, sirPct, inflationRate, scenarios,
+  }), [rr, hasRet, retAmt, PY, sirPct, inflationRate, scenarios]);
 
-  // Auto-save to localStorage on every change
   useEffect(() => { saveToStorage(currentState); }, [currentState]);
 
   const handleImport = async (file: File) => {
     const data = await importJSON(file);
     if (!data) { alert("ファイルの読み込みに失敗しました"); return; }
-    setCurrentAge(data.currentAge ?? 30);
-    setRetirementAge(data.retirementAge ?? 65);
-    setGrossMan(data.grossMan ?? 700);
     setRR(data.rr ?? 4);
     setHasRet(data.hasRet ?? false);
     setRetAmt(data.retAmt ?? 0);
@@ -195,8 +165,8 @@ export default function App() {
   const updS = useCallback((i: number, s: Scenario) => setScenarios(p => p.map((x, j) => j === i ? s : x)), []);
   const rmS = useCallback((i: number) => setScenarios(p => p.filter((_, j) => j !== i)), []);
   const addS = useCallback(() => {
-    setScenarios(p => p.length >= 4 ? p : [...p, { ...mkScenario(p.length, currentAge, retirementAge, grossMan), id: Date.now() + p.length }]);
-  }, [currentAge, retirementAge, grossMan]);
+    setScenarios(p => p.length >= 4 ? p : [...p, { ...mkScenario(p.length), id: Date.now() + p.length }]);
+  }, []);
   const dupS = useCallback((i: number) => {
     setScenarios(p => {
       if (p.length >= 4) return p;
@@ -205,12 +175,15 @@ export default function App() {
     });
   }, []);
 
-  const totalYears = retirementAge - currentAge;
+  // シナリオAの年齢を参照用に取得
+  const s0 = scenarios[0];
+  const currentAge = s0?.currentAge ?? 30;
+  const simEndAge = s0?.simEndAge ?? 85;
   const taxOpts = { dependentsCount: 0, hasSpouseDeduction: false, lifeInsuranceDeduction: 0 };
 
   const calcParams = useMemo(() => ({
-    currentAge, retirementAge, defaultGrossMan: grossMan, rr, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed: 0, inflationRate,
-  }), [currentAge, retirementAge, grossMan, rr, sirPct, hasRet, retAmt, PY, inflationRate]);
+    currentAge, retirementAge: simEndAge, defaultGrossMan: 0, rr, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed: 0, inflationRate,
+  }), [currentAge, simEndAge, rr, sirPct, hasRet, retAmt, PY, inflationRate]);
 
   const { base, res } = useMemo(() => {
     const base = computeBase(calcParams);
@@ -228,22 +201,16 @@ export default function App() {
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold">資産シミュレーター</h1>
           <div className="flex items-center gap-2">
-            <button onClick={() => exportJSON(currentState)}
-              className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">JSONエクスポート</button>
-            <button onClick={() => fileInputRef.current?.click()}
-              className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">インポート</button>
-            <input ref={fileInputRef} type="file" accept=".json" className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = ""; }} />
+            <button onClick={() => exportJSON(currentState)} className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">JSONエクスポート</button>
+            <button onClick={() => fileInputRef.current?.click()} className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">インポート</button>
+            <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = ""; }} />
           </div>
         </div>
 
-        {/* Global settings */}
+        {/* Global settings — 全シナリオ共通 */}
         <details className="rounded bg-blue-50 p-3" open>
           <summary className="cursor-pointer text-xs font-bold text-blue-700 mb-2">共通設定</summary>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <NumIn label="現在の年齢" value={currentAge} onChange={setCurrentAge} step={1} unit="歳" min={18} max={70} />
-            <NumIn label="退職予定年齢" value={retirementAge} onChange={setRetirementAge} step={1} unit="歳" min={currentAge + 1} max={80} />
-            <NumIn label="初期年収" value={grossMan} onChange={setGrossMan} step={10} unit="万円" />
             <Slider label="運用利回り" value={rr} onChange={setRR} min={0} max={10} step={0.5} unit="%" />
             <Slider label="社保料率" value={sirPct} onChange={setSirPct} min={10} max={20} step={0.25} unit="%" help="厚年+健保+介護+雇用" />
             <Slider label="年金受給期間" value={PY} onChange={setPY} min={10} max={30} step={1} unit="年" />
@@ -252,9 +219,6 @@ export default function App() {
           <div className="mt-2 flex flex-wrap items-center gap-4">
             <Tog label="会社退職金あり" checked={hasRet} onChange={setHasRet} />
             {hasRet && <NumIn label="" value={retAmt} onChange={setRetAmt} step={1000000} unit="円" small />}
-          </div>
-          <div className="mt-2 text-xs text-gray-600">
-            積立期間: <b>{totalYears}年</b>（{currentAge}〜{retirementAge}歳）
           </div>
         </details>
 
@@ -279,7 +243,7 @@ export default function App() {
             {scenarios.map((s, i) => (
               <KeyframeEditor key={s.id ?? i} s={s} idx={i}
                 onChange={(ns) => updS(i, ns)}
-                currentAge={currentAge} retirementAge={retirementAge}
+                currentAge={s.currentAge} retirementAge={s.simEndAge}
                 baseScenario={i === 0 ? null : scenarios[0]}
                 sirPct={sirPct} />
             ))}
@@ -290,14 +254,12 @@ export default function App() {
         <details className="rounded-lg border bg-white" open>
           <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-gray-700">タイムライン</summary>
           <div className="px-3 pb-3">
-            <TimelineChart results={res} currentAge={currentAge} retirementAge={retirementAge} onYearClick={(age) => setModalAge(age)} />
+            <TimelineChart results={res} currentAge={currentAge} retirementAge={simEndAge} onYearClick={(age) => setModalAge(age)} />
           </div>
         </details>
 
-        {/* Asset comparison */}
         <TotalAssetBar res={res} bestIdx={bestIdx} />
 
-        {/* Summary cards */}
         <div>
           <p className="mb-2 text-sm font-bold">サマリー</p>
           <div className={`grid gap-3 ${scenarioGridClass}`}>
@@ -308,7 +270,7 @@ export default function App() {
         </div>
 
         <div className="text-xs text-gray-400 space-y-0.5">
-          <p>※ 節税額はふるさと納税込みベースとの累進差分。社保は概算。年収は万円単位、キーフレーム間はステップ補間+昇給率。</p>
+          <p>※ 節税額はふるさと納税込みベースとの累進差分。社保は概算。</p>
           <p>※ 貯蓄＝手取り−生活費−イベント支出。マイナスの年は貯蓄取り崩し。タイムラインの年をクリックで詳細表示。</p>
         </div>
       </div>

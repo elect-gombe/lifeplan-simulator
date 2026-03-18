@@ -469,7 +469,11 @@ function calcDCReceiveTax(
 }
 
 export function computeScenario(s: Scenario, base: BaseResult, params: CalcParams, baseScenario?: Scenario | null): ScenarioResult {
-  const { currentAge, retirementAge, defaultGrossMan, rr, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed } = params;
+  const { defaultGrossMan, rr, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed } = params;
+  // 年齢はシナリオから取得（retirementAgeはsimEndAgeの意味で使う）
+  const currentAge = s.currentAge ?? params.currentAge;
+  const selfRetirementAge = s.retirementAge ?? 65;
+  const retirementAge = s.simEndAge ?? params.retirementAge; // シミュレーション終了年齢
   const r = rr / 100;
   const sir = sirPct / 100;
   const otherRet = hasRet ? retAmt : 0;
@@ -571,10 +575,11 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     const isDeathYear = deathEvent && age === deathAge;
     const isSpouseDeathYear = spouseDeathEvent && age === resolveEventAge(spouseDeathEvent, events);
 
-    // Income
+    // Income (退職後は0)
+    const selfRetired = age >= selfRetirementAge;
     let gross: number;
     let grownGrossMan: number;
-    if (isSelfDead) {
+    if (isSelfDead || selfRetired) {
       gross = 0;
       grownGrossMan = 0;
     } else {
@@ -618,10 +623,11 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       incomeTaxSaving: 0, residentTaxSaving: 0, furusatoLimit: 0, furusatoDonation: 0, takeHome: 0 };
     let spouseTaxResult: SpouseTaxResult = zeroSpouse;
     if (spouse) {
-      if (isSpouseDead) {
+      const spouseAge = spouse.currentAge + yearsFromStart;
+      const spouseRetired = spouseAge >= (spouse.retirementAge ?? 65);
+      if (isSpouseDead || spouseRetired) {
         spouseTaxResult = zeroSpouse;
       } else {
-        const spouseAge = spouse.currentAge + yearsFromStart;
         const spGrossMan = resolveKF(spouse.incomeKF, spouseAge, 0);
         let spGrowthYears = 0;
         for (let ki = spouse.incomeKF.length - 1; ki >= 0; ki--) {
@@ -873,10 +879,11 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
 
     const totalExpense = baseLivingExpense + eventOngoing + eventOnetime;
 
-    // DC/iDeCo (stop after death)
-    const dcTotal = isDead ? 0 : resolveKF(dcTotalKF, age, 0);
-    const companyDC = isDead ? 0 : resolveKF(companyDCKF, age, 0);
-    const idecoMonthly = isDead ? 0 : resolveKF(idecoKF, age, 0);
+    // DC/iDeCo (stop after death or retirement)
+    const dcStopped = isDead || selfRetired;
+    const dcTotal = dcStopped ? 0 : resolveKF(dcTotalKF, age, 0);
+    const companyDC = dcStopped ? 0 : resolveKF(companyDCKF, age, 0);
+    const idecoMonthly = dcStopped ? 0 : resolveKF(idecoKF, age, 0);
     const ds = Math.max(dcTotal - companyDC, 0);
     const aDS = ds * 12;
     const aI = idecoMonthly * 12;
