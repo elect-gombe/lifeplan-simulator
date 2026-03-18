@@ -115,88 +115,54 @@ export function TaxDetailModal({ isOpen, onClose, age, results, base, sirPct }: 
               </tr>
             </thead>
             <tbody>
-              {/* 老齢年金（受給中の場合、一番上に表示） */}
-              {yrs.some(yr => yr && (yr.selfPensionIncome > 0 || yr.spousePensionIncome > 0)) && (<>
-                <S bg="bg-emerald-50">■ 老齢年金</S>
-                <R l="本人年金" hint="基礎+厚生。平均年収×加入年数から自動計算" fn={(yr, s) => {
-                  if (s === "配偶者") return "-";
-                  return yr.selfPensionIncome > 0 ? yr.selfPensionIncome : "-";
-                }} />
-                {hasSpouse && <R l="配偶者年金" hint="配偶者の基礎+厚生年金" fn={(yr, s) => {
-                  if (s === "本人") return "-";
-                  return yr.spousePensionIncome > 0 ? yr.spousePensionIncome : "-";
-                }} />}
-                <R l="年金課税" neg hint="公的年金等控除後の所得税+住民税" fn={(yr, s) => {
-                  if (s === "世帯" || !hasSpouse) return yr.pensionTax > 0 ? yr.pensionTax : "-";
-                  return "-";
-                }} />
-                <R l="年金手取" bold bg="bg-emerald-100" hint="年金合計−課税" fn={(yr, s) => {
-                  const net = yr.selfPensionIncome + yr.spousePensionIncome - yr.pensionTax;
-                  if (!hasSpouse || s === "世帯") return net > 0 ? net : "-";
-                  if (s === "本人") return yr.selfPensionIncome > 0 ? yr.selfPensionIncome : "-";
-                  return yr.spousePensionIncome > 0 ? yr.spousePensionIncome : "-";
-                }} />
-              </>)}
-
-              {/* 就労所得（収入がある場合のみ表示） */}
+              {/* ===== 収入 ===== */}
+              <S bg="bg-emerald-50">■ 収入</S>
+              {/* 就労所得 */}
               {yrs.some(yr => yr && (yr.gross > 0 || yr.spouseGross > 0)) && (<>
-                <S bg="bg-gray-100">■ 就労所得</S>
-                <R l="年収" bold hint="キーフレーム×昇給率で計算" fn={(yr, s) => s === "本人" ? `${Math.round(yr.grossMan)}万` : s === "配偶者" ? (yr.spouseGross > 0 ? `${Math.round(yr.spouseGross / 10000)}万` : "-") : `${Math.round(yr.grossMan + yr.spouseGross / 10000)}万`} />
-                <R l="所得税" hint="給与所得控除後の課税所得に累進税率(5-45%)" fn={(yr, s) => s === "本人" ? yr.incomeTax : s === "配偶者" ? yr.spouseIncomeTax : yr.incomeTax + yr.spouseIncomeTax} />
-                <R l="住民税" hint="課税所得×10%（均等割含む）" fn={(yr, s) => s === "本人" ? yr.residentTax : s === "配偶者" ? yr.spouseResidentTax : yr.residentTax + yr.spouseResidentTax} />
-                <R l="社会保険" hint={`年収×${sirPct}%（厚年+健保+介護+雇用）`} fn={(yr, s) => s === "本人" ? yr.socialInsurance : s === "配偶者" ? yr.spouseSocialInsurance : yr.socialInsurance + yr.spouseSocialInsurance} />
-                <R l="税・社保計" bold hint="所得税+住民税+社会保険" fn={(yr, s) => {
-                  const a = yr.incomeTax + yr.residentTax + yr.socialInsurance;
-                  const b = yr.spouseIncomeTax + yr.spouseResidentTax + yr.spouseSocialInsurance;
-                  return s === "本人" ? a : s === "配偶者" ? b : a + b;
+                <R l="給与収入" bold hint="キーフレーム×昇給率" fn={(yr, s) => s === "本人" ? `${Math.round(yr.grossMan)}万` : s === "配偶者" ? (yr.spouseGross > 0 ? `${Math.round(yr.spouseGross / 10000)}万` : "-") : `${Math.round(yr.grossMan + yr.spouseGross / 10000)}万`} />
+                <R l="  所得税" sub hint="累進税率(5-45%)" fn={(yr, s) => s === "本人" ? yr.incomeTax : s === "配偶者" ? yr.spouseIncomeTax : yr.incomeTax + yr.spouseIncomeTax} />
+                <R l="  住民税" sub hint="課税所得×10%" fn={(yr, s) => s === "本人" ? yr.residentTax : s === "配偶者" ? yr.spouseResidentTax : yr.residentTax + yr.spouseResidentTax} />
+                <R l="  社会保険" sub hint={`年収×${sirPct}%`} fn={(yr, s) => s === "本人" ? yr.socialInsurance : s === "配偶者" ? yr.spouseSocialInsurance : yr.socialInsurance + yr.spouseSocialInsurance} />
+              </>)}
+              {/* 老齢年金 */}
+              {yrs.some(yr => yr && (yr.selfPensionIncome > 0 || yr.spousePensionIncome > 0)) && (<>
+                <R l="老齢年金" bold hint="基礎+厚生。平均年収×加入年数から自動計算" fn={(yr, s) => {
+                  if (!hasSpouse) return (yr.selfPensionIncome + yr.spousePensionIncome) || "-";
+                  if (s === "本人") return yr.selfPensionIncome || "-";
+                  if (s === "配偶者") return yr.spousePensionIncome || "-";
+                  return (yr.selfPensionIncome + yr.spousePensionIncome) || "-";
                 }} />
+                <R l="  年金課税" sub neg hint="公的年金等控除後の所得税+住民税" fn={(yr, s) => (s === "世帯" || !hasSpouse) ? (yr.pensionTax > 0 ? yr.pensionTax : "-") : "-"} />
               </>)}
-
-              {/* DC/iDeCo（拠出がある場合のみ表示） */}
-              {yrs.some(yr => yr && (yr.annualContribution > 0 || yr.spouseDCContribution > 0)) && (<>
-                <S bg="bg-gray-100">■ DC/iDeCo</S>
-                <R l="DC月額" hint="企業型DC+マッチング拠出の合計月額" fn={(yr, s) => s === "本人" ? yr.dcMonthly : "-"} />
-                <R l="会社DC" hint="企業が拠出する分（従業員負担なし）" fn={(yr, s) => s === "本人" ? yr.companyDC : "-"} />
-                <R l="iDeCo月額" hint="個人型DC。小規模企業共済等掛金控除" fn={(yr, s) => s === "本人" ? yr.idecoMonthly : "-"} />
-                <R l="年間拠出" bold hint="(DC+iDeCo)×12ヶ月" fn={(yr, s) => s === "本人" ? yr.annualContribution : s === "配偶者" ? yr.spouseDCContribution : yr.annualContribution + yr.spouseDCContribution} />
-                {hasSpouse && <R l="  配偶者iDeCo" sub hint="配偶者の個人型iDeCo年額" fn={(yr, s) => s === "配偶者" ? yr.spouseIDeCoContribution : "-"} />}
-              </>)}
-
-              {/* 節税メリット（メリットがある場合のみ） */}
-              {yrs.some(yr => yr && yr.annualBenefit > 0) && (<>
-                <S bg="bg-green-50">■ 節税メリット</S>
-                <R l="所得税節税" hint="DC/iDeCo控除前後の所得税差額" fn={(yr, s) => s === "本人" ? yr.incomeTaxSaving : s === "配偶者" ? yr.spouseIncomeTaxSaving : yr.incomeTaxSaving + yr.spouseIncomeTaxSaving} />
-                <R l="住民税節税" hint="DC/iDeCo控除前後の住民税差額" fn={(yr, s) => s === "本人" ? yr.residentTaxSaving : s === "配偶者" ? yr.spouseResidentTaxSaving : yr.residentTaxSaving + yr.spouseResidentTaxSaving} />
-                <R l="社保節約" hint="自己負担DC分の社保料削減" fn={(yr, s) => s === "本人" ? yr.socialInsuranceSaving : "-"} />
-                <R l="計" bold bg="bg-green-100" hint="所得税+住民税+社保の節税合計" fn={(yr, s) => {
+              {/* 保険金 */}
+              {yrs.some(yr => yr && yr.insurancePayoutTotal > 0) &&
+                <R l="保険金受取" hint="死亡時に一時金or月額給付" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.insurancePayoutTotal : "-"} />}
+              {/* 児童手当 */}
+              {yrs.some(yr => yr && yr.childAllowance > 0) &&
+                <R l="児童手当" hint="0-2歳:1.5万/月 3-18歳:1万/月 第3子以降:3万/月" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.childAllowance : "-"} />}
+              {/* DC節税 */}
+              {yrs.some(yr => yr && yr.annualBenefit > 0) &&
+                <R l="DC節税メリット" hint="所得税+住民税+社保の節税合計" fn={(yr, s) => {
                   const sp = yr.spouseIncomeTaxSaving + yr.spouseResidentTaxSaving;
                   return s === "本人" ? yr.annualBenefit : s === "配偶者" ? sp : yr.annualBenefit + sp;
-                }} />
-              </>)}
-
-              {/* ふるさと納税（利用時のみ） */}
-              {results.some(r => r.hasFuru) && yrs.some(yr => yr && yr.furusatoDonation > 0) && (<>
-                <S bg="bg-amber-50">■ ふるさと納税</S>
-                <R l="上限" hint="住民税所得割×20%÷(90%-税率×1.021)+2000" fn={(yr, s) => s === "本人" ? yr.furusatoLimit : s === "配偶者" ? yr.spouseFurusatoLimit : yr.furusatoLimit + yr.spouseFurusatoLimit} />
-                <R l="寄付額" hint="上限を1000円単位で切り捨て" fn={(yr, s) => s === "本人" ? yr.furusatoDonation : s === "配偶者" ? yr.spouseFurusatoDonation : yr.furusatoDonation + yr.spouseFurusatoDonation} />
-              </>)}
-
-              <S bg="bg-yellow-50">■ 手取り合計</S>
-              <R l="手取り" bold bg="bg-yellow-50" hint="給与+年金−税・社保−DC+児童手当+遺族年金" fn={(yr, s) => {
+                }} />}
+              {/* ふるさと納税 */}
+              {results.some(r => r.hasFuru) && yrs.some(yr => yr && yr.furusatoDonation > 0) &&
+                <R l="ふるさと納税" hint="住民税所得割×20%÷(90%-税率×1.021)+2000" fn={(yr, s) => s === "本人" ? yr.furusatoDonation : s === "配偶者" ? yr.spouseFurusatoDonation : yr.furusatoDonation + yr.spouseFurusatoDonation} />}
+              {/* 手取り合計 */}
+              <R l="手取り合計" bold bg="bg-emerald-100" hint="給与+年金−税・社保−DC+手当+保険" fn={(yr, s) => {
                 return s === "本人" ? Math.round(yr.takeHomePay - yr.spouseTakeHome) : s === "配偶者" ? Math.round(yr.spouseTakeHome) : Math.round(yr.takeHomePay);
               }} />
 
-              {/* 扶養・手当（該当ある場合のみ） */}
-              {yrs.some(yr => yr && (yr.childCount > 0 || yr.pensionLossAnnual > 0)) && (<>
-                <S bg="bg-purple-50">■ 扶養・手当</S>
-                {yrs.some(yr => yr && yr.childCount > 0) && <>
-                  <R l="扶養人数" hint="子イベントで18歳以下の子の数" fn={(yr, s) => s === "世帯" || !hasSpouse ? `${yr.childCount}人` : "-"} />
-                  <R l="扶養控除" hint="16-18歳:38万 19-22歳:63万(特定扶養)" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.dependentDeduction : "-"} />
-                  <R l="児童手当" hint="0-2歳:1.5万/月 3-18歳:1万/月 第3子以降:3万/月" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.childAllowance : "-"} />
-                </>}
-                {yrs.some(yr => yr && yr.pensionLossAnnual > 0) &&
-                  <R l="年金減少" neg hint="DC自己負担月額×5.481/1000×12(年額)" fn={(yr, s) => s === "本人" ? yr.pensionLossAnnual : "-"} />}
-              </>)}
+              {/* ===== 支出 ===== */}
+              <S>■ 支出</S>
+              <R l="基本生活費" hint="月額KF×12×インフレ率^経過年" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.baseLivingExpense : "-"} />
+              {/* 保険料 */}
+              {hasInsurance && yrs.some(yr => yr && yr.insurancePremiumTotal > 0) &&
+                <R l="保険料" neg hint="月額×12。被保険者生存中のみ" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.insurancePremiumTotal : "-"} />}
+              {/* DC拠出 */}
+              {yrs.some(yr => yr && (yr.annualContribution > 0 || yr.spouseDCContribution > 0)) &&
+                <R l="DC/iDeCo拠出" hint="(DC+iDeCo)×12" fn={(yr, s) => s === "本人" ? yr.annualContribution : s === "配偶者" ? yr.spouseDCContribution : yr.annualContribution + yr.spouseDCContribution} />}
 
               <S>■ 支出</S>
               <R l="基本生活費" hint="月額KF×12×インフレ率^経過年" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.baseLivingExpense : "-"} />
@@ -221,12 +187,6 @@ export function TaxDetailModal({ isOpen, onClose, age, results, base, sirPct }: 
                     return item ? item.amount : 0;
                   }} />;
                 })}
-              </>)}
-
-              {hasInsurance && (<>
-                <S bg="bg-indigo-50">■ 保険</S>
-                <R l="保険料" neg hint="月額×12。被保険者生存中のみ" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.insurancePremiumTotal : "-"} />
-                <R l="保険金" hint="死亡時に一時金or月額給付" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.insurancePayoutTotal : "-"} />
               </>)}
 
               <S bg="bg-teal-100">■ 累積資産</S>
