@@ -1037,6 +1037,15 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     }
 
     // ===== NISA（簿価ベース枠管理）/ 特定口座 / 現金 の自動配分・取り崩し =====
+    // 死亡者のNISAは口座閉鎖済み → 残があれば強制現金化
+    if (isSelfDead && selfNISAAsset > 0) {
+      cumulativeCash += selfNISAAsset;
+      selfNISACostBasis = 0; selfNISAAsset = 0;
+    }
+    if (isSpouseDead && spouseNISAAsset > 0) {
+      cumulativeCash += spouseNISAAsset;
+      spouseNISACostBasis = 0; spouseNISAAsset = 0;
+    }
     // 運用益を反映（元本は変わらない、時価のみ増加）
     selfNISAAsset = selfNISAAsset * (1 + nisaReturnRate);
     spouseNISAAsset = spouseNISAAsset * (1 + nisaReturnRate);
@@ -1100,9 +1109,9 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     if (nisa && nisaPriority) {
       if (cumulativeCash > cashReserveTarget) {
         const excess = cumulativeCash - cashReserveTarget;
-        // 生涯枠チェック: 簿価ベース（新NISA: 売却で枠復活するため、現在の簿価で判定）
-        const selfRoom = Math.max(Math.min(selfNISAAnnualLimit, selfNISALifetimeLimit - selfNISACostBasis), 0);
-        const spouseRoom = Math.max(Math.min(spouseNISAAnnualLimit, spouseNISALifetimeLimit - spouseNISACostBasis), 0);
+        // 死亡者のNISA枠は使えない（口座閉鎖済み）
+        const selfRoom = isSelfDead ? 0 : Math.max(Math.min(selfNISAAnnualLimit, selfNISALifetimeLimit - selfNISACostBasis), 0);
+        const spouseRoom = isSpouseDead ? 0 : Math.max(Math.min(spouseNISAAnnualLimit, spouseNISALifetimeLimit - spouseNISACostBasis), 0);
         const selfContrib = Math.min(excess, selfRoom);
         const spouseContrib = Math.min(excess - selfContrib, spouseRoom);
         nisaContribution = selfContrib + spouseContrib;
