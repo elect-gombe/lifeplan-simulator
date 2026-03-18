@@ -23,9 +23,9 @@ export function SummaryCard({ s, idx, isBest, rr }: {
               <span className="text-gray-600">DC資産（課税後）</span>
               <span className="font-mono">{fmtMan(s.finalAssetNet)}</span>
             </div>
-            {ly && ly.spouseDCAsset > 0 && (
+            {ly && ly.spouse.dcAsset > 0 && (
               <div className="flex justify-between pl-4 text-[10px]">
-                <span className="text-gray-400">本人{fmtMan(ly.selfDCAsset)} / 配偶者{fmtMan(ly.spouseDCAsset)}</span>
+                <span className="text-gray-400">本人{fmtMan(ly.self.dcAsset)} / 配偶者{fmtMan(ly.spouse.dcAsset)}</span>
               </div>
             )}
             <div className="flex justify-between pl-2">

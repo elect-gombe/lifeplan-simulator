@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { LifeEvent, InsuranceParams, EventTarget } from "../lib/types";
+import { Modal } from "./ui";
 
 export function InsuranceModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent }: {
   isOpen: boolean;
@@ -30,7 +31,6 @@ export function InsuranceModal({ isOpen, onClose, onSave, currentAge, retirement
     }
   }, [existingEvent]);
 
-  if (!isOpen) return null;
   const u = (patch: Partial<InsuranceParams>) => setIP(prev => ({ ...prev, ...patch }));
 
   const coverageYears = Math.max(ip.coverageEndAge - startAge, 0);
@@ -62,12 +62,8 @@ export function InsuranceModal({ isOpen, onClose, onSave, currentAge, retirement
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-8" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-lg bg-white shadow-xl" onClick={e => e.stopPropagation()}>
-        <div className="border-b px-4 py-3">
-          <p className="text-sm font-bold">🛡️ 保険{existingEvent ? "（編集）" : ""}</p>
-        </div>
-        <div className="p-4 space-y-4 text-xs">
+    <Modal isOpen={isOpen} onClose={onClose} title={`🛡️ 保険${existingEvent ? "（編集）" : ""}`}
+      btnClass="bg-indigo-600 hover:bg-indigo-700" onSave={handleSave} saveLabel={existingEvent ? "更新" : "追加"}>
 
           <div className="rounded bg-gray-50 p-2 text-gray-600">
             対象者の死亡イベントと連動。死亡時に保険料停止→保険金支払い。
@@ -169,12 +165,6 @@ export function InsuranceModal({ isOpen, onClose, onSave, currentAge, retirement
             </div>
           </div>
 
-        </div>
-        <div className="border-t px-4 py-3 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="rounded px-4 py-1.5 text-xs text-gray-500 hover:bg-gray-100">キャンセル</button>
-          <button onClick={handleSave} className="rounded bg-indigo-600 px-4 py-1.5 text-xs text-white font-bold hover:bg-indigo-700">{existingEvent ? "更新" : "追加"}</button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { Scenario } from "./lib/types";
-import { DEFAULT_OVERRIDE_TRACKS } from "./lib/types";
+import { DEFAULT_OVERRIDE_TRACKS, DEFAULT_DC_RECEIVE_METHOD } from "./lib/types";
 import { fmt } from "./lib/format";
 import { computeBase, computeScenario } from "./lib/calc";
 import { Slider, NumIn, Tog } from "./components/ui";
@@ -10,6 +10,7 @@ import { TimelineChart } from "./components/TimelineChart";
 import { TotalAssetBar } from "./components/TotalAssetBar";
 import { SummaryCard } from "./components/SummaryCard";
 import { TaxDetailModal, TaxDetailPanel } from "./components/TaxDetailModal";
+import { TaxRateCharts } from "./components/TaxRateChart";
 
 const STORAGE_KEY = "asset-sim-state-v1";
 
@@ -40,7 +41,7 @@ function migrateScenario(s: any, oldFields?: any): Scenario {
     dependentDeductionHolder: s.dependentDeductionHolder ?? "self",
     pensionStartAge: s.pensionStartAge ?? 65,
     pensionWorkStartAge: s.pensionWorkStartAge ?? 22,
-    dcReceiveMethod: s.dcReceiveMethod ?? { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 },
+    dcReceiveMethod: s.dcReceiveMethod ?? DEFAULT_DC_RECEIVE_METHOD,
     spouse: s.spouse ? {
       retirementAge: 65,
       ...s.spouse,
@@ -155,11 +156,28 @@ function mkScenario(id: number): Scenario {
     years: 35, hasFurusato: true,
     dependentDeductionHolder: "self",
     pensionStartAge: 65, pensionWorkStartAge: 22,
-    dcReceiveMethod: { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 },
+    dcReceiveMethod: DEFAULT_DC_RECEIVE_METHOD,
     spouse: { enabled: false, currentAge: 28, retirementAge: 65, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true, pensionStartAge: 65, pensionWorkStartAge: 22 },
     nisa: { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 },
     balancePolicy: { cashReserveMonths: 6, nisaPriority: true },
   };
+}
+
+function PanelContainer({ children }: { children: (width: number) => React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setW(e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className="hidden 2xl:block min-w-[1000px] flex-1 shrink-0 ml-3 sticky top-3 max-h-[calc(100vh-24px)] rounded-lg border bg-white shadow-lg overflow-auto">
+      {children(w)}
+    </div>
+  );
 }
 
 export default function App() {
@@ -325,6 +343,8 @@ export default function App() {
           </div>
         </div>
 
+        <TaxRateCharts results={res} />
+
         <div className="text-xs text-gray-400 space-y-0.5">
           <p>※ 節税額はふるさと納税込みベースとの累進差分。社保は概算。</p>
           <p>※ 貯蓄＝手取り−生活費−イベント支出。マイナスの年は貯蓄取り崩し。タイムラインの年をクリックで詳細表示。</p>
@@ -333,9 +353,9 @@ export default function App() {
 
       {/* Side panel: hover detail on ultra-wide screens */}
       {panelAge != null && (
-        <div className="hidden 2xl:block min-w-[1000px] flex-1 shrink-0 ml-3 sticky top-3 max-h-[calc(100vh-24px)] rounded-lg border bg-white shadow-lg overflow-auto">
-          <TaxDetailPanel age={panelAge} results={res} base={base} sirPct={sirPct} />
-        </div>
+        <PanelContainer>
+          {(w) => <TaxDetailPanel age={panelAge} results={res} base={base} sirPct={sirPct} containerWidth={w} />}
+        </PanelContainer>
       )}
 
       <TaxDetailModal isOpen={modalAge != null} onClose={() => setModalAge(null)} age={modalAge}

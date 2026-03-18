@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from "react";
-import type { Keyframe, LifeEvent, Scenario, TrackKey, SettingKey, SpouseConfig, NISAConfig, BalancePolicy, DCReceiveMethod } from "../lib/types";
+import type { Keyframe, LifeEvent, Scenario, TrackKey, SettingKey, SpouseConfig, NISAConfig, BalancePolicy, DCReceiveMethod, SocialInsuranceParams } from "../lib/types";
+import { DEFAULT_DC_RECEIVE_METHOD, DEFAULT_SI_PARAMS } from "../lib/types";
 import { sortKF, EVENT_TYPES, resolveEventAge } from "../lib/types";
 import { ChildEventModal } from "./ChildEventModal";
 import { PropertyModal } from "./PropertyModal";
@@ -101,9 +102,10 @@ interface MemberData {
   dcTotalKF: Keyframe[]; companyDCKF: Keyframe[]; idecoKF: Keyframe[];
   salaryGrowthRate: number; sirPct: number; hasFurusato: boolean;
   dcReceiveMethod?: DCReceiveMethod;
+  siParams?: SocialInsuranceParams;
 }
 
-const DEFAULT_DC_RM: DCReceiveMethod = { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
+const DEFAULT_DC_RM = DEFAULT_DC_RECEIVE_METHOD;
 
 function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge, extraFields, linked, readOnly, baseData, trackLinked, onToggleTrack, excludeTracks, dcLinked, onToggleDCLink }: {
   label: string; color: string;
@@ -144,11 +146,41 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
               <input type="number" value={display.salaryGrowthRate} step={0.5} onChange={e => onUpdate({ salaryGrowthRate: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" disabled={isRO} />
               <span className="text-[10px] text-gray-400">%</span>
             </div>
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">社保率</span>
-              <input type="number" value={display.sirPct} step={0.25} onChange={e => onUpdate({ sirPct: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" disabled={isRO} />
-              <span className="text-[10px] text-gray-400">%</span>
-            </div>
+            <details className="text-[10px]">
+              <summary className="cursor-pointer text-gray-500 flex items-center gap-1">
+                社保
+                <span className="font-mono text-gray-700">{display.siParams ? `詳細` : `${display.sirPct}%`}</span>
+                {!display.siParams && <span className="text-gray-300">(フラット)</span>}
+              </summary>
+              <div className="mt-1 rounded border p-1.5 space-y-1 bg-gray-50">
+                {!display.siParams ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500">一律料率</span>
+                    <input type="number" value={display.sirPct} step={0.25} onChange={e => onUpdate({ sirPct: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5" disabled={isRO} />
+                    <span className="text-gray-400">%</span>
+                    <button onClick={() => onUpdate({ siParams: { ...DEFAULT_SI_PARAMS } })} className="text-blue-500 hover:underline" disabled={isRO}>詳細に切替</button>
+                  </div>
+                ) : (
+                  <div className="space-y-0.5">
+                    <div className="text-gray-400">厚生年金 9.15%(固定) 雇用 0.60%(固定)</div>
+                    {([
+                      ["healthInsuranceRate", "健保率"] as const,
+                      ["nursingInsuranceRate", "介護率"] as const,
+                      ["childSupportRate", "子育支援"] as const,
+                    ] as const).map(([key, lbl]) => (
+                      <div key={key} className="flex items-center gap-1">
+                        <span className="text-gray-500 w-12">{lbl}</span>
+                        <input type="number" value={display.siParams![key]} step={0.05} min={0}
+                          onChange={e => onUpdate({ siParams: { ...display.siParams!, [key]: Number(e.target.value) } })}
+                          className="w-14 rounded border px-1 py-0.5" disabled={isRO} />
+                        <span className="text-gray-400">%</span>
+                      </div>
+                    ))}
+                    <button onClick={() => onUpdate({ siParams: undefined })} className="text-gray-400 hover:text-red-500" disabled={isRO}>フラット率に戻す</button>
+                  </div>
+                )}
+              </div>
+            </details>
             <label className="flex items-center gap-1 text-[10px] cursor-pointer">
               <input type="checkbox" checked={display.hasFurusato} onChange={e => onUpdate({ hasFurusato: e.target.checked })} className="accent-blue-600" disabled={isRO} />
               <span className="text-gray-500">ふるさと納税</span>
@@ -351,15 +383,11 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
   const baseEvents = (isLinked && baseScenario) ? (baseScenario.events || []) : [];
   const excludedIds = scenario.excludedBaseEventIds || [];
   const [showMenu, setShowMenu] = useState(false);
-  const [showChildModal, setShowChildModal] = useState(false);
-  const [showPropertyModal, setShowPropertyModal] = useState(false);
-  const [editingPropertyEvent, setEditingPropertyEvent] = useState<LifeEvent | null>(null);
-  const [showCarModal, setShowCarModal] = useState(false);
-  const [editingCarEvent, setEditingCarEvent] = useState<LifeEvent | null>(null);
-  const [showDeathModal, setShowDeathModal] = useState(false);
-  const [editingDeathEvent, setEditingDeathEvent] = useState<LifeEvent | null>(null);
-  const [showInsuranceModal, setShowInsuranceModal] = useState(false);
-  const [editingInsuranceEvent, setEditingInsuranceEvent] = useState<LifeEvent | null>(null);
+  type ModalType = "child" | "property" | "car" | "death" | "insurance" | null;
+  const [openModal, setOpenModal] = useState<ModalType>(null);
+  const [editingEvent, setEditingEvent] = useState<LifeEvent | null>(null);
+  const openModalFor = (type: ModalType, evt?: LifeEvent | null) => { setOpenModal(type); setEditingEvent(evt ?? null); setShowMenu(false); };
+  const closeModal = () => { setOpenModal(null); setEditingEvent(null); };
 
   const setEvents = (evts: LifeEvent[]) => onChange({ ...scenario, events: evts });
   const addSimpleEvent = (type: string) => {
@@ -389,10 +417,10 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
   const topEvents = [...baseEvents.filter(e => !e.parentId && !excludedIds.includes(e.id)), ...events.filter(e => !e.parentId)];
   const summaryText = topEvents.map(e => `${(EVENT_TYPES[e.type] || EVENT_TYPES.custom).icon}${e.label}`).join(" ");
 
-  const modalSave = (setter: (e: LifeEvent | null) => void, editing: LifeEvent | null) => (evt: LifeEvent) => {
-    if (editing) setEvents(events.map(e => e.id === evt.id ? evt : e));
+  const modalSave = (evt: LifeEvent) => {
+    if (editingEvent) setEvents(events.map(e => e.id === evt.id ? evt : e));
     else setEvents([...events, evt].sort((a, b) => a.age - b.age));
-    setter(null);
+    closeModal();
   };
 
   return (
@@ -410,22 +438,18 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
             <div className="flex flex-wrap gap-1">
               {Object.entries(EVENT_TYPES).filter(([k]) => k !== "education" && k !== "marriage").map(([k, v]) => (
                 <button key={k} onClick={() => {
-                  if (k === "child") { setShowChildModal(true); setShowMenu(false); }
-                  else if (k === "property") { setShowPropertyModal(true); setShowMenu(false); }
-                  else if (k === "car") { setShowCarModal(true); setShowMenu(false); }
-                  else if (k === "death") { setShowDeathModal(true); setShowMenu(false); }
-                  else if (k === "insurance") { setShowInsuranceModal(true); setShowMenu(false); }
+                  if (["child", "property", "car", "death", "insurance"].includes(k)) { openModalFor(k as ModalType); }
                   else addSimpleEvent(k);
                 }} className="rounded border bg-white px-2 py-1 text-xs hover:bg-gray-50">{v.icon} {v.label}</button>
               ))}
             </div>
           </div>
         )}
-        <ChildEventModal isOpen={showChildModal} onClose={() => setShowChildModal(false)} onAdd={addChildEvents} currentAge={currentAge} retirementAge={retirementAge} />
-        <PropertyModal isOpen={showPropertyModal} onClose={() => { setShowPropertyModal(false); setEditingPropertyEvent(null); }} onSave={modalSave(setEditingPropertyEvent, editingPropertyEvent)} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingPropertyEvent} />
-        <CarModal isOpen={showCarModal} onClose={() => { setShowCarModal(false); setEditingCarEvent(null); }} onSave={modalSave(setEditingCarEvent, editingCarEvent)} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingCarEvent} />
-        <DeathModal isOpen={showDeathModal} onClose={() => { setShowDeathModal(false); setEditingDeathEvent(null); }} onSave={modalSave(setEditingDeathEvent, editingDeathEvent)} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingDeathEvent} />
-        <InsuranceModal isOpen={showInsuranceModal} onClose={() => { setShowInsuranceModal(false); setEditingInsuranceEvent(null); }} onSave={modalSave(setEditingInsuranceEvent, editingInsuranceEvent)} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingInsuranceEvent} />
+        <ChildEventModal isOpen={openModal === "child"} onClose={closeModal} onAdd={addChildEvents} currentAge={currentAge} retirementAge={retirementAge} />
+        <PropertyModal isOpen={openModal === "property"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+        <CarModal isOpen={openModal === "car"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+        <DeathModal isOpen={openModal === "death"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+        <InsuranceModal isOpen={openModal === "insurance"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
         {isLinked && baseEvents.length > 0 && <BaseEventList baseEvents={baseEvents} excludedIds={excludedIds} disabledIds={scenario.disabledBaseEventIds || []}
           onUnlink={unlinkBaseEvent} onRelink={relinkBaseEvent}
           onToggleDisable={(id) => {
@@ -440,8 +464,8 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
           }} />}
         <EventList events={events} updateEvent={updateEvent} updateEventMulti={updateEventMulti} removeEvent={removeEvent} currentAge={currentAge} retirementAge={retirementAge}
           label={isLinked && events.length > 0 ? `${scenario.name}の独自イベント` : undefined}
-          onEditProperty={(e) => { setEditingPropertyEvent(e); setShowPropertyModal(true); }} onEditCar={(e) => { setEditingCarEvent(e); setShowCarModal(true); }}
-          onEditDeath={(e) => { setEditingDeathEvent(e); setShowDeathModal(true); }} onEditInsurance={(e) => { setEditingInsuranceEvent(e); setShowInsuranceModal(true); }} />
+          onEditProperty={(e) => openModalFor("property", e)} onEditCar={(e) => openModalFor("car", e)}
+          onEditDeath={(e) => openModalFor("death", e)} onEditInsurance={(e) => openModalFor("insurance", e)} />
         {events.length === 0 && baseEvents.length === 0 && <div className="text-[10px] text-gray-400 pl-2">イベントなし</div>}
       </>)}
     </div>
@@ -692,7 +716,7 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
   const toggleSpouseDCLink = () => {
     if (!spInherited || !baseSp) return;
     if (!sp.dcReceiveMethod) {
-      onChange({ ...s, spouse: { ...sp, dcReceiveMethod: baseSp.dcReceiveMethod || { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 } } });
+      onChange({ ...s, spouse: { ...sp, dcReceiveMethod: baseSp.dcReceiveMethod || DEFAULT_DC_RECEIVE_METHOD } });
     } else {
       onChange({ ...s, spouse: { ...sp, dcReceiveMethod: undefined } });
     }
@@ -711,19 +735,19 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
       {/* 本人設定: MemberEditorを使用 */}
       <MemberEditor
         label={`本人${isLinked ? " 🔗A" : ""}`} color="#374151"
-        data={{ incomeKF: s.incomeKF, expenseKF: s.expenseKF, dcTotalKF: s.dcTotalKF, companyDCKF: s.companyDCKF, idecoKF: s.idecoKF, salaryGrowthRate: s.salaryGrowthRate, sirPct: sirPct ?? 15.75, hasFurusato: s.hasFurusato, dcReceiveMethod: s.dcReceiveMethod }}
+        data={{ incomeKF: s.incomeKF, expenseKF: s.expenseKF, dcTotalKF: s.dcTotalKF, companyDCKF: s.companyDCKF, idecoKF: s.idecoKF, salaryGrowthRate: s.salaryGrowthRate, sirPct: sirPct ?? 15.75, hasFurusato: s.hasFurusato, dcReceiveMethod: s.dcReceiveMethod, siParams: s.siParams }}
         onUpdate={(patch) => onChange({ ...s, ...patch })}
         currentAge={currentAge} retirementAge={retirementAge}
         linked={isLinked}
         readOnly={isLinked}
-        baseData={baseScenario ? { incomeKF: baseScenario.incomeKF, expenseKF: baseScenario.expenseKF, dcTotalKF: baseScenario.dcTotalKF, companyDCKF: baseScenario.companyDCKF, idecoKF: baseScenario.idecoKF, salaryGrowthRate: baseScenario.salaryGrowthRate, sirPct: sirPct ?? 15.75, hasFurusato: baseScenario.hasFurusato, dcReceiveMethod: baseScenario.dcReceiveMethod } : undefined}
+        baseData={baseScenario ? { incomeKF: baseScenario.incomeKF, expenseKF: baseScenario.expenseKF, dcTotalKF: baseScenario.dcTotalKF, companyDCKF: baseScenario.companyDCKF, idecoKF: baseScenario.idecoKF, salaryGrowthRate: baseScenario.salaryGrowthRate, sirPct: sirPct ?? 15.75, hasFurusato: baseScenario.hasFurusato, dcReceiveMethod: baseScenario.dcReceiveMethod, siParams: baseScenario.siParams } : undefined}
         trackLinked={isLinked ? isTrackLinked : undefined}
         onToggleTrack={isLinked ? toggleTrack : undefined}
         dcLinked={isLinked && !s.dcReceiveMethod}
         onToggleDCLink={isLinked ? () => {
           if (!s.dcReceiveMethod && baseScenario) {
             // リンク解除: ベースの値をコピーして独自設定に
-            onChange({ ...s, dcReceiveMethod: baseScenario.dcReceiveMethod || { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 } });
+            onChange({ ...s, dcReceiveMethod: baseScenario.dcReceiveMethod || DEFAULT_DC_RECEIVE_METHOD });
           } else {
             // リンク復帰: 独自設定をクリア
             onChange({ ...s, dcReceiveMethod: undefined as any });
@@ -755,12 +779,12 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
           <MemberEditor
             label="配偶者" color="#be185d"
             excludeTracks={["expenseKF"]}
-            data={{ incomeKF: sp.incomeKF || [], expenseKF: sp.expenseKF || [], dcTotalKF: sp.dcTotalKF || [], companyDCKF: sp.companyDCKF || [], idecoKF: sp.idecoKF || [], salaryGrowthRate: sp.salaryGrowthRate || effectiveSp.salaryGrowthRate, sirPct: sp.sirPct ?? effectiveSp.sirPct ?? 15.75, hasFurusato: sp.hasFurusato ?? effectiveSp.hasFurusato ?? true, dcReceiveMethod: sp.dcReceiveMethod }}
+            data={{ incomeKF: sp.incomeKF || [], expenseKF: sp.expenseKF || [], dcTotalKF: sp.dcTotalKF || [], companyDCKF: sp.companyDCKF || [], idecoKF: sp.idecoKF || [], salaryGrowthRate: sp.salaryGrowthRate || effectiveSp.salaryGrowthRate, sirPct: sp.sirPct ?? effectiveSp.sirPct ?? 15.75, hasFurusato: sp.hasFurusato ?? effectiveSp.hasFurusato ?? true, dcReceiveMethod: sp.dcReceiveMethod, siParams: sp.siParams ?? effectiveSp.siParams }}
             onUpdate={(patch) => onChange({ ...s, spouse: { ...sp, ...patch } })}
             currentAge={effectiveSp.currentAge} retirementAge={retirementAge}
             linked={spInherited}
             readOnly={false}
-            baseData={baseSp ? { incomeKF: baseSp.incomeKF || [], expenseKF: baseSp.expenseKF || [], dcTotalKF: baseSp.dcTotalKF || [], companyDCKF: baseSp.companyDCKF || [], idecoKF: baseSp.idecoKF || [], salaryGrowthRate: baseSp.salaryGrowthRate, sirPct: baseSp.sirPct ?? 15.75, hasFurusato: baseSp.hasFurusato ?? true, dcReceiveMethod: baseSp.dcReceiveMethod } : undefined}
+            baseData={baseSp ? { incomeKF: baseSp.incomeKF || [], expenseKF: baseSp.expenseKF || [], dcTotalKF: baseSp.dcTotalKF || [], companyDCKF: baseSp.companyDCKF || [], idecoKF: baseSp.idecoKF || [], salaryGrowthRate: baseSp.salaryGrowthRate, sirPct: baseSp.sirPct ?? 15.75, hasFurusato: baseSp.hasFurusato ?? true, dcReceiveMethod: baseSp.dcReceiveMethod, siParams: baseSp.siParams } : undefined}
             trackLinked={spInherited ? isSpouseTrackLinked : undefined}
             onToggleTrack={spInherited ? toggleSpouseTrack : undefined}
             dcLinked={isSpouseDCLinked}

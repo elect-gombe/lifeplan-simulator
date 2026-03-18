@@ -41,6 +41,26 @@ export interface InsuranceParams {
   coverageEndAge: number;       // 保険期間（何歳まで保険料を払うか）
 }
 
+// 社会保険料の詳細パラメータ
+export interface SocialInsuranceParams {
+  healthInsuranceRate: number;      // 健康保険料率（被保険者負担分, %）例: 3.97
+  nursingInsuranceRate: number;     // 介護保険料率（被保険者負担分, %）例: 1.00
+  childSupportRate: number;         // 子ども・子育て支援金率（被保険者負担分, %）例: 0.10
+}
+
+export const DEFAULT_SI_PARAMS: SocialInsuranceParams = {
+  healthInsuranceRate: 5.00,   // 協会けんぽ全国平均相当
+  nursingInsuranceRate: 0.80,  // 介護保険 被保険者負担
+  childSupportRate: 0.10,      // 子ども・子育て支援金
+};
+
+// 厚生年金（全国一律、定数）
+export const PENSION_INSURANCE_RATE = 9.15;        // 被保険者負担 %
+export const PENSION_MONTHLY_CAP = 650000;         // 標準報酬月額上限（円）
+export const EMPLOYMENT_INSURANCE_RATE = 0.60;     // 雇用保険 被保険者負担 %
+export const NURSING_INSURANCE_MIN_AGE = 40;       // 介護保険 対象開始年齢
+export const NURSING_INSURANCE_MAX_AGE = 65;       // 介護保険 対象終了年齢
+
 export interface SpouseConfig {
   enabled: boolean;
   currentAge: number;
@@ -51,7 +71,8 @@ export interface SpouseConfig {
   companyDCKF: Keyframe[];      // 会社DC KF（円/月）
   idecoKF: Keyframe[];          // iDeCo KF（円/月）
   salaryGrowthRate: number;     // 昇給率（%）
-  sirPct: number;               // 社保料率（%）
+  sirPct: number;               // 社保料率（%）— レガシー（siParamsがあればそちら優先）
+  siParams?: SocialInsuranceParams; // 社保詳細パラメータ
   hasFurusato: boolean;         // ふるさと納税
   pensionStartAge?: number;     // 年金受給開始年齢
   pensionWorkStartAge?: number; // 就職年齢
@@ -89,6 +110,11 @@ export interface CarParams {
   insuranceAnnualMan: number;
   replaceEveryYears: number; // 買い替えサイクル（0=一度のみ）
 }
+
+// DC/iDeCo受取方法のデフォルト値
+export const DEFAULT_DC_RECEIVE_METHOD: DCReceiveMethod = {
+  type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50,
+};
 
 export type EventTarget = "self" | "spouse";
 
@@ -185,6 +211,8 @@ export interface Scenario {
   pensionWorkStartAge: number;      // 就職年齢（厚生年金加入開始、デフォ22）
   // DC/iDeCo受取方法
   dcReceiveMethod: DCReceiveMethod;
+  // Social Insurance
+  siParams?: SocialInsuranceParams; // 社保詳細パラメータ（未設定=フラット率sirPctを使用）
   // Spouse
   spouse?: SpouseConfig;
   // NISA / Balance policy
@@ -192,127 +220,110 @@ export interface Scenario {
   balancePolicy?: BalancePolicy;
 }
 
+export interface MemberResult {
+  gross: number;
+  employeeDeduction: number;
+  taxableIncome: number;
+  marginalRate: number;
+  incomeTax: number;
+  residentTax: number;
+  socialInsurance: number;
+  // 社保内訳
+  siPension: number;          // 厚生年金
+  siHealth: number;           // 健康保険
+  siNursing: number;          // 介護保険
+  siEmployment: number;       // 雇用保険
+  siChildSupport: number;     // 子ども・子育て支援金
+  socialInsuranceDeduction: number;
+  dcIdecoDeduction: number;
+  lifeInsuranceDeductionAmount: number;
+  furusatoDeduction: number;
+  dependentDeduction: number;
+  housingLoanDeduction: number;
+  housingLoanDeductionAvail: number;
+  housingLoanDeductionIT: number;
+  housingLoanDeductionRT: number;
+  dcContribution: number;
+  idecoContribution: number;
+  selfDCContribution: number;
+  incomeTaxSaving: number;
+  residentTaxSaving: number;
+  socialInsuranceSaving: number;
+  furusatoLimit: number;
+  furusatoDonation: number;
+  takeHome: number;
+  pensionIncome: number;
+  dcAsset: number;
+  nisaAsset: number;
+  nisaCostBasis: number;
+  nisaContribution: number;
+}
+
 export interface YearResult {
   age: number;
-  gross: number;
   grossMan: number;
   // Expenses
   baseLivingExpense: number;
   eventOnetime: number;
   eventOngoing: number;
   totalExpense: number;
-  // Tax
-  incomeTax: number;
-  residentTax: number;
-  socialInsurance: number;
+  // Household totals
   takeHomePay: number;
-  // Tax detail (intermediate values)
-  employeeDeduction: number;       // 給与所得控除
-  taxableIncome: number;           // 課税所得（DC控除後）
-  marginalRate: number;            // 最高税率（%）
   basicDeduction: number;          // 基礎控除
-  selfDependentDeduction: number;  // 扶養控除（本人に帰属する分）
-  housingLoanDeduction: number;    // 住宅ローン控除（税額控除）実際適用額（本人）
-  housingLoanDeductionAvail: number; // 住宅ローン控除可能額（本人）
-  housingLoanDeductionIT: number;    // うち所得税から控除（本人）
-  housingLoanDeductionRT: number;    // うち住民税から控除（本人）
-  spouseHousingLoanDeduction: number;    // 配偶者の住宅ローン控除適用額
-  spouseHousingLoanDeductionAvail: number; // 配偶者の控除可能額
-  spouseHousingLoanDeductionIT: number;    // 配偶者 所得税から
-  spouseHousingLoanDeductionRT: number;    // 配偶者 住民税から
-  spouseDeductionAmount: number;       // 配偶者控除/配偶者特別控除額
-  dcIdecoDeduction: number;          // DC/iDeCo所得控除額（本人）
-  spouseDCIdecoDeduction: number;    // DC/iDeCo所得控除額（配偶者）
-  lifeInsuranceDeductionAmount: number;  // 生命保険料控除額（本人）
-  spouseLifeInsuranceDeductionAmount: number; // 生命保険料控除額（配偶者）
-  socialInsuranceDeduction: number;  // 社会保険料控除（本人）
-  spouseSocialInsuranceDeduction: number; // 社会保険料控除（配偶者）
-  furusatoDeduction: number;         // ふるさと納税控除額（本人）
-  spouseFurusatoDeduction: number;   // ふるさと納税控除額（配偶者）
-  // Spouse tax detail
-  spouseEmployeeDeduction: number;
-  spouseTaxableIncome: number;
-  spouseMarginalRate: number;
-  // DC/iDeCo
+  spouseDeductionAmount: number;   // 配偶者控除/配偶者特別控除額
+  // DC/iDeCo (本人)
   dcMonthly: number;
   companyDC: number;
   idecoMonthly: number;
   annualContribution: number;
-  selfDCContribution: number;
-  // Savings
-  incomeTaxSaving: number;
-  residentTaxSaving: number;
-  socialInsuranceSaving: number;
   annualBenefit: number;
   annualNetBenefit: number;
-  // Wealth
-  cumulativeDCAsset: number;      // 世帯合計
-  selfDCAsset: number;            // 本人DC資産
-  spouseDCAsset: number;          // 配偶者DC資産
+  // Wealth (世帯合計)
+  cumulativeDCAsset: number;
   cumulativeReinvest: number;
   annualNetCashFlow: number;
   cumulativeSavings: number;
   totalWealth: number;
-  // Furusato
-  furusatoLimit: number;
-  furusatoDonation: number;
   pensionLossAnnual: number;
   // Dependents & allowances
   childCount: number;
   dependentDeduction: number;  // 扶養控除合計（円）
   childAllowance: number;     // 児童手当合計（円/年）
   // 公的年金・遺族年金
-  selfPensionIncome: number;    // 本人の年金収入
-  spousePensionIncome: number;  // 配偶者の年金収入
   pensionTax: number;           // 年金にかかる税
   pensionReduction: number;     // 在職老齢年金の減額分(年額)
   survivorIncome: number;       // 遺族年金+収入保障保険（手取りに含まれる）
   // 遺族年金・保険内訳
-  survivorBasicPension: number;    // 遺族基礎年金
-  survivorEmployeePension: number; // 遺族厚生年金
-  survivorWidowSupplement: number; // 中高齢寡婦加算
-  survivorIncomeProtection: number; // 収入保障保険
+  survivorBasicPension: number;
+  survivorEmployeePension: number;
+  survivorWidowSupplement: number;
+  survivorIncomeProtection: number;
   // Housing loan balance (for graph)
   loanBalance: number;
-  // NISA / 特定口座 / Cash split
+  // NISA / 特定口座 / Cash split (世帯合計)
   nisaContribution: number;
-  selfNISAContribution: number;   // 本人NISA積立（年間）
-  spouseNISAContribution: number; // 配偶者NISA積立（年間）
   nisaWithdrawal: number;
   nisaAsset: number;           // 世帯合計（時価）
-  selfNISAAsset: number;       // 本人NISA（時価）
-  spouseNISAAsset: number;     // 配偶者NISA（時価）
-  selfNISACostBasis: number;   // 本人NISA元本（簿価）
-  spouseNISACostBasis: number; // 配偶者NISA元本（簿価）
   nisaGain: number;            // NISA含み益（時価−簿価）
   taxableContribution: number;
   taxableWithdrawal: number;
   taxableAsset: number;        // 特定口座（税引前評価額）
   taxableGain: number;         // 特定口座の含み益
   cashSavings: number;
-  // Spouse (individual breakdown — same framework as 本人)
-  spouseGross: number;
-  spouseIncomeTax: number;
-  spouseResidentTax: number;
-  spouseSocialInsurance: number;
-  spouseDCContribution: number;
-  spouseIDeCoContribution: number;
-  spouseIncomeTaxSaving: number;
-  spouseResidentTaxSaving: number;
-  spouseFurusatoLimit: number;
-  spouseFurusatoDonation: number;
-  spouseTakeHome: number;
   // Insurance
   insurancePremiumTotal: number;
   insurancePayoutTotal: number;
   // Inheritance tax (death year)
-  inheritanceTax: number;           // 相続税
-  inheritanceEstate: number;        // 課税遺産総額
+  inheritanceTax: number;
+  inheritanceEstate: number;
   // DC/iDeCo receive tax (retirement)
-  dcReceiveTax: number;             // DC受取時の税金（退職所得税 or 年金受取税）
+  dcReceiveTax: number;
   // Active events & cost breakdown
   activeEvents: LifeEvent[];
   eventCostBreakdown: EventYearCost[];
+  // Unified member results
+  self: MemberResult;
+  spouse: MemberResult;
 }
 
 export interface DCReceiveDetail {

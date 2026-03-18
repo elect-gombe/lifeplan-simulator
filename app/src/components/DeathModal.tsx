@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { LifeEvent, DeathParams, EventTarget } from "../lib/types";
+import { calcSurvivorPension } from "../lib/calc";
+import { Modal } from "./ui";
 
 export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent }: {
   isOpen: boolean;
@@ -32,38 +34,20 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
     }
   }, [existingEvent]);
 
-  // 遺族年金プレビュー（令和7年度基準、calc.ts calcSurvivorPension と同じ式）
-  const calcPensionPreview = () => {
+  // 遺族年金プレビュー（calc.ts calcSurvivorPension を使用）
+  const pensionPreview = (() => {
     const avgSalary = avgAnnualSalaryMan * 10000;
-    // 遺族基礎年金（子がいる場合のみ）
-    let basicPension = 0;
-    if (childCount > 0) {
-      basicPension = 816000;
-      for (let i = 0; i < childCount; i++) {
-        basicPension += i < 2 ? 234800 : 78300;
-      }
-    }
-    // 遺族厚生年金
-    const avgMonthly = Math.min(avgSalary / 12, 650000); // 標準報酬上限65万
-    const contributionMonths = Math.max((deathAge - 22) * 12, 300);
-    const employeePension = Math.round(avgMonthly * 5.481 / 1000 * contributionMonths * 3 / 4);
-    // 中高齢寡婦加算（妻のみ、子なし、遺族40-65歳）
-    // 令和7年改正: 2028年度以降は段階的逓減
+    const contribYears = Math.max(deathAge - 22, 0);
+    const childAges = Array.from({ length: childCount }, (_, i) => i); // 仮の子年齢(0,1,2...)=全員18歳未満
     const deathCalYear = new Date().getFullYear() + (deathAge - currentAge);
+    const r = calcSurvivorPension(avgSalary, contribYears, childAges, survivorAge, true, deathCalYear);
+    // 逓減率（UI表示用）
     let widowTaperRate = 1;
-    if (deathCalYear >= 2028) {
-      const elapsed = deathCalYear - 2028 + 1;
-      widowTaperRate = Math.max(26 - elapsed, 0) / 26;
-    }
-    const widowFull = 623800;
-    const widowSupplement = childCount === 0 && survivorAge >= 40 && survivorAge < 65
-      ? Math.round(widowFull * widowTaperRate) : 0;
-    const total = basicPension + employeePension + widowSupplement;
-    return { basicPension, employeePension, widowSupplement, widowTaperRate, total, totalMan: Math.round(total / 10000) };
-  };
-  const pensionPreview = calcPensionPreview();
+    if (deathCalYear >= 2028) widowTaperRate = Math.max(26 - (deathCalYear - 2028 + 1), 0) / 26;
+    return { basicPension: r.basic, employeePension: r.employee, widowSupplement: r.widowSupplement,
+      widowTaperRate, total: r.total, totalMan: Math.round(r.total / 10000) };
+  })();
 
-  if (!isOpen) return null;
   const u = (patch: Partial<DeathParams>) => setDP(prev => ({ ...prev, ...patch }));
 
   const protectionAnnual = dp.incomeProtectionManPerMonth * 12;
@@ -85,12 +69,8 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-8" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-lg bg-white shadow-xl" onClick={e => e.stopPropagation()}>
-        <div className="border-b px-4 py-3">
-          <p className="text-sm font-bold">⚰️ 死亡イベント（収入保障シミュレーション）</p>
-        </div>
-        <div className="p-4 space-y-4 text-xs">
+    <Modal isOpen={isOpen} onClose={onClose} title="⚰️ 死亡イベント（収入保障シミュレーション）"
+      btnClass="bg-slate-700 hover:bg-slate-800" onSave={handleSave} saveLabel={existingEvent ? "更新" : "追加"}>
 
           <div className="rounded bg-gray-50 p-2 text-gray-600">
             世帯メンバーが死亡した場合の家計シミュレーションです。収入保障保険の必要保障額を検討するために使います。
@@ -215,12 +195,6 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
             </div>
           </div>
 
-        </div>
-        <div className="border-t px-4 py-3 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="rounded px-4 py-1.5 text-xs text-gray-500 hover:bg-gray-100">キャンセル</button>
-          <button onClick={handleSave} className="rounded bg-slate-700 px-4 py-1.5 text-xs text-white font-bold hover:bg-slate-800">{existingEvent ? "更新" : "追加"}</button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

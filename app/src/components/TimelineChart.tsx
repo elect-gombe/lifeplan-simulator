@@ -289,17 +289,17 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
             {hoverData.map((yr, si) => yr && (
               <div key={si} className="space-y-0.5">
                 <div className="font-bold" style={{ color: COLORS[si] }}>{results[si].scenario.name}</div>
-                <div>年収 {Math.round(yr.grossMan)}万{yr.spouseGross > 0 ? ` + 配偶者${Math.round(yr.spouseGross / 10000)}万` : ""}
-                  {(yr.selfPensionIncome > 0 || yr.spousePensionIncome > 0) && ` 年金${fmtMan(yr.selfPensionIncome + yr.spousePensionIncome)}`}
+                <div>年収 {Math.round(yr.grossMan)}万{yr.spouse.gross > 0 ? ` + 配偶者${Math.round(yr.spouse.gross / 10000)}万` : ""}
+                  {(yr.self.pensionIncome > 0 || yr.spouse.pensionIncome > 0) && ` 年金${fmtMan(yr.self.pensionIncome + yr.spouse.pensionIncome)}`}
                   {" / "}手取り {fmtMan(yr.takeHomePay)}</div>
                 <div>支出 {fmtMan(yr.totalExpense)}（基本{fmtMan(yr.baseLivingExpense)} + イベント{fmtMan(yr.eventOngoing + yr.eventOnetime)}）</div>
                 <div className="font-bold">総資産 {fmtMan(yr.totalWealth)}</div>
                 {yr.cumulativeDCAsset > 0 && (
-                  <div className="text-gray-500">DC {fmtMan(yr.cumulativeDCAsset)}{yr.spouseDCAsset > 0 ? ` (本人${fmtMan(yr.selfDCAsset)} 配偶者${fmtMan(yr.spouseDCAsset)})` : ""}</div>
+                  <div className="text-gray-500">DC {fmtMan(yr.cumulativeDCAsset)}{yr.spouse.dcAsset > 0 ? ` (本人${fmtMan(yr.self.dcAsset)} 配偶者${fmtMan(yr.spouse.dcAsset)})` : ""}</div>
                 )}
                 {(yr.nisaAsset > 0 || yr.taxableAsset > 0) && (
                   <div className="text-green-600">
-                    {yr.nisaAsset > 0 && `NISA ${fmtMan(yr.nisaAsset)}${yr.spouseNISAAsset > 0 ? ` (本人${fmtMan(yr.selfNISAAsset)} 配偶者${fmtMan(yr.spouseNISAAsset)})` : ""}`}
+                    {yr.nisaAsset > 0 && `NISA ${fmtMan(yr.nisaAsset)}${yr.spouse.nisaAsset > 0 ? ` (本人${fmtMan(yr.self.nisaAsset)} 配偶者${fmtMan(yr.spouse.nisaAsset)})` : ""}`}
                     {yr.taxableAsset > 0 && ` 特定 ${fmtMan(yr.taxableAsset)}`}
                     {` 現金 ${fmtMan(yr.cashSavings)}`}
                   </div>

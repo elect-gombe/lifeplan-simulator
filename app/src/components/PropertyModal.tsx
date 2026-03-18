@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { LifeEvent, PropertyParams } from "../lib/types";
 import { calcMonthlyPaymentEqual, loanBalanceAfterYears } from "../lib/calc";
+import { Modal } from "./ui";
 
 export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent }: {
   isOpen: boolean;
@@ -29,8 +30,6 @@ export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementA
       setPurchaseAge(existingEvent.age);
     }
   }, [existingEvent]);
-
-  if (!isOpen) return null;
 
   const u = (patch: Partial<PropertyParams>) => setPP(prev => ({ ...prev, ...patch }));
   const loanAmount = (pp.priceMan - pp.downPaymentMan) * 10000;
@@ -72,12 +71,8 @@ export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementA
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-8" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-lg bg-white shadow-xl" onClick={e => e.stopPropagation()}>
-        <div className="border-b px-4 py-3">
-          <p className="text-sm font-bold">🏠 住宅購入{existingEvent ? "（編集）" : ""}</p>
-        </div>
-        <div className="p-4 space-y-4 text-xs">
+    <Modal isOpen={isOpen} onClose={onClose} title={`🏠 住宅購入${existingEvent ? "（編集）" : ""}`}
+      onSave={handleSave} saveLabel={existingEvent ? "更新" : "追加"}>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -267,13 +262,7 @@ export function PropertyModal({ isOpen, onClose, onSave, currentAge, retirementA
               合計: 約{Math.round(displayMonthly * 12 / 10000) + pp.maintenanceMonthlyMan * 12 + pp.taxAnnualMan - (pp.hasLoanDeduction ? Math.round(deductionYear1 / 10000) : 0)}万円/年
             </div>
           </div>
-        </div>
 
-        <div className="border-t px-4 py-3 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="rounded px-4 py-1.5 text-xs text-gray-500 hover:bg-gray-100">キャンセル</button>
-          <button onClick={handleSave} className="rounded bg-blue-600 px-4 py-1.5 text-xs text-white font-bold hover:bg-blue-700">{existingEvent ? "更新" : "追加"}</button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

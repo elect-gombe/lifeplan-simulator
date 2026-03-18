@@ -50,6 +50,25 @@ export function Row({ l, vs, neg, bold, bg, sub, help, formula }: any) {
   );
 }
 
+export function Modal({ isOpen, onClose, title, btnClass, onSave, saveLabel, children }: {
+  isOpen: boolean; onClose: () => void; title: string; btnClass?: string;
+  onSave: () => void; saveLabel?: string; children: React.ReactNode;
+}) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-8" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-lg bg-white shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="border-b px-4 py-3"><p className="text-sm font-bold">{title}</p></div>
+        <div className="max-h-[70vh] overflow-y-auto p-4 space-y-4 text-xs">{children}</div>
+        <div className="border-t px-4 py-3 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="rounded px-4 py-1.5 text-xs text-gray-500 hover:bg-gray-100">キャンセル</button>
+          <button onClick={onSave} className={`rounded px-4 py-1.5 text-xs text-white font-bold ${btnClass || "bg-blue-600 hover:bg-blue-700"}`}>{saveLabel || "追加"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Sec({ children, c, colSpan }: any) {
   return (
     <tr className={`${c || "bg-gray-100"} font-semibold`}>
