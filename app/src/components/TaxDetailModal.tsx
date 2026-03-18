@@ -117,14 +117,12 @@ export function TaxDetailModal({ isOpen, onClose, age, results, base, sirPct }: 
             <tbody>
               {/* ===== 収入 ===== */}
               <S bg="bg-emerald-50">■ 収入</S>
-              {/* 就労所得 */}
               {yrs.some(yr => yr && (yr.gross > 0 || yr.spouseGross > 0)) && (<>
                 <R l="給与収入" bold hint="キーフレーム×昇給率" fn={(yr, s) => s === "本人" ? `${Math.round(yr.grossMan)}万` : s === "配偶者" ? (yr.spouseGross > 0 ? `${Math.round(yr.spouseGross / 10000)}万` : "-") : `${Math.round(yr.grossMan + yr.spouseGross / 10000)}万`} />
-                <R l="  所得税" sub hint="累進税率(5-45%)" fn={(yr, s) => s === "本人" ? yr.incomeTax : s === "配偶者" ? yr.spouseIncomeTax : yr.incomeTax + yr.spouseIncomeTax} />
-                <R l="  住民税" sub hint="課税所得×10%" fn={(yr, s) => s === "本人" ? yr.residentTax : s === "配偶者" ? yr.spouseResidentTax : yr.residentTax + yr.spouseResidentTax} />
-                <R l="  社会保険" sub hint={`年収×${sirPct}%`} fn={(yr, s) => s === "本人" ? yr.socialInsurance : s === "配偶者" ? yr.spouseSocialInsurance : yr.socialInsurance + yr.spouseSocialInsurance} />
+                <R l="  所得税" sub neg hint="累進税率(5-45%)" fn={(yr, s) => s === "本人" ? yr.incomeTax : s === "配偶者" ? yr.spouseIncomeTax : yr.incomeTax + yr.spouseIncomeTax} />
+                <R l="  住民税" sub neg hint="課税所得×10%" fn={(yr, s) => s === "本人" ? yr.residentTax : s === "配偶者" ? yr.spouseResidentTax : yr.residentTax + yr.spouseResidentTax} />
+                <R l="  社会保険" sub neg hint={`年収×${sirPct}%`} fn={(yr, s) => s === "本人" ? yr.socialInsurance : s === "配偶者" ? yr.spouseSocialInsurance : yr.socialInsurance + yr.spouseSocialInsurance} />
               </>)}
-              {/* 老齢年金 */}
               {yrs.some(yr => yr && (yr.selfPensionIncome > 0 || yr.spousePensionIncome > 0)) && (<>
                 <R l="老齢年金" bold hint="基礎+厚生。平均年収×加入年数から自動計算" fn={(yr, s) => {
                   if (!hasSpouse) return (yr.selfPensionIncome + yr.spousePensionIncome) || "-";
