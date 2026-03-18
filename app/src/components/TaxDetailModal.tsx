@@ -134,9 +134,11 @@ export function TaxDetailModal({ isOpen, onClose, age, results, base, sirPct }: 
                 }} />
                 <R l="  年金課税" sub neg hint="公的年金等控除後の所得税+住民税" fn={(yr, s) => (s === "世帯" || !hasSpouse) ? (yr.pensionTax > 0 ? yr.pensionTax : "-") : "-"} />
               </>)}
-              {/* 保険金 */}
+              {/* 遺族年金・保険金（死亡後） */}
+              {yrs.some(yr => yr && yr.survivorIncome > 0) &&
+                <R l="遺族年金・保険" bold hint="遺族基礎+厚生年金+収入保障保険" fn={(yr, s) => (s === "世帯" || !hasSpouse) ? (yr.survivorIncome > 0 ? yr.survivorIncome : "-") : "-"} />}
               {yrs.some(yr => yr && yr.insurancePayoutTotal > 0) &&
-                <R l="保険金受取" hint="死亡時に一時金or月額給付" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.insurancePayoutTotal : "-"} />}
+                <R l="  保険金(イベント)" sub hint="保険イベントからの一時金or月額給付" fn={(yr, s) => (s === "世帯" || !hasSpouse) ? (yr.insurancePayoutTotal > 0 ? yr.insurancePayoutTotal : "-") : "-"} />}
               {/* 児童手当 */}
               {yrs.some(yr => yr && yr.childAllowance > 0) &&
                 <R l="児童手当" hint="0-2歳:1.5万/月 3-18歳:1万/月 第3子以降:3万/月" fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.childAllowance : "-"} />}

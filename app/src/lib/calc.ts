@@ -867,19 +867,9 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       const survivorAge = spouse ? spouse.currentAge + (age - currentAge) : age;
       const pensionCalc = calcSurvivorPension(avgSalary, contribYears, childAgesForPension, survivorAge);
 
-      const pensionAmount = pensionCalc.total;
-      survivorIncome += pensionAmount;
-      eventCostBreakdown.push({
-        label: "遺族年金",
-        icon: "🏛️", color: "#16a34a",
-        amount: -pensionAmount,
-        detail: `${pensionCalc.detail} = ${Math.round(pensionAmount / 10000)}万/年`,
-      });
-
+      survivorIncome += pensionCalc.total;
       if (dp.incomeProtectionManPerMonth > 0 && age < dp.incomeProtectionUntilAge) {
-        const protAnnual = dp.incomeProtectionManPerMonth * 12 * 10000;
-        survivorIncome += protAnnual;
-        eventCostBreakdown.push({ label: "収入保障保険(死亡設定)", icon: "🛡️", color: "#16a34a", amount: -protAnnual });
+        survivorIncome += dp.incomeProtectionManPerMonth * 12 * 10000;
       }
     }
     // Spouse death: survivor pension based on SPOUSE's salary history
@@ -890,23 +880,14 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         const contribYears = spouseSalaryYears;
         const childEvtsForPension = events.filter(e => e.type === "child" && isEventActive(e, age, events));
         const childAgesForPension = childEvtsForPension.map(ce => age - resolveEventAge(ce, events));
-        const selfAge = age;
-        const pensionCalc = calcSurvivorPension(avgSpouseSalary, contribYears, childAgesForPension, selfAge);
-        const pensionAmount = pensionCalc.total;
-        survivorIncome += pensionAmount;
-        eventCostBreakdown.push({
-          label: "遺族年金(配偶者分)",
-          icon: "🏛️", color: "#16a34a",
-          amount: -pensionAmount,
-          detail: `${pensionCalc.detail} = ${Math.round(pensionAmount / 10000)}万/年`,
-        });
+        const pensionCalc = calcSurvivorPension(avgSpouseSalary, contribYears, childAgesForPension, age);
+        survivorIncome += pensionCalc.total;
       }
       if (sdp.incomeProtectionManPerMonth > 0 && age < sdp.incomeProtectionUntilAge) {
-        const protAnnual = sdp.incomeProtectionManPerMonth * 12 * 10000;
-        survivorIncome += protAnnual;
-        eventCostBreakdown.push({ label: "収入保障保険(配偶者死亡設定)", icon: "🛡️", color: "#16a34a", amount: -protAnnual });
+        survivorIncome += sdp.incomeProtectionManPerMonth * 12 * 10000;
       }
     }
+    // survivorIncomeはtakeHomePayに加算済み。eventCostBreakdownには入れない（収入セクションで表示）
 
     const totalExpense = baseLivingExpense + eventOngoing + eventOnetime;
 
@@ -1202,7 +1183,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       cumulativeDCAsset, selfDCAsset, spouseDCAsset, cumulativeReinvest, annualNetCashFlow,
       cumulativeSavings: finalCumulativeSavings, totalWealth: finalCumulativeSavings + cumulativeDCAsset + cumulativeReinvest,
       furusatoLimit: nFL, furusatoDonation: furuDonNew,
-      pensionLossAnnual, selfPensionIncome, spousePensionIncome, pensionTax, loanBalance,
+      pensionLossAnnual, selfPensionIncome, spousePensionIncome, pensionTax, survivorIncome, loanBalance,
       childCount: childEvents.length, dependentDeduction: dependentDeductionTotal, childAllowance,
       nisaContribution, nisaWithdrawal, nisaAsset: totalNISA, selfNISAAsset, spouseNISAAsset,
       selfNISACostBasis, spouseNISACostBasis, nisaGain: totalNISA - selfNISACostBasis - spouseNISACostBasis,

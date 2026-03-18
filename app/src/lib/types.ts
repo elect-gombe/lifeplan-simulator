@@ -221,10 +221,11 @@ export interface YearResult {
   childCount: number;
   dependentDeduction: number;  // 扶養控除合計（円）
   childAllowance: number;     // 児童手当合計（円/年）
-  // 公的年金
+  // 公的年金・遺族年金
   selfPensionIncome: number;    // 本人の年金収入
   spousePensionIncome: number;  // 配偶者の年金収入
   pensionTax: number;           // 年金にかかる税
+  survivorIncome: number;       // 遺族年金+収入保障保険（手取りに含まれる）
   // Housing loan balance (for graph)
   loanBalance: number;
   // NISA / 特定口座 / Cash split
