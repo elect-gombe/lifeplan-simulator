@@ -46,9 +46,9 @@ export function txInc(g: number, opts?: TaxOpts & { dependentDeductionTotal?: nu
   const depDed = o.dependentDeductionTotal != null
     ? o.dependentDeductionTotal
     : Math.max(Number(o.dependentsCount) || 0, 0) * 380000;
-  const spouseDed = o.hasSpouseDeduction ? 380000 : 0;
   const lifeDed = Math.max(Number(o.lifeInsuranceDeduction) || 0, 0);
-  return Math.max(g - empDed(g) - g * 0.15 - 480000 - depDed - spouseDed - lifeDed, 0);
+  const sirRate = (o.sirPct != null ? o.sirPct : 15) / 100; // 社会保険料率
+  return Math.max(g - empDed(g) - g * sirRate - 480000 - depDed - lifeDed, 0);
 }
 
 export function hlResidentCap(ti: number): number {
@@ -64,13 +64,68 @@ export function apTxCr(it: number, rt: number, cr: number, ti: number) {
   return { it: Math.max(it - itUsed, 0), rt: Math.max(rt - rtUsed, 0), used: itUsed + rtUsed, itUsed, rtUsed, residentCap };
 }
 
-export function fLm(ti: number, mr: number): number {
+/** ふるさと納税控除上限額
+ * = (住民税所得割額 − 住宅ローン控除の住民税分) × 20% ÷ (90% − 所得税率 × 1.021) + 2000
+ * @param ti 課税所得（DC/iDeCo控除後、ふるさと控除前）
+ * @param mr 所得税の最高税率(%)
+ * @param hlRTDeduction 住宅ローン控除のうち住民税から控除される額（住民税所得割を減らす）
+ */
+export function fLm(ti: number, mr: number, hlRTDeduction: number = 0): number {
+  const rtBase = Math.max(Math.max(ti, 0) * 0.1 - hlRTDeduction, 0);
   const d = 0.9 - (mr / 100) * 1.021;
-  return d > 0 ? Math.floor((Math.max(ti, 0) * 0.1 * 0.2) / d + 2000) : 0;
+  return d > 0 ? Math.floor((rtBase * 0.2) / d + 2000) : 0;
 }
 
 export function calcFurusatoDonation(limit: number): number {
   return Math.max(Math.floor(Math.max(limit, 0) / 1000) * 1000, 0);
+}
+
+/**
+ * 配偶者控除 / 配偶者特別控除
+ * @param selfIncome 本人の合計所得（給与収入 − 給与所得控除）
+ * @param spouseIncome 配偶者の合計所得（給与収入 − 給与所得控除）
+ * @returns 控除額（円）
+ */
+export function spouseDeduction(selfIncome: number, spouseIncome: number): number {
+  if (selfIncome > 10000000 || spouseIncome >= 1330000) return 0;
+
+  // 本人所得に応じた区分 (0: <=900万, 1: 900超~950万, 2: 950超~1000万)
+  const tier = selfIncome <= 9000000 ? 0 : selfIncome <= 9500000 ? 1 : 2;
+
+  // 配偶者控除 (配偶者の合計所得 <= 48万)
+  if (spouseIncome <= 480000) {
+    return [380000, 260000, 130000][tier];
+  }
+
+  // 配偶者特別控除 (配偶者の合計所得 48万超〜133万未満)
+  // tier0 deductions by spouse income bracket
+  const brackets: [number, number[]][] = [
+    [500000,  [380000, 260000, 130000]],
+    [550000,  [360000, 240000, 120000]],
+    [600000,  [310000, 210000, 110000]],
+    [670000,  [260000, 180000, 90000]],
+    [750000,  [210000, 140000, 70000]],
+    [830000,  [160000, 110000, 60000]],
+    [900000,  [110000, 80000, 40000]],
+    [950000,  [60000, 40000, 20000]],
+    [1000000, [30000, 20000, 10000]],
+    [1330000, [0, 0, 0]],
+  ];
+
+  for (const [limit, amounts] of brackets) {
+    if (spouseIncome <= limit) return amounts[tier];
+  }
+  return 0;
+}
+
+// 生命保険料控除（新制度 2012年〜）
+// 一般生命保険料控除の計算（年間保険料 → 控除額、上限4万円）
+export function calcLifeInsuranceDeduction(annualPremium: number): number {
+  if (annualPremium <= 0) return 0;
+  if (annualPremium <= 20000) return annualPremium;
+  if (annualPremium <= 40000) return Math.floor(annualPremium / 2 + 10000);
+  if (annualPremium <= 80000) return Math.floor(annualPremium / 4 + 20000);
+  return 40000;
 }
 
 export function fvA(a: number, r: number, n: number): number {

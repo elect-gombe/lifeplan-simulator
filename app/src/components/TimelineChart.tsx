@@ -19,13 +19,15 @@ function usePersistedSet(key: string): [Set<number>, (fn: (prev: Set<number>) =>
   return [set, update];
 }
 
-export function TimelineChart({ results, currentAge, retirementAge, onYearClick }: {
+export function TimelineChart({ results, currentAge, retirementAge, onYearClick, onHoverAge }: {
   results: ScenarioResult[];
   currentAge: number;
   retirementAge: number;
   onYearClick?: (age: number) => void;
+  onHoverAge?: (age: number | null) => void;
 }) {
   const [hoverAge, setHoverAge] = useState<number | null>(null);
+  const handleHover = (age: number | null) => { setHoverAge(age); onHoverAge?.(age); };
   const [collapsedParents, setCollapsedParents] = usePersistedSet("sim-tl-collapsed");
   const [selectedScenario, setSelectedScenario] = useState(0);
   if (!results.length || !results[0].yearResults.length) return null;
@@ -146,7 +148,7 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
           ))}
         </div>
       )}
-      <svg viewBox={`0 0 ${cW} ${cH}`} className="block w-full cursor-crosshair" onMouseLeave={() => setHoverAge(null)}>
+      <svg viewBox={`0 0 ${cW} ${cH}`} className="block w-full cursor-crosshair" onMouseLeave={() => handleHover(null)}>
 
         {/* === Event bars === */}
         {visibleEvents.map((evt, ei) => {
@@ -249,7 +251,7 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick 
         {/* === Hover zones (chart area only, below event bars) === */}
         {Array.from({ length: totalYears }, (_, i) => currentAge + i).map(age => (
           <rect key={`h${age}`} x={xForAge(age) - xStep / 2} y={chartTop} width={xStep} height={chartH}
-            fill="transparent" onMouseEnter={() => setHoverAge(age)} onClick={() => onYearClick?.(age)} />
+            fill="transparent" onMouseEnter={() => handleHover(age)} onClick={() => onYearClick?.(age)} />
         ))}
 
         {/* Hover line */}

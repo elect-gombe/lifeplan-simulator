@@ -65,6 +65,9 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
   const [birthAge, setBirthAge] = useState(currentAge + 3);
   const [birthCostMan, setBirthCostMan] = useState(50);
   const [baseCareMan, setBaseCareMan] = useState(30);
+  const [weddingSupportMan, setWeddingSupportMan] = useState(92); // 結婚支援金（万円）184万÷2人
+  const [weddingSupportChildAge, setWeddingSupportChildAge] = useState(30); // 子が何歳のとき
+  const [weddingSupportEnabled, setWeddingSupportEnabled] = useState(true);
   const [stages, setStages] = useState<Stage[]>(() => buildStages(TEMPLATES[2]));
   // Batch mode
   const [childCount, setChildCount] = useState(3);
@@ -114,6 +117,20 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
         durationYears: s.toChildAge - s.fromChildAge,
         parentId,
         ageOffset: s.fromChildAge,
+      });
+    }
+    // 結婚支援金
+    if (weddingSupportEnabled && weddingSupportMan > 0) {
+      evts.push({
+        id: parentId + Math.round(Math.random() * 100000),
+        age: age + weddingSupportChildAge,
+        type: "custom",
+        label: `${name} 結婚支援金`,
+        oneTimeCostMan: weddingSupportMan,
+        annualCostMan: 0,
+        durationYears: 1,
+        parentId,
+        ageOffset: weddingSupportChildAge,
       });
     }
     return evts;
@@ -197,6 +214,30 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
               <label className="block text-xs font-semibold text-gray-600 mb-1">基本養育費（万円/年）</label>
               <input type="number" value={baseCareMan} step={5} onChange={e => setBaseCareMan(Number(e.target.value))} className="w-full rounded border px-2 py-1.5 text-sm" />
             </div>
+          </div>
+
+          {/* 結婚支援金 */}
+          <div className="flex items-center gap-3 rounded border p-2">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" checked={weddingSupportEnabled} onChange={e => setWeddingSupportEnabled(e.target.checked)} className="accent-pink-500" />
+              <span className="text-xs font-semibold text-gray-600">💍 結婚支援金</span>
+            </label>
+            {weddingSupportEnabled && (<>
+              <div className="flex items-center gap-1">
+                <input type="number" value={weddingSupportMan} step={10} min={0}
+                  onChange={e => setWeddingSupportMan(Number(e.target.value))}
+                  className="w-16 rounded border px-1.5 py-1 text-xs text-right" />
+                <span className="text-[10px] text-gray-400">万円</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-gray-500">子が</span>
+                <input type="number" value={weddingSupportChildAge} step={1} min={20} max={40}
+                  onChange={e => setWeddingSupportChildAge(Number(e.target.value))}
+                  className="w-12 rounded border px-1.5 py-1 text-xs text-right" />
+                <span className="text-[10px] text-gray-400">歳時</span>
+              </div>
+              <span className="text-[10px] text-gray-400 ml-auto">平均184万の親負担1/2</span>
+            </>)}
           </div>
 
           {/* Templates */}

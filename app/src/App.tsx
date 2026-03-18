@@ -9,7 +9,7 @@ import { KeyframeEditor } from "./components/KeyframeEditor";
 import { TimelineChart } from "./components/TimelineChart";
 import { TotalAssetBar } from "./components/TotalAssetBar";
 import { SummaryCard } from "./components/SummaryCard";
-import { TaxDetailModal } from "./components/TaxDetailModal";
+import { TaxDetailModal, TaxDetailPanel } from "./components/TaxDetailModal";
 
 const STORAGE_KEY = "asset-sim-state-v1";
 
@@ -171,6 +171,8 @@ export default function App() {
   const [sirPct, setSirPct] = useState(saved?.sirPct ?? 15.75);
   const [scenarios, setScenarios] = useState<Scenario[]>(() => saved?.scenarios?.length ? saved.scenarios : [mkScenario(0), mkScenario(1)]);
   const [modalAge, setModalAge] = useState<number | null>(null);
+  const [panelAge, setPanelAge] = useState<number | null>(() => saved?.scenarios?.[0]?.currentAge ?? 30);
+  const handleHoverAge = useCallback((age: number | null) => { if (age != null) setPanelAge(age); }, []);
   const [inflationRate, setInflationRate] = useState(saved?.inflationRate ?? 1.5);
   const [jsonModal, setJsonModal] = useState<"export" | "import" | null>(null);
   const [jsonText, setJsonText] = useState("");
@@ -187,8 +189,6 @@ export default function App() {
       setRR(data.rr); setHasRet(data.hasRet); setRetAmt(data.retAmt);
       setPY(data.PY); setSirPct(data.sirPct); setInflationRate(data.inflationRate);
       if (data.scenarios.length) setScenarios(data.scenarios);
-      // ハッシュをクリア（再読み込み防止）
-      window.history.replaceState(null, "", window.location.pathname);
     });
   }, []);
 
@@ -197,6 +197,13 @@ export default function App() {
   }), [rr, hasRet, retAmt, PY, sirPct, inflationRate, scenarios]);
 
   useEffect(() => { saveToStorage(currentState); }, [currentState]);
+
+  // 設定変更時にURLハッシュも更新（共有リンクが常に最新を反映）
+  useEffect(() => {
+    encodeStateToURL(currentState).then(hash => {
+      window.history.replaceState(null, "", `#${hash}`);
+    });
+  }, [currentState]);
 
   const handleImport = async (file: File) => {
     const data = await importJSON(file);
@@ -227,7 +234,7 @@ export default function App() {
   const s0 = scenarios[0];
   const currentAge = s0?.currentAge ?? 30;
   const simEndAge = s0?.simEndAge ?? 85;
-  const taxOpts = { dependentsCount: 0, hasSpouseDeduction: false, lifeInsuranceDeduction: 0 };
+  const taxOpts = { dependentsCount: 0, lifeInsuranceDeduction: 0, sirPct };
 
   const calcParams = useMemo(() => ({
     currentAge, retirementAge: simEndAge, defaultGrossMan: 0, rr, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed: 0, inflationRate,
@@ -244,8 +251,8 @@ export default function App() {
   const scenarioGridClass = scenarios.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2";
 
   return (
-    <div className="mx-auto max-w-5xl p-3 text-gray-900">
-      <div className="flex flex-col gap-3">
+    <div className="flex p-3 text-gray-900">
+      <div className="flex flex-col gap-3 max-w-5xl w-full shrink-0">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold">資産シミュレーター</h1>
           <div className="flex items-center gap-2">
@@ -303,7 +310,7 @@ export default function App() {
         <details className="rounded-lg border bg-white" open>
           <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-gray-700">タイムライン</summary>
           <div className="px-3 pb-3">
-            <TimelineChart results={res} currentAge={currentAge} retirementAge={simEndAge} onYearClick={(age) => setModalAge(age)} />
+            <TimelineChart results={res} currentAge={currentAge} retirementAge={simEndAge} onYearClick={(age) => setModalAge(age)} onHoverAge={handleHoverAge} />
           </div>
         </details>
 
@@ -323,6 +330,13 @@ export default function App() {
           <p>※ 貯蓄＝手取り−生活費−イベント支出。マイナスの年は貯蓄取り崩し。タイムラインの年をクリックで詳細表示。</p>
         </div>
       </div>
+
+      {/* Side panel: hover detail on ultra-wide screens */}
+      {panelAge != null && (
+        <div className="hidden 2xl:block min-w-[1000px] flex-1 shrink-0 ml-3 sticky top-3 max-h-[calc(100vh-24px)] rounded-lg border bg-white shadow-lg overflow-auto">
+          <TaxDetailPanel age={panelAge} results={res} base={base} sirPct={sirPct} />
+        </div>
+      )}
 
       <TaxDetailModal isOpen={modalAge != null} onClose={() => setModalAge(null)} age={modalAge}
         results={res} base={base} sirPct={sirPct} />

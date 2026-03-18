@@ -108,6 +108,7 @@ export interface LifeEvent {
   carParams?: CarParams;
   deathParams?: DeathParams;
   insuranceParams?: InsuranceParams;
+  disabled?: boolean;  // true=計算から除外（UIではグレーアウト表示）
 }
 
 // Computed cost breakdown for a single year from a structured event
@@ -145,9 +146,18 @@ export const LINKABLE_TRACKS = [
 export type TrackKey = typeof LINKABLE_TRACKS[number];
 export const DEFAULT_OVERRIDE_TRACKS: TrackKey[] = ["dcTotalKF", "companyDCKF", "idecoKF"];
 
+// Linkable scalar settings (scenario settings section)
+export const LINKABLE_SETTINGS = [
+  "currentAge", "retirementAge", "simEndAge", "currentAssetsMan", "selfGender",
+  "years", "dependentDeductionHolder",
+  "pensionStartAge", "pensionWorkStartAge",
+] as const;
+export type SettingKey = typeof LINKABLE_SETTINGS[number];
+
 export interface Scenario {
   id: number;
   name: string;
+  selfGender?: "male" | "female"; // 本人の性別（中高齢寡婦加算の判定に使用）
   // 本人年齢
   currentAge: number;         // 本人の現在年齢
   retirementAge: number;      // 本人の退職予定年齢
@@ -162,8 +172,11 @@ export interface Scenario {
   // Events: own events + which base events to include
   events: LifeEvent[];
   excludedBaseEventIds: number[];
+  disabledBaseEventIds?: number[];
   linkedToBase: boolean;
   overrideTracks: TrackKey[];
+  overrideSettings?: SettingKey[];
+  spouseOverrideTracks?: TrackKey[];
   years: number;             // DC通算期間
   hasFurusato: boolean;
   dependentDeductionHolder: "self" | "spouse";
@@ -193,6 +206,33 @@ export interface YearResult {
   residentTax: number;
   socialInsurance: number;
   takeHomePay: number;
+  // Tax detail (intermediate values)
+  employeeDeduction: number;       // 給与所得控除
+  taxableIncome: number;           // 課税所得（DC控除後）
+  marginalRate: number;            // 最高税率（%）
+  basicDeduction: number;          // 基礎控除
+  selfDependentDeduction: number;  // 扶養控除（本人に帰属する分）
+  housingLoanDeduction: number;    // 住宅ローン控除（税額控除）実際適用額（本人）
+  housingLoanDeductionAvail: number; // 住宅ローン控除可能額（本人）
+  housingLoanDeductionIT: number;    // うち所得税から控除（本人）
+  housingLoanDeductionRT: number;    // うち住民税から控除（本人）
+  spouseHousingLoanDeduction: number;    // 配偶者の住宅ローン控除適用額
+  spouseHousingLoanDeductionAvail: number; // 配偶者の控除可能額
+  spouseHousingLoanDeductionIT: number;    // 配偶者 所得税から
+  spouseHousingLoanDeductionRT: number;    // 配偶者 住民税から
+  spouseDeductionAmount: number;       // 配偶者控除/配偶者特別控除額
+  dcIdecoDeduction: number;          // DC/iDeCo所得控除額（本人）
+  spouseDCIdecoDeduction: number;    // DC/iDeCo所得控除額（配偶者）
+  lifeInsuranceDeductionAmount: number;  // 生命保険料控除額（本人）
+  spouseLifeInsuranceDeductionAmount: number; // 生命保険料控除額（配偶者）
+  socialInsuranceDeduction: number;  // 社会保険料控除（本人）
+  spouseSocialInsuranceDeduction: number; // 社会保険料控除（配偶者）
+  furusatoDeduction: number;         // ふるさと納税控除額（本人）
+  spouseFurusatoDeduction: number;   // ふるさと納税控除額（配偶者）
+  // Spouse tax detail
+  spouseEmployeeDeduction: number;
+  spouseTaxableIncome: number;
+  spouseMarginalRate: number;
   // DC/iDeCo
   dcMonthly: number;
   companyDC: number;
@@ -225,11 +265,19 @@ export interface YearResult {
   selfPensionIncome: number;    // 本人の年金収入
   spousePensionIncome: number;  // 配偶者の年金収入
   pensionTax: number;           // 年金にかかる税
+  pensionReduction: number;     // 在職老齢年金の減額分(年額)
   survivorIncome: number;       // 遺族年金+収入保障保険（手取りに含まれる）
+  // 遺族年金・保険内訳
+  survivorBasicPension: number;    // 遺族基礎年金
+  survivorEmployeePension: number; // 遺族厚生年金
+  survivorWidowSupplement: number; // 中高齢寡婦加算
+  survivorIncomeProtection: number; // 収入保障保険
   // Housing loan balance (for graph)
   loanBalance: number;
   // NISA / 特定口座 / Cash split
   nisaContribution: number;
+  selfNISAContribution: number;   // 本人NISA積立（年間）
+  spouseNISAContribution: number; // 配偶者NISA積立（年間）
   nisaWithdrawal: number;
   nisaAsset: number;           // 世帯合計（時価）
   selfNISAAsset: number;       // 本人NISA（時価）
@@ -257,6 +305,11 @@ export interface YearResult {
   // Insurance
   insurancePremiumTotal: number;
   insurancePayoutTotal: number;
+  // Inheritance tax (death year)
+  inheritanceTax: number;           // 相続税
+  inheritanceEstate: number;        // 課税遺産総額
+  // DC/iDeCo receive tax (retirement)
+  dcReceiveTax: number;             // DC受取時の税金（退職所得税 or 年金受取税）
   // Active events & cost breakdown
   activeEvents: LifeEvent[];
   eventCostBreakdown: EventYearCost[];
@@ -310,8 +363,8 @@ export interface BaseResult {
 
 export interface TaxOpts {
   dependentsCount: number;
-  hasSpouseDeduction: boolean;
   lifeInsuranceDeduction: number;
+  sirPct?: number;  // 社会保険料率(%) — 省略時15%
 }
 
 export function resolveKF(keyframes: Keyframe[], age: number, fallback: number): number {
@@ -343,6 +396,7 @@ export const EVENT_TYPES: Record<string, { label: string; icon: string; color: s
   insurance: { label: "保険",       icon: "🛡️", color: "#6366f1", defaultAnnual: 0,  defaultOnetime: 0,   defaultDuration: 0 },
   travel:    { label: "旅行・趣味", icon: "✈️", color: "#14b8a6", defaultAnnual: 30,  defaultOnetime: 0,   defaultDuration: 0 },
   rent:      { label: "家賃",       icon: "🏢", color: "#64748b", defaultAnnual: 120, defaultOnetime: 0,   defaultDuration: 0 },
+  nursing:   { label: "介護",       icon: "🏥", color: "#be185d", defaultAnnual: 84,  defaultOnetime: 0,   defaultDuration: 6 },
   death:     { label: "死亡",       icon: "⚰️", color: "#1e293b", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
   custom:    { label: "カスタム",   icon: "📌", color: "#78716c", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
 };

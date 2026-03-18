@@ -32,7 +32,7 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
     }
   }, [existingEvent]);
 
-  // 遺族年金プレビュー（令和6年度基準、calc.ts calcSurvivorPension と同じ式）
+  // 遺族年金プレビュー（令和7年度基準、calc.ts calcSurvivorPension と同じ式）
   const calcPensionPreview = () => {
     const avgSalary = avgAnnualSalaryMan * 10000;
     // 遺族基礎年金（子がいる場合のみ）
@@ -47,10 +47,19 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
     const avgMonthly = Math.min(avgSalary / 12, 650000); // 標準報酬上限65万
     const contributionMonths = Math.max((deathAge - 22) * 12, 300);
     const employeePension = Math.round(avgMonthly * 5.481 / 1000 * contributionMonths * 3 / 4);
-    // 中高齢寡婦加算（子なし、遺族40-65歳）
-    const widowSupplement = childCount === 0 && survivorAge >= 40 && survivorAge < 65 ? 612000 : 0;
+    // 中高齢寡婦加算（妻のみ、子なし、遺族40-65歳）
+    // 令和7年改正: 2028年度以降は段階的逓減
+    const deathCalYear = new Date().getFullYear() + (deathAge - currentAge);
+    let widowTaperRate = 1;
+    if (deathCalYear >= 2028) {
+      const elapsed = deathCalYear - 2028 + 1;
+      widowTaperRate = Math.max(26 - elapsed, 0) / 26;
+    }
+    const widowFull = 623800;
+    const widowSupplement = childCount === 0 && survivorAge >= 40 && survivorAge < 65
+      ? Math.round(widowFull * widowTaperRate) : 0;
     const total = basicPension + employeePension + widowSupplement;
-    return { basicPension, employeePension, widowSupplement, total, totalMan: Math.round(total / 10000) };
+    return { basicPension, employeePension, widowSupplement, widowTaperRate, total, totalMan: Math.round(total / 10000) };
   };
   const pensionPreview = calcPensionPreview();
 
@@ -126,7 +135,7 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
 
           {/* 遺族年金（自動計算） */}
           <div className="rounded border p-3 space-y-2">
-            <label className="block font-semibold text-gray-600">遺族年金（自動計算・令和6年度基準）</label>
+            <label className="block font-semibold text-gray-600">遺族年金（自動計算・令和7年度基準）</label>
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="block text-gray-500 mb-0.5">18歳未満の子の数（プレビュー用）</label>
@@ -150,7 +159,13 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
               <div>遺族厚生年金: <b>{Math.round(pensionPreview.employeePension / 10000)}万円/年</b>
                 {` (月額${Math.min(Math.round(avgAnnualSalaryMan * 10000 / 12), 650000).toLocaleString()}円×5.481/1000×${Math.max((deathAge - 22) * 12, 300)}月×3/4)`}</div>
               {pensionPreview.widowSupplement > 0 && (
-                <div>中高齢寡婦加算: <b>{Math.round(pensionPreview.widowSupplement / 10000)}万円/年</b> (子なし・40-65歳)</div>
+                <div>中高齢寡婦加算: <b>{Math.round(pensionPreview.widowSupplement / 10000)}万円/年</b>
+                  {pensionPreview.widowTaperRate < 1
+                    ? ` (逓減${Math.round(pensionPreview.widowTaperRate * 100)}% — 令和7年改正)`
+                    : " (子なし・40-65歳の妻)"}</div>
+              )}
+              {childCount === 0 && survivorAge >= 40 && survivorAge < 65 && pensionPreview.widowTaperRate === 0 && (
+                <div className="text-orange-600">中高齢寡婦加算: 廃止済み（{new Date().getFullYear() + (deathAge - currentAge)}年死亡）</div>
               )}
               <div className="font-bold border-t pt-1 mt-1">プレビュー合計: 約{pensionPreview.totalMan}万円/年</div>
               <div className="text-[10px] text-gray-400">

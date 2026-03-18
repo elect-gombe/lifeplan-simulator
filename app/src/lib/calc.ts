@@ -1,6 +1,6 @@
 import type { Scenario, YearResult, ScenarioResult, BaseResult, TaxOpts, Keyframe, LifeEvent, EventYearCost, PropertyParams, CarParams, SpouseConfig, NISAConfig, BalancePolicy } from "./types";
 import { resolveKF, isEventActive, resolveEventAge } from "./types";
-import { txInc, mR, fLm, calcFurusatoDonation, iTx, rTx, apTxCr, rDed, rTxC, annuityTax, estimatePublicPension } from "./tax";
+import { txInc, mR, fLm, calcFurusatoDonation, iTx, rTx, apTxCr, hlResidentCap, rDed, rTxC, annuityTax, estimatePublicPension, empDed, spouseDeduction, calcLifeInsuranceDeduction } from "./tax";
 
 // ===== Pension-related constants (令和6年度基準) =====
 /** 遺族基礎年金 基本額（円/年） */
@@ -17,8 +17,12 @@ const STANDARD_MONTHLY_SALARY_CAP = 650000;
 const MIN_CONTRIBUTION_MONTHS = 300;
 /** 遺族厚生年金の給付乗率 (3/4) */
 const SURVIVOR_EMPLOYEE_PENSION_RATIO = 3 / 4;
-/** 中高齢寡婦加算 額（円/年） */
-const WIDOW_SUPPLEMENT_AMOUNT = 612000;
+/** 中高齢寡婦加算 満額（円/年）— 令和6年度: 612,000→令和7年度: 623,800 */
+const WIDOW_SUPPLEMENT_FULL = 623800;
+/** 中高齢寡婦加算 段階的廃止: 施行年度（令和10年=2028） */
+const WIDOW_SUPPLEMENT_REFORM_START_YEAR = 2028;
+/** 中高齢寡婦加算 段階的廃止: 逓減期間（26段階で25年かけて0へ） */
+const WIDOW_SUPPLEMENT_PHASE_OUT_STEPS = 26;
 /** 住宅ローン控除: 期間（年） */
 const HOUSING_LOAN_DEDUCTION_YEARS = 13;
 /** 住宅ローン控除: 控除率 */
@@ -78,9 +82,9 @@ export function loanBalanceAfterYears(principal: number, annualRate: number, tot
   return Math.max(Math.round(principal * Math.pow(1 + r, m) - monthly * (Math.pow(1 + r, m) - 1) / r), 0);
 }
 
-// ===== 遺族年金の自動計算（令和6年度基準） =====
+// ===== 遺族年金の自動計算（令和7年度基準） =====
 // 参考: 日本年金機構
-// https://www.nenkin.go.jp/service/jukyu/izokunenkin/
+// https://www.nenkin.go.jp/service/jukyu/izokunenkin/jukyu-yoken/20150424.html
 //
 // ■ 遺族基礎年金（国民年金法第37条〜）
 //   受給要件: 子（18歳到達年度末まで、または20歳未満で障害1-2級）のある配偶者
@@ -95,24 +99,38 @@ export function loanBalanceAfterYears(principal: number, annualRate: number, tot
 //   遺族厚生年金 = 報酬比例部分 × 3/4
 //   ※平均標準報酬額の上限: 等級50（650,000円/月）
 //
-// ■ 中高齢寡婦加算（厚生年金保険法第62条）
+// ■ 中高齢寡婦加算（厚生年金保険法第62条、改正法附則第15条）
 //   要件: 夫死亡時に40歳以上65歳未満の妻で、遺族基礎年金を受給できない
 //        （子がいないor子が全員18歳超）
-//   年額: 612,000円（令和6年度）
+//   満額: 623,800円/年（令和7年度）
 //   65歳になると終了（老齢基礎年金に切り替え）
+//
+//   【令和7年改正 — 段階的廃止（令和10年4月施行）】
+//   ・2028年4月以降に新たに受給権が発生する場合、逓減率を適用
+//   ・逓減率 = (26 - 経過年数) / 26  （経過年数 = 死亡年度 - 2027）
+//     2028年度(経過1年): 25/26 ≒ 0.962
+//     2029年度(経過2年): 24/26 ≒ 0.923
+//     ...
+//     2052年度(経過25年): 1/26 ≒ 0.038
+//     2053年度以降: 0（完全廃止）
+//   ・既受給者（2028年3月以前に受給権発生）は満額のまま
+//   ・逓減率は「死亡日が属する年度」で確定し、受給中は変わらない
 //
 function calcSurvivorPension(
   avgAnnualSalary: number,
   contributionYears: number,
   childAges: number[],
-  survivorAge?: number, // 遺族（配偶者）の現在年齢
+  survivorAge?: number,      // 遺族（配偶者）の現在年齢
+  survivorIsFemale: boolean = true, // 遺族が女性か（中高齢寡婦加算は妻のみ）
+  deathCalendarYear?: number, // 死亡した暦年（段階的廃止の逓減率算定用）
 ): { basic: number; employee: number; widowSupplement: number; total: number; detail: string } {
   // 18歳以下の子の数
   const eligibleChildren = childAges.filter(a => a >= 0 && a < 18).length;
 
   // ■ 遺族基礎年金
+  // 65歳以降は自分の老齢基礎年金に切り替わるため、遺族基礎年金は支給されない
   let basic = 0;
-  if (eligibleChildren > 0) {
+  if (eligibleChildren > 0 && (survivorAge == null || survivorAge < 65)) {
     basic = SURVIVOR_BASIC_PENSION_BASE;
     for (let i = 0; i < eligibleChildren; i++) {
       basic += i < 2 ? SURVIVOR_CHILD_ADDITION_1ST_2ND : SURVIVOR_CHILD_ADDITION_3RD_PLUS;
@@ -120,17 +138,24 @@ function calcSurvivorPension(
   }
 
   // ■ 遺族厚生年金
-  // 平均標準報酬額（上限65万/月）
   const avgMonthly = Math.min(avgAnnualSalary / 12, STANDARD_MONTHLY_SALARY_CAP);
   const months = Math.max(contributionYears * 12, MIN_CONTRIBUTION_MONTHS);
   const reportProportion = avgMonthly * PENSION_RATE_PER_MILLE / 1000 * months;
   const employee = Math.round(reportProportion * SURVIVOR_EMPLOYEE_PENSION_RATIO);
 
-  // ■ 中高齢寡婦加算
-  // 子がいない or 子が全員18歳超 かつ 遺族が40歳以上65歳未満
+  // ■ 中高齢寡婦加算（妻のみ対象）
+  // 令和7年改正: 2028年度以降の新規受給は26分の1ずつ逓減、2053年度に完全廃止
   let widowSupplement = 0;
-  if (survivorAge != null && eligibleChildren === 0 && survivorAge >= 40 && survivorAge < 65) {
-    widowSupplement = WIDOW_SUPPLEMENT_AMOUNT;
+  let widowTaperRate = 1; // 逓減率（1=満額, 0=廃止）
+  if (survivorIsFemale && survivorAge != null && eligibleChildren === 0 && survivorAge >= 40 && survivorAge < 65) {
+    if (deathCalendarYear != null && deathCalendarYear >= WIDOW_SUPPLEMENT_REFORM_START_YEAR) {
+      // 2028年度以降: 段階的逓減
+      const elapsedYears = deathCalendarYear - WIDOW_SUPPLEMENT_REFORM_START_YEAR + 1; // 2028→1, 2029→2, ...
+      const remaining = WIDOW_SUPPLEMENT_PHASE_OUT_STEPS - elapsedYears; // 26-1=25, 26-2=24, ...
+      widowTaperRate = Math.max(remaining, 0) / WIDOW_SUPPLEMENT_PHASE_OUT_STEPS;
+    }
+    // widowTaperRate: 2027以前→1.0, 2028→25/26, ..., 2052→1/26, 2053以降→0
+    widowSupplement = Math.round(WIDOW_SUPPLEMENT_FULL * widowTaperRate);
   }
 
   const total = basic + employee + widowSupplement;
@@ -139,7 +164,10 @@ function calcSurvivorPension(
   const parts: string[] = [];
   if (basic > 0) parts.push(`基礎${Math.round(basic / 10000)}万(子${eligibleChildren}人)`);
   parts.push(`厚生${Math.round(employee / 10000)}万`);
-  if (widowSupplement > 0) parts.push(`寡婦加算${Math.round(widowSupplement / 10000)}万`);
+  if (widowSupplement > 0) {
+    const taperPct = Math.round(widowTaperRate * 100);
+    parts.push(`寡婦加算${Math.round(widowSupplement / 10000)}万${taperPct < 100 ? `(${taperPct}%)` : ""}`);
+  }
 
   return { basic, employee, widowSupplement, total, detail: parts.join("+") };
 }
@@ -197,14 +225,38 @@ function computePropertyYearCost(pp: PropertyParams, yearsSincePurchase: number,
     });
 
     // Loan deduction (13 years, 0.7% of balance, max 35万)
+    // ペアローン: deductionTarget に応じて本人/配偶者に分割
     if (pp.hasLoanDeduction && yearsSincePurchase < HOUSING_LOAN_DEDUCTION_YEARS) {
       const deduction = Math.min(Math.round(balance * HOUSING_LOAN_DEDUCTION_RATE), HOUSING_LOAN_DEDUCTION_MAX);
       const isLastYear = yearsSincePurchase === HOUSING_LOAN_DEDUCTION_YEARS - 1;
-      costs.push({
-        label: "住宅ローン控除", icon: "🏠", color: "#16a34a", amount: -deduction,
-        detail: `残高${Math.round(balance / 10000)}万×0.7% (${yearsSincePurchase + 1}/13年目)`,
-        isPhaseChange: isLastYear, phaseLabel: isLastYear ? "住宅ローン控除 終了" : undefined,
-      });
+      const detailBase = `残高${Math.round(balance / 10000)}万×0.7% (${yearsSincePurchase + 1}/13年目)`;
+      const dedTarget = pp.deductionTarget || "self";
+      if (dedTarget === "both") {
+        const selfRatio = (pp.pairRatio ?? 50) / 100;
+        const selfDed = Math.round(deduction * selfRatio);
+        const spouseDed = deduction - selfDed;
+        if (selfDed > 0) {
+          costs.push({
+            label: "住宅ローン控除(本人)", icon: "🏠", color: "#16a34a", amount: -selfDed,
+            detail: `${detailBase} 本人${Math.round(selfRatio * 100)}%`,
+            isPhaseChange: isLastYear, phaseLabel: isLastYear ? "住宅ローン控除 終了" : undefined,
+          });
+        }
+        if (spouseDed > 0) {
+          costs.push({
+            label: "住宅ローン控除(配偶者)", icon: "🏠", color: "#16a34a", amount: -spouseDed,
+            detail: `${detailBase} 配偶者${Math.round((1 - selfRatio) * 100)}%`,
+            isPhaseChange: isLastYear, phaseLabel: isLastYear ? "住宅ローン控除 終了" : undefined,
+          });
+        }
+      } else {
+        const dedLabel = dedTarget === "spouse" ? "住宅ローン控除(配偶者)" : "住宅ローン控除(本人)";
+        costs.push({
+          label: dedLabel, icon: "🏠", color: "#16a34a", amount: -deduction,
+          detail: detailBase,
+          isPhaseChange: isLastYear, phaseLabel: isLastYear ? "住宅ローン控除 終了" : undefined,
+        });
+      }
     } else if (pp.hasLoanDeduction && yearsSincePurchase === HOUSING_LOAN_DEDUCTION_YEARS) {
       costs.push({
         label: "住宅ローン控除終了", icon: "🏠", color: "#94a3b8", amount: 0,
@@ -275,6 +327,73 @@ export interface CalcParams {
   inflationRate: number; // % per year
 }
 
+// ===== 相続税の計算（法定相続分課税方式・簡易版） =====
+// 参考: 国税庁 No.4155
+// 基礎控除: 3,000万 + 600万 × 法定相続人数
+// みなし相続財産の非課税: 死亡保険金・死亡退職金それぞれ 500万 × 法定相続人数
+// 税率: 累進課税（法定相続分で按分→各人の税額を合計）
+// 簡易化: 配偶者+子の標準家族構成を前提、配偶者の税額軽減（1.6億 or 法定相続分）は適用
+function calcInheritanceTax(
+  estate: number,              // 正味の遺産額（円）
+  deemedDC: number,            // みなし相続: DC死亡一時金（円）
+  deemedInsurance: number,     // みなし相続: 死亡保険金（円）
+  legalHeirs: number,          // 法定相続人数
+  hasSpouseSurvivor: boolean,  // 配偶者が遺族にいるか
+): { tax: number; taxableEstate: number; detail: string } {
+  // みなし相続財産の非課税枠
+  const dcExempt = Math.min(deemedDC, 5000000 * legalHeirs);
+  const insExempt = Math.min(deemedInsurance, 5000000 * legalHeirs);
+  // 課税価格
+  const taxablePrice = estate + (deemedDC - dcExempt) + (deemedInsurance - insExempt);
+  // 基礎控除
+  const basicDeduction = 30000000 + 6000000 * legalHeirs;
+  const taxableEstate = Math.max(taxablePrice - basicDeduction, 0);
+  if (taxableEstate <= 0) {
+    return { tax: 0, taxableEstate: 0, detail: `遺産${Math.round(taxablePrice / 10000)}万≦基礎控除${Math.round(basicDeduction / 10000)}万 → 非課税` };
+  }
+  // 法定相続分で按分して各人の税額を計算
+  // 配偶者: 1/2、子: 残り1/2を均等分割
+  const childCount = Math.max(legalHeirs - (hasSpouseSurvivor ? 1 : 0), 1);
+  const spouseShare = hasSpouseSurvivor ? taxableEstate / 2 : 0;
+  const childShare = hasSpouseSurvivor ? taxableEstate / 2 / childCount : taxableEstate / childCount;
+
+  // 税率テーブル（法定相続分に応ずる取得金額）
+  const calcTaxForShare = (share: number) => {
+    if (share <= 10000000) return share * 0.10;
+    if (share <= 30000000) return share * 0.15 - 500000;
+    if (share <= 50000000) return share * 0.20 - 2000000;
+    if (share <= 100000000) return share * 0.30 - 7000000;
+    if (share <= 200000000) return share * 0.40 - 17000000;
+    if (share <= 300000000) return share * 0.45 - 27000000;
+    if (share <= 600000000) return share * 0.50 - 42000000;
+    return share * 0.55 - 72000000;
+  };
+
+  let totalTax = 0;
+  if (hasSpouseSurvivor) totalTax += calcTaxForShare(spouseShare);
+  totalTax += calcTaxForShare(childShare) * childCount;
+  totalTax = Math.round(totalTax);
+
+  // 配偶者の税額軽減（法定相続分 or 1.6億円のいずれか大きい方まで非課税）
+  if (hasSpouseSurvivor) {
+    const spouseActualShare = taxablePrice / 2; // 法定相続分
+    const spouseExemptLimit = Math.max(spouseActualShare, 160000000);
+    if (spouseActualShare <= spouseExemptLimit) {
+      // 配偶者分の税額を全額控除
+      totalTax -= Math.round(calcTaxForShare(spouseShare));
+      totalTax = Math.max(totalTax, 0);
+    }
+  }
+
+  const parts: string[] = [];
+  parts.push(`課税遺産${Math.round(taxableEstate / 10000)}万`);
+  if (dcExempt > 0) parts.push(`DC非課税${Math.round(dcExempt / 10000)}万`);
+  if (insExempt > 0) parts.push(`保険非課税${Math.round(insExempt / 10000)}万`);
+  if (hasSpouseSurvivor) parts.push(`配偶者軽減あり`);
+
+  return { tax: totalTax, taxableEstate, detail: parts.join(" ") };
+}
+
 // 扶養控除: child age determines deduction amount
 function dependentDeduction(childAge: number): number {
   if (childAge < 16) return 0;
@@ -295,12 +414,13 @@ export function computeBase(params: CalcParams): BaseResult {
   const { defaultGrossMan, taxOpts, housingLoanDed } = params;
   const grossYen = defaultGrossMan * 10000;
   const depDed = Math.max(taxOpts.dependentsCount, 0) * 380000;
-  const spouseDed = taxOpts.hasSpouseDeduction ? 380000 : 0;
+  const spouseDed = 0; // Now dynamically calculated per-year via spouseDeduction()
   const lifeDed = Math.max(taxOpts.lifeInsuranceDeduction, 0);
   const hasDepSetting = depDed > 0, hasSpouseSetting = spouseDed > 0;
   const hasLifeSetting = lifeDed > 0, hasHousingSetting = housingLoanDed > 0;
   const bTI = txInc(grossYen, taxOpts);
-  const bMR = mR(bTI), bFL = fLm(bTI, bMR);
+  const bEstHLRT = housingLoanDed > 0 ? Math.min(Math.max(housingLoanDed - iTx(bTI), 0), hlResidentCap(bTI)) : 0;
+  const bMR = mR(bTI), bFL = fLm(bTI, bMR, bEstHLRT);
   return {
     bTI, bMR, bFL, depDed, spouseDed, lifeDed, housingLoanDed,
     hasDepSetting, hasSpouseSetting, hasLifeSetting, hasHousingSetting,
@@ -318,6 +438,8 @@ function getEffective(s: Scenario, key: string, baseScenario: Scenario | null | 
 // Spouse tax calculation — same framework as main person
 interface SpouseTaxResult {
   gross: number;
+  adjGross: number;             // DC自己負担控除後の収入(税計算ベース)
+  sir: number;                  // 社保料率(小数)
   incomeTax: number;
   residentTax: number;
   socialInsurance: number;
@@ -329,17 +451,25 @@ interface SpouseTaxResult {
   furusatoLimit: number;
   furusatoDonation: number;
   takeHome: number;
+  taxableIncome: number;        // 課税所得(ふるさと控除後=税計算ベース)
+  marginalRate: number;
+  hlDeduction: number;          // 住宅ローン控除 適用額
+  hlAvail: number;              // 住宅ローン控除 可能額
+  hlIT: number;                 // 住宅ローン控除 所得税から
+  hlRT: number;                 // 住宅ローン控除 住民税から
 }
 function calcSpouseFullTax(
   grossMan: number, sirPct: number,
   dcTotal: number, companyDC: number, idecoMonthly: number,
   hasFurusato: boolean, housingLoanDed: number,
-  dependentDeductionTotal: number = 0
+  dependentDeductionTotal: number = 0,
+  lifeInsuranceDed: number = 0
 ): SpouseTaxResult {
   const gross = grossMan * 10000;
-  const zero: SpouseTaxResult = { gross: 0, incomeTax: 0, residentTax: 0, socialInsurance: 0,
+  const zero: SpouseTaxResult = { gross: 0, adjGross: 0, sir: 0, incomeTax: 0, residentTax: 0, socialInsurance: 0,
     dcContribution: 0, idecoContribution: 0, selfDCContribution: 0,
-    incomeTaxSaving: 0, residentTaxSaving: 0, furusatoLimit: 0, furusatoDonation: 0, takeHome: 0 };
+    incomeTaxSaving: 0, residentTaxSaving: 0, furusatoLimit: 0, furusatoDonation: 0, takeHome: 0,
+    taxableIncome: 0, marginalRate: 0, hlDeduction: 0, hlAvail: 0, hlIT: 0, hlRT: 0 };
   if (gross <= 0) return zero;
 
   const sir = sirPct / 100;
@@ -348,12 +478,19 @@ function calcSpouseFullTax(
   const aI = idecoMonthly * 12;
   const aT = (dcTotal + idecoMonthly) * 12;
   const selfDC = ds * 12;
-  const spTaxOpts = { dependentsCount: 0, hasSpouseDeduction: false, lifeInsuranceDeduction: 0, dependentDeductionTotal };
+  const spTaxOpts = { dependentsCount: 0, lifeInsuranceDeduction: lifeInsuranceDed, sirPct, dependentDeductionTotal };
+
+  const spEstHLRT = (ti: number) => {
+    if (housingLoanDed <= 0) return 0;
+    const estIT = iTx(ti);
+    const itUsed = Math.min(estIT, housingLoanDed);
+    return Math.min(housingLoanDed - itUsed, hlResidentCap(ti));
+  };
 
   // Base tax (no DC/iDeCo)
   const baseTI = txInc(gross, spTaxOpts);
   const baseMR = mR(baseTI);
-  const baseFL = fLm(baseTI, baseMR);
+  const baseFL = fLm(baseTI, baseMR, spEstHLRT(baseTI));
   const baseFuruDon = hasFurusato ? calcFurusatoDonation(baseFL) : 0;
   const baseFDed = hasFurusato ? Math.max(baseFuruDon - 2000, 0) : 0;
   const baseTIaF = Math.max(baseTI - baseFDed, 0);
@@ -364,7 +501,7 @@ function calcSpouseFullTax(
   const adjG = gross - aDS;
   const adjTI = Math.max(txInc(adjG, spTaxOpts) - aI, 0);
   const nMR = mR(adjTI);
-  const nFL = fLm(adjTI, nMR);
+  const nFL = fLm(adjTI, nMR, spEstHLRT(adjTI));
   const furuDonNew = hasFurusato ? calcFurusatoDonation(nFL) : 0;
   const nFDed = hasFurusato ? Math.max(furuDonNew - 2000, 0) : 0;
   const adjTIaF = Math.max(adjTI - nFDed, 0);
@@ -381,11 +518,14 @@ function calcSpouseFullTax(
   const takeHome = gross - incomeTax - residentTax - socialInsurance - selfDC - aI;
 
   return {
-    gross, incomeTax, residentTax, socialInsurance,
+    gross, adjGross: adjG, sir,
+    incomeTax, residentTax, socialInsurance,
     dcContribution: aT, idecoContribution: aI, selfDCContribution: selfDC,
     incomeTaxSaving: itSv, residentTaxSaving: rtSv,
     furusatoLimit: nFL, furusatoDonation: furuDonNew,
-    takeHome,
+    takeHome, taxableIncome: Math.round(adjTIaF), marginalRate: mR(adjTIaF),
+    hlDeduction: nTaxAdj.itUsed + nTaxAdj.rtUsed, hlAvail: housingLoanDed,
+    hlIT: nTaxAdj.itUsed, hlRT: nTaxAdj.rtUsed,
   };
 }
 
@@ -468,37 +608,55 @@ function calcDCReceiveTax(
 
 export function computeScenario(s: Scenario, base: BaseResult, params: CalcParams, baseScenario?: Scenario | null): ScenarioResult {
   const { defaultGrossMan, rr, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed } = params;
+
+  // Linked settings resolution (must be before age resolution)
+  const linked = !!(s.linkedToBase && baseScenario);
+  const base_ = linked ? baseScenario! : s;
+  const overSet = s.overrideSettings || [];
+  const settingLinked = (key: string) => linked && !overSet.includes(key as any);
+
   // 年齢はシナリオから取得（retirementAgeはsimEndAgeの意味で使う）
-  const currentAge = s.currentAge ?? params.currentAge;
-  const selfRetirementAge = s.retirementAge ?? 65;
-  const retirementAge = s.simEndAge ?? params.retirementAge; // シミュレーション終了年齢
+  const currentAge = (settingLinked("currentAge") ? base_.currentAge : s.currentAge) ?? params.currentAge;
+  const baseCalendarYear = new Date().getFullYear(); // 暦年基準（年齢→暦年変換用）
+  const selfRetirementAge = (settingLinked("retirementAge") ? base_.retirementAge : s.retirementAge) ?? 65;
+  const retirementAge = (settingLinked("simEndAge") ? base_.simEndAge : s.simEndAge) ?? params.retirementAge; // シミュレーション終了年齢
   const r = rr / 100;
   const sir = sirPct / 100;
   const otherRet = hasRet ? retAmt : 0;
 
-  // Linked settings resolution
-  const linked = !!(s.linkedToBase && baseScenario);
-  const base_ = linked ? baseScenario! : s;
-
+  const selfGender = (settingLinked("selfGender") ? base_.selfGender : s.selfGender) || "male";
   const hasFuru = !!(linked ? base_.hasFurusato : s.hasFurusato);
-  const effectiveCurrentAssets = linked ? base_.currentAssetsMan : s.currentAssetsMan;
+  const effectiveCurrentAssets = settingLinked("currentAssetsMan") ? base_.currentAssetsMan : s.currentAssetsMan;
   const growthRate = linked && !s.overrideTracks.includes("incomeKF" as any)
     ? base_.salaryGrowthRate : s.salaryGrowthRate;
+  const effectiveDCReceiveMethod = s.dcReceiveMethod || (linked ? base_.dcReceiveMethod : undefined);
+  const effectiveYears = settingLinked("years") ? base_.years : s.years;
+  const effectivePensionStartAge = settingLinked("pensionStartAge") ? (base_.pensionStartAge ?? s.pensionStartAge) : s.pensionStartAge;
+  const effectivePensionWorkStartAge = settingLinked("pensionWorkStartAge") ? (base_.pensionWorkStartAge ?? s.pensionWorkStartAge) : s.pensionWorkStartAge;
+  const effectiveDepHolder = settingLinked("dependentDeductionHolder") ? (base_.dependentDeductionHolder || s.dependentDeductionHolder) : s.dependentDeductionHolder;
 
   const incomeKF: Keyframe[] = getEffective(s, "incomeKF", baseScenario) || [];
   const expenseKF: Keyframe[] = getEffective(s, "expenseKF", baseScenario) || [];
   const dcTotalKF: Keyframe[] = getEffective(s, "dcTotalKF", baseScenario) || [];
   const companyDCKF: Keyframe[] = getEffective(s, "companyDCKF", baseScenario) || [];
   const idecoKF: Keyframe[] = getEffective(s, "idecoKF", baseScenario) || [];
-  const baseEvents = (linked) ? (baseScenario!.events || []).filter(e => !(s.excludedBaseEventIds || []).includes(e.id)) : [];
+  const disabledBaseIds = s.disabledBaseEventIds || [];
+  const baseEvents = (linked) ? (baseScenario!.events || []).filter(e => !(s.excludedBaseEventIds || []).includes(e.id))
+    .map(e => disabledBaseIds.includes(e.id) ? { ...e, disabled: true } : e) : [];
   const ownEvents = s.events || [];
   const events = [...baseEvents, ...ownEvents].sort((a, b) => a.age - b.age);
 
-  // Spouse: use own if enabled, else inherit from base
-  const spouse: SpouseConfig | undefined =
+  // Spouse: use own if enabled, else inherit from base (with per-track overrides)
+  const rawSpouse: SpouseConfig | undefined =
     s.spouse?.enabled ? s.spouse
     : linked && base_.spouse?.enabled ? base_.spouse
     : undefined;
+  // Apply per-track overrides: if spouseOverrideTracks has a track, use s.spouse's data for it
+  const spouseOT = s.spouseOverrideTracks || [];
+  const spouse: SpouseConfig | undefined = rawSpouse && linked && !s.spouse?.enabled && s.spouse && spouseOT.length > 0
+    ? { ...rawSpouse, ...Object.fromEntries(spouseOT.map(k => [k, (s.spouse as any)?.[k] || []])),
+        ...(s.spouse.dcReceiveMethod ? { dcReceiveMethod: s.spouse.dcReceiveMethod } : {}) }
+    : rawSpouse;
 
   // NISA: use own if enabled, else inherit from base
   const nisaConfig: NISAConfig | undefined =
@@ -512,7 +670,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   // NISA config — 個人別に枠を管理
   const nisa: NISAConfig | undefined = nisaConfig;
   const nisaAccounts = nisa ? (nisa.accounts || 1) : 1;
-  const nisaReturnRate = nisa ? nisa.returnRate / 100 : 0;
+  const nisaReturnRate = r; // 共通の運用利回りを使用
   // 本人NISA枠
   const selfNISAAnnualLimit = nisa ? nisa.annualLimitMan * 10000 : 0;
   const selfNISALifetimeLimit = nisa ? nisa.lifetimeLimitMan * 10000 : 0;
@@ -560,9 +718,12 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     const yearsFromStart = age - currentAge;
     const inflationFactor = Math.pow(1 + inflation, yearsFromStart);
 
+    // Helper: event is disabled if itself or its parent is disabled
+    const isEffDisabled = (e: LifeEvent) => !!e.disabled || (e.parentId != null && !!events.find(p => p.id === e.parentId)?.disabled);
+
     // Check for death events (self and/or spouse)
-    const selfDeathEvent = events.find(e => e.type === "death" && e.deathParams && (e.target || "self") === "self" && age >= resolveEventAge(e, events));
-    const spouseDeathEvent = events.find(e => e.type === "death" && e.deathParams && e.target === "spouse" && age >= resolveEventAge(e, events));
+    const selfDeathEvent = events.find(e => !isEffDisabled(e) && e.type === "death" && e.deathParams && (e.target || "self") === "self" && age >= resolveEventAge(e, events));
+    const spouseDeathEvent = events.find(e => !isEffDisabled(e) && e.type === "death" && e.deathParams && e.target === "spouse" && age >= resolveEventAge(e, events));
     const isSelfDead = !!selfDeathEvent;
     const isSpouseDead = !!spouseDeathEvent;
     // Backward compat: use selfDeathEvent for old code paths
@@ -578,9 +739,10 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     const spouseAge = spouse ? spouse.currentAge + yearsFromStart : 0;
 
     // 本人の老齢年金（自動計算: 平均年収×加入年数から算出）
-    const selfPensionStartAge = s.pensionStartAge ?? 65;
-    const selfWorkStartAge = s.pensionWorkStartAge ?? 22;
+    const selfPensionStartAge = effectivePensionStartAge ?? 65;
+    const selfWorkStartAge = effectivePensionWorkStartAge ?? 22;
     let selfPensionIncome = 0;
+    let selfPensionEmployeeAnnual = 0; // 老齢厚生年金（報酬比例部分、併給調整用）
     let selfPensionDetail = "";
     if (!isSelfDead && age >= selfPensionStartAge) {
       const avgSalary = salaryYears > 0 ? cumulativeSalary / salaryYears : 0;
@@ -588,6 +750,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       const nationalMonths = Math.min((65 - 20) * 12, 480);
       const pe = estimatePublicPension(avgSalary, employeeMonths, nationalMonths, selfPensionStartAge);
       selfPensionIncome = pe.totalAnnual;
+      selfPensionEmployeeAnnual = Math.round(pe.employeeAnnual * pe.adjustmentFactor);
       selfPensionDetail = pe.detail;
     }
 
@@ -595,6 +758,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     const spPensionStartAge = spouse?.pensionStartAge ?? 65;
     const spWorkStartAge = spouse?.pensionWorkStartAge ?? 22;
     let spousePensionIncome = 0;
+    let spousePensionEmployeeAnnual = 0; // 老齢厚生年金（報酬比例部分、併給調整用）
     let spousePensionDetail = "";
     if (spouse && !isSpouseDead && spouseAge >= spPensionStartAge) {
       const avgSpSalary = spouseSalaryYears > 0 ? spouseCumulativeSalary / spouseSalaryYears : 0;
@@ -603,6 +767,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       const spNationalMonths = Math.min((65 - 20) * 12, 480);
       const pe = estimatePublicPension(avgSpSalary, spEmployeeMonths, spNationalMonths, spPensionStartAge);
       spousePensionIncome = pe.totalAnnual;
+      spousePensionEmployeeAnnual = Math.round(pe.employeeAnnual * pe.adjustmentFactor);
       spousePensionDetail = pe.detail;
     }
 
@@ -623,8 +788,23 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       salaryYears++;
     }
 
+    // 在職老齢年金（Working Elderly Pension Reduction）
+    // 年金受給中かつ給与収入がある場合、老齢厚生年金を減額
+    // 基本月額 + 総報酬月額相当額 > 50万/月 → 超過額の1/2が支給停止
+    let pensionReduction = 0;
+    if (selfPensionIncome > 0 && gross > 0) {
+      const basicMonthly = selfPensionEmployeeAnnual / 12;  // 老齢厚生年金の月額
+      const salaryMonthly = gross / 12;                      // 総報酬月額相当額
+      if (basicMonthly + salaryMonthly > 500000) {
+        const monthlyReduction = (basicMonthly + salaryMonthly - 500000) / 2;
+        const annualReduction = Math.min(monthlyReduction * 12, selfPensionEmployeeAnnual);
+        pensionReduction += annualReduction;
+        selfPensionIncome = selfPensionIncome - annualReduction;
+      }
+    }
+
     // Dependent deduction: compute first (needed for both self and spouse tax calc)
-    const childEvents = events.filter(e => e.type === "child" && isEventActive(e, age, events));
+    const childEvents = events.filter(e => !isEffDisabled(e) && e.type === "child" && isEventActive(e, age, events));
     let dependentDeductionTotal = 0;
     for (const ce of childEvents) {
       const childBirthAge = resolveEventAge(ce, events);
@@ -642,7 +822,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     });
 
     // 扶養控除は世帯主設定に応じて本人 or 配偶者に適用
-    const depHolder = s.dependentDeductionHolder || "self";
+    const depHolder = effectiveDepHolder || "self";
     const selfDepDed = depHolder === "self" ? dependentDeductionTotal : 0;
     const spouseDepDed = depHolder === "spouse" ? dependentDeductionTotal : 0;
 
@@ -651,6 +831,43 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       dcContribution: 0, idecoContribution: 0, selfDCContribution: 0,
       incomeTaxSaving: 0, residentTaxSaving: 0, furusatoLimit: 0, furusatoDonation: 0, takeHome: 0 };
     let spouseTaxResult: SpouseTaxResult = zeroSpouse;
+    // Pre-scan: compute spouse insurance premiums for life insurance deduction
+    let preSpouseInsPremium = 0;
+    for (const e of events) {
+      if (isEffDisabled(e) || !isEventActive(e, age, events) || !e.insuranceParams) continue;
+      const insTarget = e.target || "self";
+      if (insTarget !== "spouse") continue;
+      const insuredDead = isSpouseDead;
+      if (!insuredDead && age < e.insuranceParams.coverageEndAge) {
+        preSpouseInsPremium += e.insuranceParams.premiumMonthlyMan * 12 * 10000;
+      }
+    }
+    const preSpouseLifeInsDed = calcLifeInsuranceDeduction(preSpouseInsPremium);
+
+    // Pre-scan: compute spouse housing loan deduction for spouse tax calc
+    let preSpouseHLDed = 0;
+    for (const e of events) {
+      if (isEffDisabled(e) || !isEventActive(e, age, events) || !e.propertyParams) continue;
+      const pp = e.propertyParams;
+      if (!pp.hasLoanDeduction) continue;
+      const eAge = resolveEventAge(e, events);
+      const yearsSince = age - eAge;
+      if (yearsSince >= HOUSING_LOAN_DEDUCTION_YEARS) continue;
+      const loanAmt = (pp.priceMan - pp.downPaymentMan) * 10000;
+      if (loanAmt <= 0) continue;
+      const rate = pp.rateType === "fixed" ? pp.fixedRate
+        : (yearsSince >= pp.variableRiseAfter ? pp.variableRiskRate : pp.variableInitRate);
+      const bal = loanBalanceAfterYears(loanAmt, rate, pp.loanYears, yearsSince, pp.repaymentType || "equal_payment");
+      const ded = Math.min(Math.round(bal * HOUSING_LOAN_DEDUCTION_RATE), HOUSING_LOAN_DEDUCTION_MAX);
+      const dedTarget = pp.deductionTarget || "self";
+      if (dedTarget === "spouse") {
+        preSpouseHLDed += ded;
+      } else if (dedTarget === "both") {
+        const selfRatio = (pp.pairRatio ?? 50) / 100;
+        preSpouseHLDed += ded - Math.round(ded * selfRatio);
+      }
+    }
+
     if (spouse) {
       const spouseAge = spouse.currentAge + yearsFromStart;
       const spouseRetired = spouseAge >= (spouse.retirementAge ?? 65);
@@ -667,7 +884,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         const spCompanyDC = resolveKF(spouse.companyDCKF || [], spouseAge, 0);
         const spIdeco = resolveKF(spouse.idecoKF || [], spouseAge, 0);
         const spSirPct = spouse.sirPct || sirPct;
-        spouseTaxResult = calcSpouseFullTax(grownSpGrossMan, spSirPct, spDCTotal, spCompanyDC, spIdeco, spouse.hasFurusato, 0, spouseDepDed);
+        spouseTaxResult = calcSpouseFullTax(grownSpGrossMan, spSirPct, spDCTotal, spCompanyDC, spIdeco, spouse.hasFurusato, preSpouseHLDed, spouseDepDed, preSpouseLifeInsDed);
       }
     }
     const spouseGross = spouseTaxResult.gross;
@@ -677,19 +894,38 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       spouseSalaryYears++;
     }
 
+    // 在職老齢年金: 配偶者分
+    if (spousePensionIncome > 0 && spouseGross > 0) {
+      const basicMonthly = spousePensionEmployeeAnnual / 12;
+      const salaryMonthly = spouseGross / 12;
+      if (basicMonthly + salaryMonthly > 500000) {
+        const monthlyReduction = (basicMonthly + salaryMonthly - 500000) / 2;
+        const annualReduction = Math.min(monthlyReduction * 12, spousePensionEmployeeAnnual);
+        pensionReduction += annualReduction;
+        spousePensionIncome = spousePensionIncome - annualReduction;
+      }
+    }
+
     // Base living expense (万円/月 → 年額, with inflation)
     const baseLivingMonthlyMan = resolveKF(expenseKF, age, 15);
     let baseLivingExpense = baseLivingMonthlyMan * 12 * 10000 * inflationFactor;
 
     // Event costs: structured params (property/car/insurance) + simple events
-    const activeEvts = events.filter(e => isEventActive(e, age, events));
-    const onetimeEvts = events.filter(e => resolveEventAge(e, events) === age);
+    const activeEvts = events.filter(e => !isEffDisabled(e) && isEventActive(e, age, events));
+    // Property events with propertyParams: fixed costs (管理費・固定資産税) continue forever even after durationYears
+    const propertyFixedCostEvts = events.filter(e => !isEffDisabled(e) && e.propertyParams && !isEventActive(e, age, events) && age >= resolveEventAge(e, events));
+    const onetimeEvts = events.filter(e => !isEffDisabled(e) && resolveEventAge(e, events) === age);
     let eventOngoing = 0;
     let eventOnetime = 0;
     const eventCostBreakdown: EventYearCost[] = [];
+    let inheritanceTax = 0;
+    let inheritanceEstate = 0;
+    let dcReceiveTax = 0;
 
     // Insurance premiums and payouts
     let insurancePremiumTotal = 0;
+    let insurancePremiumSelf = 0;   // 本人対象の保険料（生命保険料控除用）
+    let insurancePremiumSpouse = 0; // 配偶者対象の保険料（生命保険料控除用）
     let insurancePayoutTotal = 0;
 
     for (const e of activeEvts) {
@@ -764,6 +1000,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         if (!insuredDead && age < ip.coverageEndAge) {
           const premium = ip.premiumMonthlyMan * 12 * 10000;
           insurancePremiumTotal += premium;
+          if (insTarget === "spouse") { insurancePremiumSpouse += premium; } else { insurancePremiumSelf += premium; }
           eventCostBreakdown.push({ label: `保険料(${e.label})`, icon: "🛡️", color: "#6366f1", amount: premium });
           eventOngoing += premium;
         }
@@ -785,6 +1022,21 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
           eventCostBreakdown.push(et);
           eventOngoing += ongoing;
         }
+      }
+    }
+
+    // Property fixed costs that continue after durationYears (管理費・固定資産税)
+    for (const e of propertyFixedCostEvts) {
+      const pp = e.propertyParams!;
+      if (pp.maintenanceMonthlyMan > 0) {
+        const amt = Math.round(pp.maintenanceMonthlyMan * 12 * 10000 * inflationFactor);
+        eventCostBreakdown.push({ label: "管理費・修繕", icon: "🔧", color: "#64748b", amount: amt });
+        eventOngoing += amt;
+      }
+      if (pp.taxAnnualMan > 0) {
+        const amt = Math.round(pp.taxAnnualMan * 10000 * inflationFactor);
+        eventCostBreakdown.push({ label: "固定資産税", icon: "🏛️", color: "#64748b", amount: amt });
+        eventOngoing += amt;
       }
     }
 
@@ -852,18 +1104,44 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     }
 
     // Survivor income (after death) — auto-calculate survivor pension
+    // 65歳以降の併給調整:
+    //   遺族厚生年金 = max(A, B) where A=死亡者報酬比例×3/4, B=死亡者報酬比例×1/2+本人老齢厚生×1/2
+    //   実際の支給額 = max(A, B) - 本人の老齢厚生年金（差額支給）
+    //   ※老齢基礎年金は全額支給（併給可）、遺族基礎年金は65歳で終了（老齢基礎へ切替）
     let survivorIncome = 0;
+    let survivorBasicPension = 0;
+    let survivorEmployeePension = 0;
+    let survivorWidowSupplement = 0;
+    let survivorIncomeProtection = 0;
     if (isDead && dp) {
       const avgSalary = salaryYears > 0 ? cumulativeSalary / salaryYears : defaultGrossMan * 10000;
       const contribYears = salaryYears;
       const childEvtsForPension = events.filter(e => e.type === "child" && isEventActive(e, age, events));
       const childAgesForPension = childEvtsForPension.map(ce => age - resolveEventAge(ce, events));
       const survivorAge = spouse ? spouse.currentAge + (age - currentAge) : age;
-      const pensionCalc = calcSurvivorPension(avgSalary, contribYears, childAgesForPension, survivorAge);
+      // 本人死亡 → 遺族は配偶者（本人が男なら配偶者は女）
+      const spouseIsFemale = selfGender === "male";
+      const deathCalYear = baseCalendarYear + (resolveEventAge(selfDeathEvent!, events) - currentAge);
+      const pensionCalc = calcSurvivorPension(avgSalary, contribYears, childAgesForPension, survivorAge, spouseIsFemale, deathCalYear);
 
-      survivorIncome += pensionCalc.total;
+      // 65歳以降の併給調整: 遺族厚生年金は配偶者の老齢厚生年金との差額のみ
+      let adjEmployeePension = pensionCalc.employee;
+      if (spousePensionEmployeeAnnual > 0) {
+        // B = 死亡者報酬比例×1/2 + 遺族の老齢厚生×1/2
+        const optionB = Math.round(pensionCalc.employee / 3 * 4 / 2) + Math.round(spousePensionEmployeeAnnual / 2);
+        // A = pensionCalc.employee（既に報酬比例×3/4）
+        const maxAmount = Math.max(pensionCalc.employee, optionB);
+        adjEmployeePension = Math.max(maxAmount - spousePensionEmployeeAnnual, 0);
+      }
+
+      survivorBasicPension += pensionCalc.basic;
+      survivorEmployeePension += adjEmployeePension;
+      survivorWidowSupplement += pensionCalc.widowSupplement;
+      survivorIncome += pensionCalc.basic + adjEmployeePension + pensionCalc.widowSupplement;
       if (dp.incomeProtectionManPerMonth > 0 && age < dp.incomeProtectionUntilAge) {
-        survivorIncome += dp.incomeProtectionManPerMonth * 12 * 10000;
+        const protectionAmt = dp.incomeProtectionManPerMonth * 12 * 10000;
+        survivorIncome += protectionAmt;
+        survivorIncomeProtection += protectionAmt;
       }
     }
     // Spouse death: survivor pension based on SPOUSE's salary history
@@ -874,14 +1152,52 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         const contribYears = spouseSalaryYears;
         const childEvtsForPension = events.filter(e => e.type === "child" && isEventActive(e, age, events));
         const childAgesForPension = childEvtsForPension.map(ce => age - resolveEventAge(ce, events));
-        const pensionCalc = calcSurvivorPension(avgSpouseSalary, contribYears, childAgesForPension, age);
-        survivorIncome += pensionCalc.total;
+        // 配偶者死亡 → 遺族は本人
+        const selfIsFemale = selfGender === "female";
+        const spouseDeathCalYear = baseCalendarYear + (resolveEventAge(spouseDeathEvent!, events) - currentAge);
+        const pensionCalc = calcSurvivorPension(avgSpouseSalary, contribYears, childAgesForPension, age, selfIsFemale, spouseDeathCalYear);
+
+        // 65歳以降の併給調整: 遺族厚生年金は本人の老齢厚生年金との差額のみ
+        let adjEmployeePension = pensionCalc.employee;
+        if (selfPensionEmployeeAnnual > 0) {
+          const optionB = Math.round(pensionCalc.employee / 3 * 4 / 2) + Math.round(selfPensionEmployeeAnnual / 2);
+          const maxAmount = Math.max(pensionCalc.employee, optionB);
+          adjEmployeePension = Math.max(maxAmount - selfPensionEmployeeAnnual, 0);
+        }
+
+        survivorBasicPension += pensionCalc.basic;
+        survivorEmployeePension += adjEmployeePension;
+        survivorWidowSupplement += pensionCalc.widowSupplement;
+        survivorIncome += pensionCalc.basic + adjEmployeePension + pensionCalc.widowSupplement;
       }
       if (sdp.incomeProtectionManPerMonth > 0 && age < sdp.incomeProtectionUntilAge) {
-        survivorIncome += sdp.incomeProtectionManPerMonth * 12 * 10000;
+        const protectionAmt = sdp.incomeProtectionManPerMonth * 12 * 10000;
+        survivorIncome += protectionAmt;
+        survivorIncomeProtection += protectionAmt;
       }
     }
     // survivorIncomeはtakeHomePayに加算済み。eventCostBreakdownには入れない（収入セクションで表示）
+
+    // 住宅ローン控除: eventCostBreakdownから抽出し、税額控除として適用
+    // (支出としてのマイナス計上は除去 → 税額控除に一本化)
+    // ペアローン対応: 本人分と配偶者分を別々に抽出
+    let yearHousingLoanDed = 0;      // 本人分
+    let yearHousingLoanDedSpouse = 0; // 配偶者分
+    const hlIdxs: number[] = [];
+    for (let i = 0; i < eventCostBreakdown.length; i++) {
+      const ec = eventCostBreakdown[i];
+      if (ec.label === "住宅ローン控除(本人)" && ec.amount < 0) {
+        yearHousingLoanDed += -ec.amount;
+        eventOngoing -= ec.amount;
+        hlIdxs.push(i);
+      } else if (ec.label === "住宅ローン控除(配偶者)" && ec.amount < 0) {
+        yearHousingLoanDedSpouse += -ec.amount;
+        eventOngoing -= ec.amount;
+        hlIdxs.push(i);
+      }
+    }
+    // 支出一覧から住宅ローン控除を除去（税額控除セクションで表示するため）
+    for (let i = hlIdxs.length - 1; i >= 0; i--) eventCostBreakdown.splice(hlIdxs[i], 1);
 
     const totalExpense = baseLivingExpense + eventOngoing + eventOnetime;
 
@@ -900,29 +1216,50 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     const spouseDCTotal = spouseTaxResult.dcContribution;
 
     // (扶養控除・児童手当は上で計算済み)
-    const effectiveTaxOpts = { ...taxOpts, dependentDeductionTotal: selfDepDed };
+    // 生命保険料控除: 保険イベントの保険料から自動計算（手動設定がある場合はそちらを優先）
+    const selfLifeInsDed = Math.max(calcLifeInsuranceDeduction(insurancePremiumSelf), taxOpts.lifeInsuranceDeduction || 0);
+    const spouseLifeInsDed = calcLifeInsuranceDeduction(insurancePremiumSpouse);
+    const effectiveTaxOpts = { ...taxOpts, dependentDeductionTotal: selfDepDed, lifeInsuranceDeduction: selfLifeInsDed };
+
+    // 配偶者控除/配偶者特別控除の計算
+    // selfIncome = 本人の合計所得 = gross - empDed(gross) (DC控除前のgrossで判定)
+    // spouseIncome = 配偶者の合計所得 = spouseGross - empDed(spouseGross)
+    const selfIncomeForSpouseDed = gross > 0 ? gross - empDed(gross) : 0;
+    const spouseGrossForDed = spouseTaxResult.gross;
+    const spouseIncomeForDed = spouseGrossForDed > 0 ? spouseGrossForDed - empDed(spouseGrossForDed) : 0;
+    const spouseDedAmount = spouse ? spouseDeduction(selfIncomeForSpouseDed, spouseIncomeForDed) : 0;
+
+    // Helper: estimate housing loan deduction applied to resident tax
+    // (HL deduction is tax credit: first offsets IT, remainder offsets RT up to cap)
+    const hlDed = yearHousingLoanDed; // 今年の住宅ローン控除額（イベントから動的算出）
+    const estHLRT = (ti: number) => {
+      if (hlDed <= 0) return 0;
+      const estIT = iTx(ti);
+      const itUsed = Math.min(estIT, hlDed);
+      return Math.min(hlDed - itUsed, hlResidentCap(ti));
+    };
 
     // *** Base tax: "no DC/iDeCo" scenario using THIS YEAR's gross ***
-    const baseTI = txInc(gross, effectiveTaxOpts);
+    const baseTI = Math.max(txInc(gross, effectiveTaxOpts) - spouseDedAmount, 0);
     const baseMR = mR(baseTI);
-    const baseFL = fLm(baseTI, baseMR);
+    const baseFL = fLm(baseTI, baseMR, estHLRT(baseTI));
     const baseFuruDon = hasFuru ? calcFurusatoDonation(baseFL) : 0;
     const baseFDed = hasFuru ? Math.max(baseFuruDon - 2000, 0) : 0;
     const baseTIaF = Math.max(baseTI - baseFDed, 0);
     const baseITraw = iTx(baseTIaF), baseRTraw = rTx(baseTIaF);
-    const baseTaxAdj = apTxCr(baseITraw, baseRTraw, housingLoanDed, baseTIaF);
+    const baseTaxAdj = apTxCr(baseITraw, baseRTraw, hlDed, baseTIaF);
 
     // Tax with DC/iDeCo
     const adjG = gross - aDS;
-    const adjTI = Math.max(txInc(adjG, effectiveTaxOpts) - aI, 0);
+    const adjTI = Math.max(txInc(adjG, effectiveTaxOpts) - aI - spouseDedAmount, 0);
     const nMR = mR(adjTI);
-    const nFL = fLm(adjTI, nMR);
+    const nFL = fLm(adjTI, nMR, estHLRT(adjTI));
     const furuDonNew = hasFuru ? calcFurusatoDonation(nFL) : 0;
     const nFDed = hasFuru ? Math.max(furuDonNew - 2000, 0) : 0;
     const adjTIaF = Math.max(adjTI - nFDed, 0);
 
     const nITraw = iTx(adjTIaF), nRTraw = rTx(adjTIaF);
-    const nTaxAdj = apTxCr(nITraw, nRTraw, housingLoanDed, adjTIaF);
+    const nTaxAdj = apTxCr(nITraw, nRTraw, hlDed, adjTIaF);
     const incomeTax = nTaxAdj.it;
     const residentTax = nTaxAdj.rt;
     const socialInsurance = Math.round(gross * sir);
@@ -954,46 +1291,80 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     cumulativeDCAsset = selfDCAsset + spouseDCAsset;
     cumulativeReinvest = cumulativeReinvest * (1 + r) + aNet;
 
-    // ===== DC/iDeCo死亡一時金 =====
-    // 加入者死亡時、DC資産は継続運用不可 → 死亡一時金として遺族に支給
-    if (isDeathYear && selfDCAsset > 0) {
-      const legalHeirs = 1 + childEvents.length;
-      const taxFreeLimit = 5000000 * Math.max(legalHeirs, 1);
-      const taxableAmount = Math.max(selfDCAsset - taxFreeLimit, 0);
-      const inheritanceBasicDeduction = 30000000 + 6000000 * Math.max(legalHeirs, 1);
-      const inheritanceTax = Math.max(taxableAmount - inheritanceBasicDeduction, 0) > 0
-        ? Math.round(Math.max(taxableAmount - inheritanceBasicDeduction, 0) * 0.1)
-        : 0;
-      const dcDeathBenefit = selfDCAsset - inheritanceTax;
-      eventCostBreakdown.push({
-        label: "DC/iDeCo死亡一時金(本人)",
-        icon: "💰", color: "#16a34a",
-        amount: -dcDeathBenefit,
-        detail: `DC資産${Math.round(selfDCAsset / 10000)}万 → 非課税枠${Math.round(taxFreeLimit / 10000)}万(500万×${legalHeirs}人)${inheritanceTax > 0 ? ` 相続税${Math.round(inheritanceTax / 10000)}万` : " 非課税"}`,
-      });
-      cumulativeCash += dcDeathBenefit;
-      selfDCAsset = 0;
-      cumulativeDCAsset = selfDCAsset + spouseDCAsset;
+    // ===== 死亡年: 相続計算（全資産統合） =====
+    // DC/iDeCo死亡一時金 + 保険金 → みなし相続財産（非課税枠あり）
+    // その他資産（現預金, NISA, 特定口座）→ 本来の相続財産
+    // 全体で相続税を計算し、税引後を遺族に渡す
+    if (isDeathYear) {
+      const legalHeirs = Math.max(1 + childEvents.length, 1);
+      const hasSpouseSurvivor = !!spouse && !isSpouseDead;
+      // DC死亡一時金（みなし相続財産）
+      const dcDeath = selfDCAsset;
+      // 保険金一時金（この年のinsurancePayoutTotal、みなし相続財産）
+      const insDeath = insurancePayoutTotal;
+      // 本来の相続財産: 被相続人の資産の一部
+      // 簡易: 共有資産の1/2を相続対象とする（配偶者がいる場合）
+      const shareRatio = hasSpouseSurvivor ? 0.5 : 1;
+      const estateOther = Math.round((cumulativeCash + selfNISAAsset + cumulativeTaxable) * shareRatio);
+      const inheritResult = calcInheritanceTax(estateOther, dcDeath, insDeath, legalHeirs, hasSpouseSurvivor);
+      inheritanceTax = inheritResult.tax;
+      inheritanceEstate = inheritResult.taxableEstate;
+      // DC一時金を現金化
+      if (dcDeath > 0) {
+        eventCostBreakdown.push({
+          label: "DC/iDeCo死亡一時金(本人)", icon: "💰", color: "#16a34a", amount: -dcDeath,
+          detail: `DC資産${Math.round(dcDeath / 10000)}万→遺族へ`,
+        });
+        cumulativeCash += dcDeath;
+        selfDCAsset = 0;
+        cumulativeDCAsset = selfDCAsset + spouseDCAsset;
+      }
+      // 相続税を計上
+      if (inheritanceTax > 0) {
+        eventCostBreakdown.push({
+          label: "相続税(本人死亡)", icon: "🏛️", color: "#dc2626", amount: inheritanceTax,
+          detail: inheritResult.detail,
+        });
+        cumulativeCash -= inheritanceTax;
+      } else {
+        eventCostBreakdown.push({
+          label: "相続税(本人死亡)", icon: "🏛️", color: "#16a34a", amount: 0,
+          detail: inheritResult.detail, isPhaseChange: true, phaseLabel: "相続税なし",
+        });
+      }
     }
-    // 配偶者死亡時: 配偶者DC資産を死亡一時金として現金化
-    if (isSpouseDeathYear && spouseDCAsset > 0) {
-      const legalHeirs = 1 + childEvents.length;
-      const taxFreeLimit = 5000000 * Math.max(legalHeirs, 1);
-      const taxableAmount = Math.max(spouseDCAsset - taxFreeLimit, 0);
-      const inheritanceBasicDeduction = 30000000 + 6000000 * Math.max(legalHeirs, 1);
-      const inheritanceTax = Math.max(taxableAmount - inheritanceBasicDeduction, 0) > 0
-        ? Math.round(Math.max(taxableAmount - inheritanceBasicDeduction, 0) * 0.1)
-        : 0;
-      const dcDeathBenefit = spouseDCAsset - inheritanceTax;
-      eventCostBreakdown.push({
-        label: "DC/iDeCo死亡一時金(配偶者)",
-        icon: "💰", color: "#16a34a",
-        amount: -dcDeathBenefit,
-        detail: `配偶者DC資産${Math.round(spouseDCAsset / 10000)}万 → 非課税枠${Math.round(taxFreeLimit / 10000)}万${inheritanceTax > 0 ? ` 相続税${Math.round(inheritanceTax / 10000)}万` : " 非課税"}`,
-      });
-      cumulativeCash += dcDeathBenefit;
-      spouseDCAsset = 0;
-      cumulativeDCAsset = selfDCAsset + spouseDCAsset;
+    if (isSpouseDeathYear) {
+      const legalHeirs = Math.max(1 + childEvents.length, 1);
+      const hasSpouseSurvivor = true; // 本人が生存
+      // 配偶者DC死亡一時金
+      const dcDeath = spouseDCAsset;
+      const insDeath = insurancePayoutTotal;
+      const shareRatio = 0.5; // 配偶者の持分
+      const estateOther = Math.round((cumulativeCash + spouseNISAAsset + cumulativeTaxable) * shareRatio);
+      const inheritResult = calcInheritanceTax(estateOther, dcDeath, insDeath, legalHeirs, hasSpouseSurvivor);
+      inheritanceTax = inheritResult.tax;
+      inheritanceEstate = inheritResult.taxableEstate;
+      if (dcDeath > 0) {
+        eventCostBreakdown.push({
+          label: "DC/iDeCo死亡一時金(配偶者)", icon: "💰", color: "#16a34a", amount: -dcDeath,
+          detail: `配偶者DC資産${Math.round(dcDeath / 10000)}万→遺族へ`,
+        });
+        cumulativeCash += dcDeath;
+        spouseDCAsset = 0;
+        cumulativeDCAsset = selfDCAsset + spouseDCAsset;
+      }
+      if (inheritanceTax > 0) {
+        eventCostBreakdown.push({
+          label: "相続税(配偶者死亡)", icon: "🏛️", color: "#dc2626", amount: inheritanceTax,
+          detail: inheritResult.detail,
+        });
+        cumulativeCash -= inheritanceTax;
+      } else {
+        eventCostBreakdown.push({
+          label: "相続税(配偶者死亡)", icon: "🏛️", color: "#16a34a", amount: 0,
+          detail: inheritResult.detail, isPhaseChange: true, phaseLabel: "相続税なし",
+        });
+      }
     }
 
     // ===== NISA死亡時処理 =====
@@ -1027,6 +1398,8 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     cumulativeTaxable = cumulativeTaxable * (1 + taxableReturnRate);
 
     let nisaContribution = 0;
+    let selfNISAContribution = 0;
+    let spouseNISAContribution = 0;
     let taxableContribution = 0;
     let nisaWithdrawal = 0;
     let taxableWithdrawal = 0;
@@ -1089,6 +1462,8 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         const spouseRoom = isSpouseDead ? 0 : Math.max(Math.min(spouseNISAAnnualLimit, spouseNISALifetimeLimit - spouseNISACostBasis), 0);
         const selfContrib = Math.min(excess, selfRoom);
         const spouseContrib = Math.min(excess - selfContrib, spouseRoom);
+        selfNISAContribution = selfContrib;
+        spouseNISAContribution = spouseContrib;
         nisaContribution = selfContrib + spouseContrib;
         const remaining = excess - nisaContribution;
         if (remaining > 0) taxableContribution = remaining;
@@ -1122,15 +1497,17 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     // 併用: 一時金割合分を現金化、残りは年金として毎年取崩し（calcDCReceiveTaxで計算済み）
     // 年金: 全額を年金として毎年取崩し
     {
-      const processDCReceive = (label: string, asset: number, rm: DCReceiveMethod, retDed: number, otherRet: number) => {
+      const processDCReceive = (label: string, asset: number, rm: DCReceiveMethod, retDed: number, otherRet: number): number => {
         if (asset <= 0) return asset;
         const startAge = rm.annuityStartAge || 65;
         if (age !== startAge) return asset;
         // 受取開始年齢に到達
         if (rm.type === "lump_sum") {
           const tax = rTxC(asset + otherRet, retDed) - rTxC(otherRet, retDed);
+          dcReceiveTax += tax;
           eventCostBreakdown.push({ label: `DC一時金受取(${label})`, icon: "💰", color: "#ea580c", amount: tax,
-            detail: `${age}歳: DC${Math.round(asset/10000)}万→控除${Math.round(retDed/10000)}万→税${Math.round(tax/10000)}万` });
+            detail: `${age}歳: DC${Math.round(asset/10000)}万 退職所得控除${Math.round(retDed/10000)}万 退職所得税${Math.round(tax/10000)}万`,
+            isPhaseChange: true, phaseLabel: `DC一時金受取(${label})` });
           cumulativeCash += asset - tax;
           return 0;
         }
@@ -1139,19 +1516,22 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
           const lumpPart = Math.round(asset * ratio);
           const annuityPart = asset - lumpPart;
           const tax = rTxC(lumpPart + otherRet, retDed) - rTxC(otherRet, retDed);
+          dcReceiveTax += tax;
           eventCostBreakdown.push({ label: `DC併用受取開始(${label})`, icon: "💰", color: "#ea580c", amount: tax,
-            detail: `${age}歳: 一時金${Math.round(lumpPart/10000)}万(${Math.round(ratio*100)}%)→税${Math.round(tax/10000)}万、年金${Math.round(annuityPart/10000)}万×${rm.annuityYears||20}年` });
+            detail: `${age}歳: 一時金${Math.round(lumpPart/10000)}万(${Math.round(ratio*100)}%) 退職所得税${Math.round(tax/10000)}万 年金${Math.round(annuityPart/10000)}万×${rm.annuityYears||20}年`,
+            isPhaseChange: true, phaseLabel: `DC併用受取(${label})` });
           cumulativeCash += lumpPart - tax;
-          return annuityPart; // 年金部分はDCに残留（以降毎年取崩し想定）
+          return annuityPart;
         }
         // 年金のみ
         eventCostBreakdown.push({ label: `DC年金受取開始(${label})`, icon: "📋", color: "#ea580c", amount: 0,
-          detail: `${age}歳: DC${Math.round(asset/10000)}万を${rm.annuityYears||20}年で取崩し開始` });
-        return asset; // 全額DC残留（毎年取崩し想定）
+          detail: `${age}歳: DC${Math.round(asset/10000)}万を${rm.annuityYears||20}年で取崩し開始`,
+          isPhaseChange: true, phaseLabel: `DC年金受取開始(${label})` });
+        return asset;
       };
 
-      const rm = s.dcReceiveMethod || { type: "lump_sum" as const, annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
-      selfDCAsset = processDCReceive("本人", selfDCAsset, rm, rDed(s.years), otherRet);
+      const rm = effectiveDCReceiveMethod || { type: "lump_sum" as const, annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
+      selfDCAsset = processDCReceive("本人", selfDCAsset, rm, rDed(effectiveYears), otherRet);
 
       if (spouseDCAsset > 0 && spouse) {
         const spRM = spouse.dcReceiveMethod || { type: "lump_sum" as const, annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
@@ -1171,15 +1551,45 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       age, gross, grossMan: grownGrossMan,
       baseLivingExpense, eventOnetime, eventOngoing, totalExpense,
       incomeTax, residentTax, socialInsurance, takeHomePay,
+      // Tax detail — 全て実際の税計算と整合する値を格納
+      // DC選択制は gross を減らしてから控除計算 → adjG = gross - selfDC
+      employeeDeduction: Math.round(empDed(adjG)),        // 給与所得控除(adjGベース)
+      taxableIncome: Math.round(adjTIaF),                 // 課税所得(ふるさと控除後=税計算ベース)
+      marginalRate: mR(adjTIaF),                          // 課税所得に対する最高税率
+      basicDeduction: 480000,
+      selfDependentDeduction: selfDepDed,
+      spouseDeductionAmount: spouseDedAmount,
+      housingLoanDeduction: nTaxAdj.itUsed + nTaxAdj.rtUsed,
+      housingLoanDeductionAvail: hlDed,
+      housingLoanDeductionIT: nTaxAdj.itUsed,
+      housingLoanDeductionRT: nTaxAdj.rtUsed,
+      spouseHousingLoanDeduction: spouseTaxResult.hlDeduction,
+      spouseHousingLoanDeductionAvail: spouseTaxResult.hlAvail,
+      spouseHousingLoanDeductionIT: spouseTaxResult.hlIT,
+      spouseHousingLoanDeductionRT: spouseTaxResult.hlRT,
+      dcIdecoDeduction: aDS + aI,                         // DC自己負担+iDeCo(所得控除)
+      spouseDCIdecoDeduction: spouseTaxResult.dcContribution + spouseTaxResult.idecoContribution,
+      lifeInsuranceDeductionAmount: selfLifeInsDed,        // 生命保険料控除額（本人）
+      spouseLifeInsuranceDeductionAmount: preSpouseLifeInsDed, // 生命保険料控除額（配偶者）
+      socialInsuranceDeduction: Math.round(adjG * sir),    // 社保料控除(adjGベース=税計算で使用)
+      spouseSocialInsuranceDeduction: Math.round(spouseTaxResult.adjGross * (spouseTaxResult.sir || sir)),
+      furusatoDeduction: nFDed,                            // ふるさと納税控除(寄付額−2000円)
+      spouseFurusatoDeduction: spouseTaxResult.furusatoDonation > 0 ? Math.max(spouseTaxResult.furusatoDonation - 2000, 0) : 0,
+      spouseEmployeeDeduction: Math.round(empDed(spouseTaxResult.adjGross)),
+      spouseTaxableIncome: spouseTaxResult.taxableIncome ?? 0,
+      spouseMarginalRate: spouseTaxResult.marginalRate ?? 0,
       dcMonthly: dcTotal, companyDC, idecoMonthly, annualContribution: aT, selfDCContribution: selfDC,
       incomeTaxSaving: itSv, residentTaxSaving: rtSv, socialInsuranceSaving: siSv,
       annualBenefit: aBen, annualNetBenefit: aNet,
       cumulativeDCAsset, selfDCAsset, spouseDCAsset, cumulativeReinvest, annualNetCashFlow,
       cumulativeSavings: postCumulativeSavings, totalWealth: postCumulativeSavings + cumulativeDCAsset + cumulativeReinvest,
       furusatoLimit: nFL, furusatoDonation: furuDonNew,
-      pensionLossAnnual, selfPensionIncome, spousePensionIncome, pensionTax, survivorIncome, loanBalance,
+      pensionLossAnnual, selfPensionIncome, spousePensionIncome, pensionTax, pensionReduction, survivorIncome,
+      survivorBasicPension, survivorEmployeePension, survivorWidowSupplement, survivorIncomeProtection,
+      loanBalance,
       childCount: childEvents.length, dependentDeduction: dependentDeductionTotal, childAllowance,
-      nisaContribution, nisaWithdrawal, nisaAsset: totalNISA, selfNISAAsset, spouseNISAAsset,
+      nisaContribution, selfNISAContribution, spouseNISAContribution,
+      nisaWithdrawal, nisaAsset: totalNISA, selfNISAAsset, spouseNISAAsset,
       selfNISACostBasis, spouseNISACostBasis, nisaGain: totalNISA - selfNISACostBasis - spouseNISACostBasis,
       taxableContribution, taxableWithdrawal, taxableAsset: cumulativeTaxable, taxableGain,
       cashSavings: cumulativeCash,
@@ -1191,23 +1601,24 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       spouseFurusatoLimit: spouseTaxResult.furusatoLimit, spouseFurusatoDonation: spouseTaxResult.furusatoDonation,
       spouseTakeHome,
       insurancePremiumTotal, insurancePayoutTotal,
-      activeEvents: activeEvts, eventCostBreakdown,
+      inheritanceTax, inheritanceEstate, dcReceiveTax,
+      activeEvents: [...activeEvts, ...propertyFixedCostEvts], eventCostBreakdown,
     });
   }
 
   const assetFV = cumulativeDCAsset;
   const fvB = cumulativeReinvest;
   const lPL = totalPensionLoss * PY;
-  const dcRetDed = rDed(s.years);
+  const dcRetDed = rDed(effectiveYears);
 
   // ===== DC/iDeCo受取方法に応じた税計算（本人・配偶者別） =====
-  const rm = s.dcReceiveMethod || { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
-  const dcReceiveDetail = calcDCReceiveTax(selfDCAsset, otherRet, dcRetDed, rm, retirementAge, rr);
+  const rmFinal = effectiveDCReceiveMethod || { type: "lump_sum" as const, annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
+  const dcReceiveDetail = calcDCReceiveTax(selfDCAsset, otherRet, dcRetDed, rmFinal, retirementAge, rr);
 
   let spouseDCReceiveDetail: import("./types").DCReceiveDetail | undefined;
   if (spouseDCAsset > 0 && spouse) {
     const spContribYears = yearResults.filter(yr => yr.spouseDCContribution > 0).length;
-    const spYears = spContribYears > 0 ? spContribYears : s.years;
+    const spYears = spContribYears > 0 ? spContribYears : effectiveYears;
     const spRetDed = rDed(spYears);
     spouseDCReceiveDetail = calcDCReceiveTax(spouseDCAsset, 0, spRetDed, spouseRM, retirementAge, rr);
   }
