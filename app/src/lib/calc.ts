@@ -397,16 +397,19 @@ function calcSpouseFullTax(
 // 併用: 一部を一時金、残りを年金
 import type { DCReceiveMethod, DCReceiveDetail } from "./types";
 
+// DC/iDeCo受取税計算
+// 年金受取の場合: DC内で運用継続しつつ分割受取。受取期間中も残高に利回りが適用される。
+// netAmount = 一時金手取り + 年金受取の税引後総額（運用益込み）
 function calcDCReceiveTax(
   dcAsset: number, otherRetirement: number, retirementDeduction: number,
-  method: DCReceiveMethod, retirementAge: number
+  method: DCReceiveMethod, retirementAge: number, rr: number = 0
 ): DCReceiveDetail {
   const m = method.type || "lump_sum";
   const annuityYears = method.annuityYears || 20;
   const annuityStartAge = method.annuityStartAge || 65;
+  const r = rr / 100; // 運用利回り
 
   if (m === "lump_sum") {
-    // 全額一時金
     const tax = rTxC(dcAsset + otherRetirement, retirementDeduction) - rTxC(otherRetirement, retirementDeduction);
     return {
       method: "一時金",
@@ -417,36 +420,52 @@ function calcDCReceiveTax(
   }
 
   if (m === "annuity") {
-    // 全額年金受取
-    const annual = Math.round(dcAsset / annuityYears);
+    // 年金受取: DC内で運用継続しつつ毎年定額取崩し
+    // 受取開始までの据置期間も運用
+    const waitYears = Math.max(annuityStartAge - retirementAge, 0);
+    let remaining = dcAsset * Math.pow(1 + r, waitYears); // 据置期間の運用
     let totalAnnuityTax = 0;
+    let totalReceived = 0;
     for (let y = 0; y < annuityYears; y++) {
+      const annual = Math.round(remaining / (annuityYears - y)); // 残高÷残年数
       const age = annuityStartAge + y;
-      totalAnnuityTax += annuityTax(annual, age);
+      const tax = annuityTax(annual, age);
+      totalAnnuityTax += tax;
+      totalReceived += annual - tax;
+      remaining = (remaining - annual) * (1 + r); // 残高を運用
     }
     return {
       method: `年金(${annuityYears}年)`,
       lumpSumAmount: 0, lumpSumTax: 0,
-      annuityAnnual: annual, annuityTotalTax: totalAnnuityTax, annuityYears, annuityStartAge,
-      totalTax: totalAnnuityTax, netAmount: dcAsset - totalAnnuityTax,
+      annuityAnnual: Math.round(dcAsset * Math.pow(1 + r, waitYears) / annuityYears),
+      annuityTotalTax: totalAnnuityTax, annuityYears, annuityStartAge,
+      totalTax: totalAnnuityTax, netAmount: totalReceived,
     };
   }
 
-  // 併用: combinedLumpSumRatio% を一時金、残りを年金
+  // 併用
   const ratio = (method.combinedLumpSumRatio || 50) / 100;
   const lumpSum = Math.round(dcAsset * ratio);
   const annuityPortion = dcAsset - lumpSum;
   const lumpSumTax = rTxC(lumpSum + otherRetirement, retirementDeduction) - rTxC(otherRetirement, retirementDeduction);
-  const annual = Math.round(annuityPortion / annuityYears);
+
+  const waitYears = Math.max(annuityStartAge - retirementAge, 0);
+  let remaining = annuityPortion * Math.pow(1 + r, waitYears);
   let totalAnnuityTax = 0;
+  let totalReceived = lumpSum - lumpSumTax;
   for (let y = 0; y < annuityYears; y++) {
-    totalAnnuityTax += annuityTax(annual, annuityStartAge + y);
+    const annual = Math.round(remaining / (annuityYears - y));
+    const tax = annuityTax(annual, annuityStartAge + y);
+    totalAnnuityTax += tax;
+    totalReceived += annual - tax;
+    remaining = (remaining - annual) * (1 + r);
   }
   return {
     method: `併用(一時金${Math.round(ratio * 100)}%)`,
     lumpSumAmount: lumpSum, lumpSumTax,
-    annuityAnnual: annual, annuityTotalTax: totalAnnuityTax, annuityYears, annuityStartAge,
-    totalTax: lumpSumTax + totalAnnuityTax, netAmount: dcAsset - lumpSumTax - totalAnnuityTax,
+    annuityAnnual: Math.round(annuityPortion * Math.pow(1 + r, waitYears) / annuityYears),
+    annuityTotalTax: totalAnnuityTax, annuityYears, annuityStartAge,
+    totalTax: lumpSumTax + totalAnnuityTax, netAmount: totalReceived,
   };
 }
 
@@ -499,8 +518,10 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   // 配偶者NISA枠（2口座の場合）
   const spouseNISAAnnualLimit = nisa && nisaAccounts === 2 ? (nisa.spouseAnnualLimitMan ?? nisa.annualLimitMan) * 10000 : 0;
   const spouseNISALifetimeLimit = nisa && nisaAccounts === 2 ? (nisa.spouseLifetimeLimitMan ?? nisa.lifetimeLimitMan) * 10000 : 0;
-  let selfNISACumulContrib = 0;
-  let spouseNISACumulContrib = 0;
+  // NISA簿価（取得原価）ベースで生涯枠を管理
+  // 新NISA（2024～）: 売却すると翌年に簿価分の枠が復活
+  let selfNISACostBasis = 0;   // 本人NISA内の元本
+  let spouseNISACostBasis = 0; // 配偶者NISA内の元本
   // 特定口座 (taxable): same return rate, but gains taxed at 20.315%
   const TAXABLE_TAX_RATE = TAXABLE_ACCOUNT_TAX_RATE;
   const taxableReturnRate = nisaReturnRate;
@@ -954,29 +975,25 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     }
 
     // ===== NISA死亡時処理 =====
-    // NISA口座は相続時に閉鎖。非課税のまま相続（取得価額は死亡時の時価に引き上げ）
-    // 相続後は一般口座扱い。簡易的には現金化して特定口座に移管する想定
+    // NISA口座は相続時に閉鎖。非課税のまま現金化
     if (isDeathYear && selfNISAAsset > 0) {
       eventCostBreakdown.push({ label: "NISA相続(本人)", icon: "📊", color: "#22c55e", amount: -selfNISAAsset,
-        detail: `NISA${Math.round(selfNISAAsset / 10000)}万 → 口座閉鎖・現金化(非課税)` });
+        detail: `NISA時価${Math.round(selfNISAAsset / 10000)}万(元本${Math.round(selfNISACostBasis / 10000)}万) → 現金化(非課税)` });
       cumulativeCash += selfNISAAsset;
-      selfNISACumulContrib = 0;
-      selfNISAAsset = 0;
+      selfNISACostBasis = 0; selfNISAAsset = 0;
     }
     if (isSpouseDeathYear && spouseNISAAsset > 0) {
       eventCostBreakdown.push({ label: "NISA相続(配偶者)", icon: "📊", color: "#22c55e", amount: -spouseNISAAsset,
-        detail: `配偶者NISA${Math.round(spouseNISAAsset / 10000)}万 → 口座閉鎖・現金化(非課税)` });
+        detail: `配偶者NISA時価${Math.round(spouseNISAAsset / 10000)}万(元本${Math.round(spouseNISACostBasis / 10000)}万) → 現金化(非課税)` });
       cumulativeCash += spouseNISAAsset;
-      spouseNISACumulContrib = 0;
-      spouseNISAAsset = 0;
+      spouseNISACostBasis = 0; spouseNISAAsset = 0;
     }
 
-    // ===== NISA（個人別）/ 特定口座 / 現金 の自動配分・取り崩し =====
-    // 運用益を先に反映
+    // ===== NISA（簿価ベース枠管理）/ 特定口座 / 現金 の自動配分・取り崩し =====
+    // 運用益を反映（元本は変わらない、時価のみ増加）
     selfNISAAsset = selfNISAAsset * (1 + nisaReturnRate);
     spouseNISAAsset = spouseNISAAsset * (1 + nisaReturnRate);
     cumulativeTaxable = cumulativeTaxable * (1 + taxableReturnRate);
-    const cumulativeNISA = selfNISAAsset + spouseNISAAsset;
 
     let nisaContribution = 0;
     let taxableContribution = 0;
@@ -988,11 +1005,22 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     const monthlyExpense = baseLivingExpense / 12;
     const cashReserveTarget = monthlyExpense * cashReserveMonths;
 
+    // NISA取り崩しヘルパー: 時価を売却し、簿価を比例で減少（翌年に枠復活）
+    const sellNISA = (asset: { v: number; c: number }, amount: number) => {
+      const sell = Math.min(amount, asset.v);
+      if (sell <= 0 || asset.v <= 0) return 0;
+      const costRatio = asset.c / asset.v; // 簿価率
+      asset.c -= sell * costRatio;          // 簿価も比例で減少 → この分の枠が翌年復活
+      asset.v -= sell;
+      return sell;
+    };
+
     // 取り崩しヘルパー: 特定口座 → 配偶者NISA → 本人NISA の順
     const withdrawToTarget = (targetCash: number) => {
       let deficit = targetCash - cumulativeCash;
       if (deficit <= 0) return;
 
+      // 1. 特定口座
       if (deficit > 0 && cumulativeTaxable > 0) {
         const gainRatio = cumulativeTaxableCost > 0
           ? Math.max(cumulativeTaxable - cumulativeTaxableCost, 0) / cumulativeTaxable : 0;
@@ -1005,32 +1033,37 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         cumulativeCash += sellNeeded - tax;
         deficit = Math.max(targetCash - cumulativeCash, 0);
       }
-      // 配偶者NISA → 本人NISA
+      // 2. 配偶者NISA（非課税で売却、簿価分の枠が翌年復活）
       if (deficit > 0 && spouseNISAAsset > 0) {
-        const sell = Math.min(deficit, spouseNISAAsset);
-        nisaWithdrawal += sell; spouseNISAAsset -= sell; spouseNISACumulContrib = Math.max(spouseNISACumulContrib - sell, 0);
-        cumulativeCash += sell; deficit = Math.max(targetCash - cumulativeCash, 0);
+        const spRef = { v: spouseNISAAsset, c: spouseNISACostBasis };
+        const sold = sellNISA(spRef, deficit);
+        spouseNISAAsset = spRef.v; spouseNISACostBasis = spRef.c;
+        nisaWithdrawal += sold; cumulativeCash += sold;
+        deficit = Math.max(targetCash - cumulativeCash, 0);
       }
+      // 3. 本人NISA
       if (deficit > 0 && selfNISAAsset > 0) {
-        const sell = Math.min(deficit, selfNISAAsset);
-        nisaWithdrawal += sell; selfNISAAsset -= sell; selfNISACumulContrib = Math.max(selfNISACumulContrib - sell, 0);
-        cumulativeCash += sell;
+        const selfRef = { v: selfNISAAsset, c: selfNISACostBasis };
+        const sold = sellNISA(selfRef, deficit);
+        selfNISAAsset = selfRef.v; selfNISACostBasis = selfRef.c;
+        nisaWithdrawal += sold; cumulativeCash += sold;
       }
     };
 
     if (nisa && nisaPriority) {
       if (cumulativeCash > cashReserveTarget) {
         const excess = cumulativeCash - cashReserveTarget;
-        // 本人NISA枠 → 配偶者NISA枠 → 特定口座 の順で投入
-        const selfRoom = Math.max(Math.min(selfNISAAnnualLimit, selfNISALifetimeLimit - selfNISACumulContrib), 0);
-        const spouseRoom = Math.max(Math.min(spouseNISAAnnualLimit, spouseNISALifetimeLimit - spouseNISACumulContrib), 0);
+        // 生涯枠チェック: 簿価ベース（新NISA: 売却で枠復活するため、現在の簿価で判定）
+        const selfRoom = Math.max(Math.min(selfNISAAnnualLimit, selfNISALifetimeLimit - selfNISACostBasis), 0);
+        const spouseRoom = Math.max(Math.min(spouseNISAAnnualLimit, spouseNISALifetimeLimit - spouseNISACostBasis), 0);
         const selfContrib = Math.min(excess, selfRoom);
         const spouseContrib = Math.min(excess - selfContrib, spouseRoom);
         nisaContribution = selfContrib + spouseContrib;
         const remaining = excess - nisaContribution;
         if (remaining > 0) taxableContribution = remaining;
-        selfNISAAsset += selfContrib; selfNISACumulContrib += selfContrib;
-        spouseNISAAsset += spouseContrib; spouseNISACumulContrib += spouseContrib;
+        // 時価と簿価の両方を増加
+        selfNISAAsset += selfContrib; selfNISACostBasis += selfContrib;
+        spouseNISAAsset += spouseContrib; spouseNISACostBasis += spouseContrib;
         cumulativeCash -= nisaContribution + taxableContribution;
       } else if (cumulativeCash < cashReserveTarget) {
         withdrawToTarget(cashReserveTarget);
@@ -1051,6 +1084,55 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     totalC += aT;
     totalPensionLoss += pensionLossAnnual + spousePensionLossAnnual;
 
+    // ===== 退職年（最終年）: DC資産を受取方法に応じて振替 =====
+    if (age === retirementAge - 1) {
+      const rm = s.dcReceiveMethod || { type: "lump_sum" as const, annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
+      // 本人DC
+      if (selfDCAsset > 0) {
+        const dcRetDedSelf = rDed(s.years);
+        if (rm.type === "lump_sum") {
+          const tax = rTxC(selfDCAsset + otherRet, dcRetDedSelf) - rTxC(otherRet, dcRetDedSelf);
+          eventCostBreakdown.push({ label: "DC一時金受取(本人)", icon: "💰", color: "#ea580c", amount: tax, detail: `DC${Math.round(selfDCAsset/10000)}万→退職所得控除${Math.round(dcRetDedSelf/10000)}万→税${Math.round(tax/10000)}万` });
+          cumulativeCash += selfDCAsset - tax;
+          selfDCAsset = 0;
+        } else if (rm.type === "combined") {
+          const ratio = (rm.combinedLumpSumRatio || 50) / 100;
+          const lumpPart = Math.round(selfDCAsset * ratio);
+          const tax = rTxC(lumpPart + otherRet, dcRetDedSelf) - rTxC(otherRet, dcRetDedSelf);
+          eventCostBreakdown.push({ label: "DC一時金受取(本人)", icon: "💰", color: "#ea580c", amount: tax, detail: `一時金${Math.round(lumpPart/10000)}万(${Math.round(ratio*100)}%)→税${Math.round(tax/10000)}万、残${Math.round((selfDCAsset-lumpPart)/10000)}万は年金受取` });
+          cumulativeCash += lumpPart - tax;
+          selfDCAsset -= lumpPart;
+        }
+        // 年金受取の場合: selfDCAssetはそのまま残る（退職後に分割受取される想定）
+      }
+      // 配偶者DC
+      if (spouseDCAsset > 0 && spouse) {
+        const spRM = spouse.dcReceiveMethod || { type: "lump_sum" as const, annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
+        const spContribYears = yearResults.filter(yr => yr.spouseDCContribution > 0).length + 1;
+        const spRetDed = rDed(Math.max(spContribYears, 1));
+        if (spRM.type === "lump_sum") {
+          const tax = rTxC(spouseDCAsset, spRetDed);
+          eventCostBreakdown.push({ label: "DC一時金受取(配偶者)", icon: "💰", color: "#ea580c", amount: tax, detail: `配偶者DC${Math.round(spouseDCAsset/10000)}万→税${Math.round(tax/10000)}万` });
+          cumulativeCash += spouseDCAsset - tax;
+          spouseDCAsset = 0;
+        } else if (spRM.type === "combined") {
+          const ratio = (spRM.combinedLumpSumRatio || 50) / 100;
+          const lumpPart = Math.round(spouseDCAsset * ratio);
+          const tax = rTxC(lumpPart, spRetDed);
+          cumulativeCash += lumpPart - tax;
+          spouseDCAsset -= lumpPart;
+          eventCostBreakdown.push({ label: "DC一時金受取(配偶者)", icon: "💰", color: "#ea580c", amount: tax });
+        }
+      }
+      cumulativeDCAsset = selfDCAsset + spouseDCAsset;
+    }
+
+    // 退職年の振替後に再計算
+    const finalTotalNISA = selfNISAAsset + spouseNISAAsset;
+    const finalCumulativeSavings = age === retirementAge - 1
+      ? cumulativeCash + finalTotalNISA + (cumulativeTaxable - Math.round(Math.max(cumulativeTaxable - cumulativeTaxableCost, 0) * TAXABLE_TAX_RATE))
+      : cumulativeSavings;
+
     yearResults.push({
       age, gross, grossMan: grownGrossMan,
       baseLivingExpense, eventOnetime, eventOngoing, totalExpense,
@@ -1059,11 +1141,12 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       incomeTaxSaving: itSv, residentTaxSaving: rtSv, socialInsuranceSaving: siSv,
       annualBenefit: aBen, annualNetBenefit: aNet,
       cumulativeDCAsset, selfDCAsset, spouseDCAsset, cumulativeReinvest, annualNetCashFlow,
-      cumulativeSavings, totalWealth: cumulativeSavings + cumulativeDCAsset + cumulativeReinvest,
+      cumulativeSavings: finalCumulativeSavings, totalWealth: finalCumulativeSavings + cumulativeDCAsset + cumulativeReinvest,
       furusatoLimit: nFL, furusatoDonation: furuDonNew,
       pensionLossAnnual, loanBalance,
       childCount: childEvents.length, dependentDeduction: dependentDeductionTotal, childAllowance,
       nisaContribution, nisaWithdrawal, nisaAsset: totalNISA, selfNISAAsset, spouseNISAAsset,
+      selfNISACostBasis, spouseNISACostBasis, nisaGain: totalNISA - selfNISACostBasis - spouseNISACostBasis,
       taxableContribution, taxableWithdrawal, taxableAsset: cumulativeTaxable, taxableGain,
       cashSavings: cumulativeCash,
       spouseGross,
@@ -1085,18 +1168,20 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
 
   // ===== DC/iDeCo受取方法に応じた税計算（本人・配偶者別） =====
   const rm = s.dcReceiveMethod || { type: "lump_sum", annuityYears: 20, annuityStartAge: 65, combinedLumpSumRatio: 50 };
-  const dcReceiveDetail = calcDCReceiveTax(selfDCAsset, otherRet, dcRetDed, rm, retirementAge);
+  const dcReceiveDetail = calcDCReceiveTax(selfDCAsset, otherRet, dcRetDed, rm, retirementAge, rr);
 
   let spouseDCReceiveDetail: import("./types").DCReceiveDetail | undefined;
   if (spouseDCAsset > 0 && spouse) {
     const spContribYears = yearResults.filter(yr => yr.spouseDCContribution > 0).length;
     const spYears = spContribYears > 0 ? spContribYears : s.years;
     const spRetDed = rDed(spYears);
-    spouseDCReceiveDetail = calcDCReceiveTax(spouseDCAsset, 0, spRetDed, spouseRM, retirementAge);
+    spouseDCReceiveDetail = calcDCReceiveTax(spouseDCAsset, 0, spRetDed, spouseRM, retirementAge, rr);
   }
 
   const exitDelta = dcReceiveDetail.totalTax + (spouseDCReceiveDetail?.totalTax || 0);
-  const finalAssetNet = Math.max(assetFV - exitDelta, 0);
+  // DC手取り = 各人のnetAmount合計（一時金の場合はDC−税、年金の場合は運用益込み税引後総額）
+  const dcNetTotal = dcReceiveDetail.netAmount + (spouseDCReceiveDetail?.netAmount || 0);
+  const finalAssetNet = dcNetTotal;
   const ly = yearResults[yearResults.length - 1];
   const finalSavings = ly ? ly.cumulativeSavings : effectiveCurrentAssets * 10000;
   const finalWealth = finalAssetNet + fvB + finalSavings;

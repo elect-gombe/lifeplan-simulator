@@ -216,9 +216,12 @@ export interface YearResult {
   // NISA / 特定口座 / Cash split
   nisaContribution: number;
   nisaWithdrawal: number;
-  nisaAsset: number;           // 世帯合計
-  selfNISAAsset: number;       // 本人NISA
-  spouseNISAAsset: number;     // 配偶者NISA
+  nisaAsset: number;           // 世帯合計（時価）
+  selfNISAAsset: number;       // 本人NISA（時価）
+  spouseNISAAsset: number;     // 配偶者NISA（時価）
+  selfNISACostBasis: number;   // 本人NISA元本（簿価）
+  spouseNISACostBasis: number; // 配偶者NISA元本（簿価）
+  nisaGain: number;            // NISA含み益（時価−簿価）
   taxableContribution: number;
   taxableWithdrawal: number;
   taxableAsset: number;        // 特定口座（税引前評価額）
