@@ -2,6 +2,7 @@ import React, { useState, useCallback } from "react";
 import { fmtMan } from "../lib/format";
 import { EVENT_TYPES, resolveEventAge } from "../lib/types";
 import type { ScenarioResult, LifeEvent, EventYearCost } from "../lib/types";
+import { buildLoanSchedule } from "../lib/calc";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
 
@@ -39,7 +40,19 @@ export function EventBars({ events, allEvents, currentAge, endAge, xForAge, pT, 
     const isChild = !!evt.parentId || !!(evt as any)._virtual;
     const isCollapsed = collapsedParents?.has(evt.id);
     const realChildCount = allEvents.filter(c => c.parentId === evt.id).length;
-    const childCount = hasStructured ? (evt.propertyParams ? 4 : 2) : realChildCount;
+    const childCount = hasStructured ? (() => {
+      if (evt.propertyParams) {
+        const pp = evt.propertyParams;
+        let c = 3; // ローン + 控除or管理費 + 管理費
+        if (pp.rateType === "variable" && pp.variableRiseAfter < pp.loanYears) c++;
+        if (pp.hasLoanDeduction) c++;
+        c += (pp.prepayments || []).filter(p => p.amountMan > 0).length;
+        if (pp.refinance) c++;
+        if (pp.saleAge) c++;
+        return c;
+      }
+      return 2;
+    })() : realChildCount;
     // 無効イベント: 親が無効なら子も無効
     const isDisabled = !!evt.disabled || (evt.parentId != null && !!allEvents.find(p => p.id === evt.parentId)?.disabled);
     const disabledOpacity = isDisabled ? 0.25 : 1;
@@ -116,15 +129,37 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
       if (hasStructured && p.propertyParams) {
         const pp = p.propertyParams;
         const startAge = resolveEventAge(p, allEvents);
-        // Loan period
-        visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.1, age: startAge, label: `ローン返済(${pp.rateType === "fixed" ? `固定${pp.fixedRate}%` : `変動${pp.variableInitRate}%`})`, type: "custom", durationYears: pp.rateType === "variable" ? pp.variableRiseAfter : pp.loanYears, oneTimeCostMan: 0, annualCostMan: 0 } as any);
-        if (pp.rateType === "variable" && pp.variableRiseAfter < pp.loanYears) {
-          visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.2, age: startAge + pp.variableRiseAfter, label: `金利上昇→${pp.variableRiskRate}%`, type: "custom", durationYears: pp.loanYears - pp.variableRiseAfter, oneTimeCostMan: 0, annualCostMan: 0 } as any);
+        const schedule = buildLoanSchedule(pp, startAge);
+        const effectiveLoanYears = schedule.length > 0 ? schedule.length : pp.loanYears;
+        const loanEndAge = startAge + effectiveLoanYears;
+        const saleAge = pp.saleAge;
+        const endAge = saleAge ?? loanEndAge;
+
+        // Loan period (adjusted for prepayment shortening)
+        visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.1, age: startAge, label: `ローン返済(${pp.rateType === "fixed" ? `固定${pp.fixedRate}%` : `変動${pp.variableInitRate}%`}${effectiveLoanYears !== pp.loanYears ? ` ${effectiveLoanYears}年` : ""})`, type: "custom", durationYears: Math.min(effectiveLoanYears, (saleAge ?? 999) - startAge), oneTimeCostMan: 0, annualCostMan: 0 } as any);
+        if (pp.rateType === "variable" && pp.variableRiseAfter < effectiveLoanYears) {
+          const riseEnd = Math.min(effectiveLoanYears - pp.variableRiseAfter, (saleAge ?? 999) - startAge - pp.variableRiseAfter);
+          if (riseEnd > 0) visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.2, age: startAge + pp.variableRiseAfter, label: `金利上昇→${pp.variableRiskRate}%`, type: "custom", durationYears: riseEnd, oneTimeCostMan: 0, annualCostMan: 0 } as any);
         }
         if (pp.hasLoanDeduction) {
-          visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.3, age: startAge, label: `住宅ローン控除(13年)`, type: "custom", durationYears: 13, oneTimeCostMan: 0, annualCostMan: 0 } as any);
+          visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.3, age: startAge, label: `住宅ローン控除(13年)`, type: "custom", durationYears: Math.min(13, (saleAge ?? 999) - startAge), oneTimeCostMan: 0, annualCostMan: 0 } as any);
         }
-        visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.4, age: startAge, label: `管理費・固定資産税`, type: "custom", durationYears: 0, oneTimeCostMan: 0, annualCostMan: pp.maintenanceMonthlyMan * 12 + pp.taxAnnualMan } as any);
+        // 繰上返済マーカー
+        for (const prep of pp.prepayments || []) {
+          if (prep.amountMan > 0 && (!saleAge || prep.age < saleAge)) {
+            visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.5 + prep.age * 0.001, age: prep.age, label: `繰上${prep.amountMan}万(${prep.type === "reduce" ? "軽減" : "短縮"})`, type: "custom", durationYears: 1, oneTimeCostMan: prep.amountMan, annualCostMan: 0 } as any);
+          }
+        }
+        // 借換マーカー
+        if (pp.refinance && (!saleAge || pp.refinance.age < saleAge)) {
+          visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.6, age: pp.refinance.age, label: `借換→${pp.refinance.newRate}%/${pp.refinance.newLoanYears}年`, type: "custom", durationYears: 1, oneTimeCostMan: pp.refinance.costMan, annualCostMan: 0 } as any);
+        }
+        // 売却マーカー
+        if (saleAge) {
+          visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.7, age: saleAge, label: `売却${pp.salePriceMan ? pp.salePriceMan + "万" : "(自動)"}`, type: "custom", durationYears: 1, oneTimeCostMan: 0, annualCostMan: 0 } as any);
+        }
+        // 管理費・固定資産税（売却まで or 永続）
+        visibleEvents.push({ ...p, _virtual: true, id: p.id + 0.4, age: startAge, label: `管理費・固定資産税`, type: "custom", durationYears: saleAge ? saleAge - startAge : 0, oneTimeCostMan: 0, annualCostMan: pp.maintenanceMonthlyMan * 12 + pp.taxAnnualMan } as any);
       }
       if (hasStructured && p.carParams) {
         const cp = p.carParams;

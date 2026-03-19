@@ -1427,7 +1427,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
           const schedEntry = yearsSince < schedule.length ? schedule[yearsSince] : null;
           const remainingLoan = schedEntry ? schedEntry.balance : 0;
           // Capital gains tax
-          const cgtResult = calcPropertyCapitalGainsTax(purchasePrice, salePrice, yearsSince, true);
+          const cgtResult = calcPropertyCapitalGainsTax(purchasePrice, salePrice, yearsSince, pp.saleIsResidence ?? true, pp.saleCostRate ?? 4);
           propertyCapitalGainsTax += cgtResult.tax;
           const netProceeds = salePrice - remainingLoan - cgtResult.tax;
           propertySaleProceeds += netProceeds;

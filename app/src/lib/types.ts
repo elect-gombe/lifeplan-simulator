@@ -44,6 +44,8 @@ export interface PropertyParams {
   saleAge?: number;           // 売却年齢
   salePriceMan?: number;      // 売却価格（万円）。未設定時は購入価格×上昇率で計算
   appreciationRate?: number;  // 年間価値変動率（%）
+  saleIsResidence?: boolean;  // 居住用か（デフォルトtrue=3000万特別控除適用）
+  saleCostRate?: number;      // 売却費用率（%）デフォルト4%（仲介手数料+印紙等）
   // Phase 4: 借換
   refinance?: {
     age: number;
@@ -115,6 +117,14 @@ export interface BalancePolicy {
   nisaPriority: boolean;        // 余剰はNISA優先
   // Phase 8: 引出戦略のカスタマイズ
   withdrawalOrder?: ("taxable" | "spouseNisa" | "selfNisa")[];
+}
+
+// 住居タイムライン（住居フェーズの配列）
+export interface HousingPhase {
+  startAge: number;
+  type: "rent" | "own";
+  rentAnnualMan?: number;         // 賃貸時の年間家賃（万円）
+  propertyParams?: PropertyParams; // 購入時の物件設定
 }
 
 // Phase 5: 住み替え（リロケーション）
@@ -261,6 +271,8 @@ export interface Scenario {
   // NISA / Balance policy
   nisa?: NISAConfig;
   balancePolicy?: BalancePolicy;
+  // 住居タイムライン（設定されている場合、rent/property/relocationイベントの代わりに使用）
+  housingTimeline?: HousingPhase[];
   // Phase 3: 個別資産クラス利回り
   dcReturnRate?: number;       // DC利回り（%）。未設定=グローバルrr
   nisaReturnRate?: number;     // NISA利回り（%）。未設定=グローバルrr

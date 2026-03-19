@@ -259,10 +259,10 @@ export function calcPropertyCapitalGainsTax(
   salePrice: number,        // 売却価格（円）
   yearsSince: number,       // 所有期間（年）
   isResidence: boolean = true, // 居住用
+  saleCostRate: number = 4,    // 売却費用率（%）デフォルト4%
 ): PropertyCapitalGainsTaxResult {
-  // 取得費不明の場合は売却価格の5%を概算取得費とする（ここでは実購入価格を使用）
-  // 譲渡費用: 仲介手数料3%+6万円+印紙税（概算で売却価格の4%）
-  const transferCost = Math.round(salePrice * 0.04);
+  // 譲渡費用: 仲介手数料3%+6万+印紙税等（概算で売却価格×費用率%）
+  const transferCost = Math.round(salePrice * saleCostRate / 100);
   const gain = salePrice - purchasePrice - transferCost;
   if (gain <= 0) return { gain, specialDeduction: 0, taxableGain: 0, tax: 0, isLongTerm: yearsSince > 5 };
 

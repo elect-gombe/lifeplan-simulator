@@ -494,7 +494,30 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
       <DeathModal isOpen={openModal === "death"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <InsuranceModal isOpen={openModal === "insurance"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <GiftModal isOpen={openModal === "gift"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
-      <RelocationModal isOpen={openModal === "relocation"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+      <RelocationModal isOpen={openModal === "relocation"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent}
+        allEvents={[...baseEvents.filter(e => !excludedIds.includes(e.id)), ...events]}
+        onUpdatePropertySale={(propId, patch) => {
+          // 既存物件のpropertyParamsに売却設定を反映（own eventsから探す。base eventsなら先にunlinkが必要）
+          const ownEvt = events.find(e => e.id === propId);
+          if (ownEvt?.propertyParams) {
+            setEvents(events.map(e => e.id === propId ? { ...e, propertyParams: { ...e.propertyParams!, ...patch } } : e));
+          } else {
+            // baseイベントの場合: unlinkしてから更新
+            const baseEvt = baseEvents.find(e => e.id === propId);
+            if (baseEvt?.propertyParams) {
+              const newId = Date.now();
+              const children = baseEvents.filter(c => c.parentId === propId);
+              const toExclude = [propId, ...children.map(c => c.id)];
+              onChange({
+                ...scenario,
+                excludedBaseEventIds: [...excludedIds, ...toExclude],
+                events: [...events, { ...baseEvt, id: newId, propertyParams: { ...baseEvt.propertyParams!, ...patch } },
+                  ...children.map(c => ({ ...c, id: Date.now() + Math.round(Math.random() * 100000), parentId: newId }))
+                ].sort((a, b) => a.age - b.age),
+              });
+            }
+          }
+        }} />
       {isLinked && baseEvents.length > 0 && <BaseEventList baseEvents={baseEvents} excludedIds={excludedIds} disabledIds={scenario.disabledBaseEventIds || []}
         onUnlink={unlinkBaseEvent} onRelink={relinkBaseEvent}
         onToggleDisable={(id) => {
@@ -514,6 +537,145 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
         onEditGift={(e) => openModalFor("gift", e)} onEditRelocation={(e) => openModalFor("relocation", e)}
         onEditChild={(e) => { const childEvts = [e, ...events.filter(c => c.parentId === e.id)]; setEditingChildEvents(childEvts); setOpenModal("child"); }} />
       {events.length === 0 && baseEvents.length === 0 && <div className="text-[10px] text-gray-400 pl-2">イベントなし</div>}
+    </Section>
+  );
+}
+
+// ===== Housing Timeline Section =====
+import type { HousingPhase } from "../lib/types";
+import { buildLoanSchedule } from "../lib/calc";
+import { calcPropertyCapitalGainsTax } from "../lib/tax";
+
+function HousingSection({ s, onChange, currentAge, retirementAge, open, onToggle, allEvents }: {
+  s: Scenario; onChange: (s: Scenario) => void;
+  currentAge: number; retirementAge: number;
+  open: boolean; onToggle: () => void;
+  allEvents: LifeEvent[];
+}) {
+  // 既存イベントから住居フェーズを自動構築
+  const phases = useMemo((): HousingPhase[] => {
+    if (s.housingTimeline && s.housingTimeline.length > 0) return s.housingTimeline;
+
+    const result: HousingPhase[] = [];
+    // 家賃イベント
+    const rentEvts = allEvents.filter(e => e.type === "rent" && !e.disabled && !e.parentId);
+    // 住宅購入イベント
+    const propEvts = allEvents.filter(e => e.type === "property" && e.propertyParams && !e.disabled);
+    // リロケーションイベント
+    const relocEvts = allEvents.filter(e => e.type === "relocation" && e.relocationParams && !e.disabled);
+
+    // 時系列でソート
+    const all = [
+      ...rentEvts.map(e => ({ age: resolveEventAge(e, allEvents), type: "rent" as const, evt: e })),
+      ...propEvts.map(e => ({ age: resolveEventAge(e, allEvents), type: "own" as const, evt: e })),
+      ...relocEvts.map(e => ({ age: e.age, type: "reloc" as const, evt: e })),
+    ].sort((a, b) => a.age - b.age);
+
+    for (const item of all) {
+      if (item.type === "rent") {
+        result.push({ startAge: item.age, type: "rent", rentAnnualMan: item.evt.annualCostMan });
+      } else if (item.type === "own") {
+        result.push({ startAge: item.age, type: "own", propertyParams: item.evt.propertyParams });
+      } else if (item.type === "reloc" && item.evt.relocationParams) {
+        const rp = item.evt.relocationParams;
+        if (rp.newHousingType === "rent") {
+          result.push({ startAge: item.age, type: "rent", rentAnnualMan: rp.newRentAnnualMan });
+        } else if (rp.newPropertyParams) {
+          result.push({ startAge: item.age, type: "own", propertyParams: rp.newPropertyParams });
+        }
+      }
+    }
+    if (result.length === 0) result.push({ startAge: currentAge, type: "rent", rentAnnualMan: 10 });
+    return result;
+  }, [s.housingTimeline, allEvents, currentAge]);
+
+  const simEnd = s.simEndAge ?? 85;
+
+  // フェーズの終了年齢
+  const phaseEnd = (i: number) => i < phases.length - 1 ? phases[i + 1].startAge : simEnd;
+
+  // 売却見積もり
+  const saleEstimate = (phase: HousingPhase, nextAge: number) => {
+    if (phase.type !== "own" || !phase.propertyParams) return null;
+    const pp = phase.propertyParams;
+    const ys = nextAge - phase.startAge;
+    if (ys <= 0) return null;
+    const purchasePrice = pp.priceMan * 10000;
+    const appRate = (pp.appreciationRate ?? -1) / 100;
+    const salePrice = pp.salePriceMan != null ? pp.salePriceMan * 10000 : Math.round(purchasePrice * Math.pow(1 + appRate, ys));
+    const schedule = buildLoanSchedule(pp, phase.startAge);
+    const remaining = ys < schedule.length ? schedule[ys]?.balance ?? 0 : 0;
+    const cgt = calcPropertyCapitalGainsTax(purchasePrice, salePrice, ys, pp.saleIsResidence ?? true, pp.saleCostRate ?? 4);
+    const cost = Math.round(salePrice * (pp.saleCostRate ?? 4) / 100);
+    return { salePrice, remaining, cost, tax: cgt.tax, net: salePrice - remaining - cost - cgt.tax };
+  };
+
+  const summary = phases.map((p, i) => {
+    const end = phaseEnd(i);
+    return p.type === "rent" ? `家賃${p.startAge}-${end}歳` : `持家${p.startAge}-${end}歳`;
+  }).join(" → ");
+
+  return (
+    <Section title="住居プラン" icon="🏠" borderColor="#3b82f6" bgOpen="bg-blue-50/30" open={open} onToggle={onToggle}
+      badge={<span className="font-normal text-gray-400 text-[10px]">({summary})</span>}>
+      <div className="space-y-1">
+        {/* フェーズ可視化バー */}
+        <div className="flex rounded overflow-hidden h-6 border border-gray-200">
+          {phases.map((p, i) => {
+            const start = p.startAge;
+            const end = phaseEnd(i);
+            const totalRange = simEnd - currentAge;
+            const wPct = Math.max((end - start) / totalRange * 100, 3);
+            const bg = p.type === "own" ? "bg-blue-400" : "bg-gray-300";
+            return (
+              <div key={i} className={`${bg} relative group flex items-center justify-center text-[8px] text-white font-bold`}
+                style={{ width: `${wPct}%` }}>
+                {p.type === "own" ? `🏠${p.propertyParams?.priceMan ?? "?"}万` : `🏢${p.rentAnnualMan ?? "?"}万/年`}
+                <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 bg-gray-800 text-white rounded px-2 py-1 text-[9px] whitespace-nowrap z-10 mb-1">
+                  {start}歳〜{end}歳 ({end - start}年間) {p.type === "own" ? "持家" : "賃貸"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex justify-between text-[8px] text-gray-400">
+          <span>{currentAge}歳</span><span>{simEnd}歳</span>
+        </div>
+
+        {/* フェーズ一覧 */}
+        {phases.map((p, i) => {
+          const end = phaseEnd(i);
+          const nextPhase = i < phases.length - 1 ? phases[i + 1] : null;
+          const sale = nextPhase ? saleEstimate(p, end) : null;
+          return (
+            <div key={i} className={`rounded border p-2 text-[10px] space-y-1 ${p.type === "own" ? "border-blue-200 bg-blue-50/30" : "border-gray-200"}`}>
+              <div className="flex items-center gap-2">
+                <span className="font-bold">{p.type === "own" ? "🏠 持家" : "🏢 賃貸"}</span>
+                <span className="text-gray-500">{p.startAge}歳〜{end}歳（{end - p.startAge}年）</span>
+                {p.type === "own" && p.propertyParams && <span className="text-blue-600">{p.propertyParams.priceMan}万</span>}
+                {p.type === "rent" && <span className="text-gray-600">{p.rentAnnualMan}万/年</span>}
+              </div>
+              {/* 所有フェーズの売却見積もり */}
+              {sale && p.type === "own" && (
+                <div className="flex items-center gap-2 text-[9px] text-amber-700 bg-amber-50 rounded px-1.5 py-0.5">
+                  <span>→ 売却:</span>
+                  <span>価格{Math.round(sale.salePrice / 10000)}万</span>
+                  <span>残債{Math.round(sale.remaining / 10000)}万</span>
+                  <span>税{Math.round(sale.tax / 10000)}万</span>
+                  <span className="font-bold text-green-700">手取{Math.round(sale.net / 10000)}万</span>
+                  {nextPhase?.type === "own" && nextPhase.propertyParams && (
+                    <span className="text-blue-600">→ 頭金{nextPhase.propertyParams.downPaymentMan}万</span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        <div className="text-[9px] text-gray-400 mt-1">
+          住居の変更はライフイベントの「住宅購入」「家賃」「住み替え」で設定できます
+        </div>
+      </div>
     </Section>
   );
 }
@@ -912,6 +1074,13 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
 
       <EventSection scenario={s} onChange={onChange} currentAge={currentAge} retirementAge={retirementAge} baseScenario={baseScenario} isLinked={isLinked}
         open={secOpen("events")} onToggle={() => toggleSec("events")} />
+
+      <HousingSection s={s} onChange={onChange} currentAge={currentAge} retirementAge={s.simEndAge ?? 85}
+        open={secOpen("housing")} onToggle={() => toggleSec("housing")}
+        allEvents={[
+          ...(isLinked && baseScenario ? baseScenario.events.filter(e => !(s.excludedBaseEventIds || []).includes(e.id)) : []),
+          ...(s.events || []),
+        ]} />
 
       <NISASection s={s} onChange={onChange} isLinked={isLinked} baseScenario={baseScenario}
         open={secOpen("nisa")} onToggle={() => toggleSec("nisa")} />
