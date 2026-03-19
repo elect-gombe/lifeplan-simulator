@@ -40,14 +40,18 @@ export function EventBars({ events, allEvents, currentAge, endAge, xForAge, pT, 
     const isCollapsed = collapsedParents?.has(evt.id);
     const realChildCount = allEvents.filter(c => c.parentId === evt.id).length;
     const childCount = hasStructured ? (evt.propertyParams ? 4 : 2) : realChildCount;
+    // 無効イベント: 親が無効なら子も無効
+    const isDisabled = !!evt.disabled || (evt.parentId != null && !!allEvents.find(p => p.id === evt.parentId)?.disabled);
+    const disabledOpacity = isDisabled ? 0.25 : 1;
     return (
-      <g key={`ev${evt.id}`}
+      <g key={`ev${evt.id}`} opacity={disabledOpacity}
         style={{ cursor: isParent && onToggle ? "pointer" : undefined }}
         onClick={isParent && onToggle && !(evt as any)._virtual ? (e) => { e.stopPropagation(); onToggle(evt.id); } : undefined}>
         <rect x={isChild ? startX + 8 : startX} y={barY} width={Math.max((isChild ? endX - startX - 8 : endX - startX), 4)} height={barH}
-          rx={3} fill={et.color} opacity={isChild ? 0.15 : 0.25} />
-        <rect x={isChild ? startX + 8 : startX} y={barY} width={3} height={barH} rx={1} fill={et.color} opacity={0.8} />
-        <text x={(isChild ? startX + 14 : startX + 6)} y={barY + barH - 3} fontSize={8} fill={et.color} fontWeight="600">
+          rx={3} fill={isDisabled ? "#9ca3af" : et.color} opacity={isChild ? 0.15 : 0.25} />
+        <rect x={isChild ? startX + 8 : startX} y={barY} width={3} height={barH} rx={1} fill={isDisabled ? "#9ca3af" : et.color} opacity={0.8} />
+        <text x={(isChild ? startX + 14 : startX + 6)} y={barY + barH - 3} fontSize={8} fill={isDisabled ? "#9ca3af" : et.color} fontWeight="600"
+          textDecoration={isDisabled ? "line-through" : undefined}>
           {isParent && onToggle ? (isCollapsed ? "▶ " : "▼ ") : ""}{et.icon} {evt.label} {effectiveAge}歳{evt.durationYears > 0 ? `〜${effectiveAge + evt.durationYears}歳` : "〜"}
           {evt.annualCostMan > 0 ? ` ${evt.annualCostMan}万/年` : ""}
           {evt.oneTimeCostMan > 0 ? ` +${evt.oneTimeCostMan}万` : ""}
@@ -81,7 +85,9 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
     if (!s0) return [];
     if (selIdx === 0 || !s0.linkedToBase || !baseScenario) return [...(s0.events || [])];
     const excludedIds = s0.excludedBaseEventIds || [];
-    const baseEvts = (baseScenario.events || []).filter(e => !excludedIds.includes(e.id));
+    const disabledIds = s0.disabledBaseEventIds || [];
+    const baseEvts = (baseScenario.events || []).filter(e => !excludedIds.includes(e.id))
+      .map(e => (disabledIds.includes(e.id) || e.disabled) ? { ...e, disabled: true } : e);
     const ownEvts = s0.events || [];
     return [...baseEvts, ...ownEvts].sort((a, b) => a.age - b.age);
   })();

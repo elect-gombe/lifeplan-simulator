@@ -218,6 +218,8 @@ export interface Scenario {
   // NISA / Balance policy
   nisa?: NISAConfig;
   balancePolicy?: BalancePolicy;
+  // UI state: section open/close (persisted in JSON)
+  sectionOpen?: Record<string, boolean>;
 }
 
 export interface MemberResult {

@@ -899,8 +899,10 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       childAllowance += childAllowanceMonthly(childAge, ci) * 12;
     });
 
-    // 扶養控除は世帯主設定に応じて本人 or 配偶者に適用
-    const depHolder = effectiveDepHolder || "self";
+    // 扶養控除は世帯主設定に応じて本人 or 配偶者に適用（死亡時は生存者に自動切替）
+    let depHolder: "self" | "spouse" = effectiveDepHolder || "self";
+    if (depHolder === "self" && isSelfDead && !isSpouseDead) depHolder = "spouse";
+    if (depHolder === "spouse" && isSpouseDead && !isSelfDead) depHolder = "self";
     const selfDepDed = depHolder === "self" ? dependentDeductionTotal : 0;
     const spouseDepDed = depHolder === "spouse" ? dependentDeductionTotal : 0;
 

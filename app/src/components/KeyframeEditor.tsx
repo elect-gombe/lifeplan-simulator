@@ -10,6 +10,37 @@ import { InsuranceModal } from "./InsuranceModal";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
 
+// リンクバッジ共通
+const LinkBadge = ({ linked }: { linked?: boolean }) =>
+  linked ? <span className="text-[9px] bg-gray-200 text-gray-500 rounded px-1 py-px">🔗A</span> : null;
+
+// 折りたたみセクション共通ラッパー（grid-rows アニメーション）
+function Section({ title, icon, borderColor, bgOpen, open, onToggle, badge, right, children, linked }: {
+  title: string; icon?: string; borderColor: string; bgOpen?: string;
+  open: boolean; onToggle: () => void; badge?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode;
+  linked?: boolean;
+}) {
+  return (
+    <div className={`rounded-md border-l-[3px] transition-colors duration-150 ${open ? bgOpen || "bg-gray-50/50" : "hover:bg-gray-50/50"}`} style={{ borderLeftColor: borderColor }}>
+      <div className={`flex items-center justify-between px-2 py-1.5 cursor-pointer select-none rounded-r-md ${!open ? "hover:bg-gray-100/60" : ""}`} onClick={onToggle}>
+        <div className="flex items-center gap-1.5">
+          <span className={`text-[11px] w-4 text-center transition-transform duration-200 ${open ? "rotate-0" : "-rotate-90"}`} style={{ color: borderColor }}>▼</span>
+          {icon && <span className="text-xs">{icon}</span>}
+          <span className="text-xs font-bold" style={{ color: borderColor }}>{title}</span>
+          <LinkBadge linked={linked} />
+          {badge}
+        </div>
+        {right && <div onClick={e => e.stopPropagation()}>{right}</div>}
+      </div>
+      <div className="grid transition-[grid-template-rows] duration-200 ease-in-out" style={{ gridTemplateRows: open ? "1fr" : "0fr" }}>
+        <div className="overflow-hidden">
+          <div className="px-2 pb-2">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 折りたたみ状態をlocalStorageに保持
 function usePersistedSet(key: string): [Set<number>, (fn: (prev: Set<number>) => Set<number>) => void] {
   const [set, setSet] = useState<Set<number>>(() => {
@@ -64,8 +95,9 @@ function TrackRow({ track, keyframes, onChange, currentAge, retirementAge, linke
         <span className="text-xs font-semibold text-gray-700">{track.label}（{track.unit}）</span>
         <div className="flex items-center gap-1.5">
           {onToggleLink && (
-            <button onClick={onToggleLink} className={`text-[10px] rounded px-1.5 py-0.5 ${linked ? "bg-gray-200 text-gray-500" : "bg-blue-100 text-blue-600"}`}>
-              {linked ? "🔗A" : "✏️"}
+            <button onClick={onToggleLink} className={`text-[10px] rounded px-1.5 py-0.5 ${linked ? "bg-gray-200 text-gray-500" : "bg-blue-100 text-blue-600"}`}
+              title={linked ? "Aにリンク中（クリックで独自設定）" : "独自設定中（クリックでAにリンク）"}>
+              {linked ? "🔗A" : "✏️独自"}
             </button>
           )}
           {!ro && <button onClick={() => { setAdding(!adding); setNewAge(currentAge); setNewVal(track.defaultValue); }} className="text-[10px] text-blue-500">+</button>}
@@ -107,7 +139,7 @@ interface MemberData {
 
 const DEFAULT_DC_RM = DEFAULT_DC_RECEIVE_METHOD;
 
-function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge, extraFields, linked, readOnly, baseData, trackLinked, onToggleTrack, excludeTracks, dcLinked, onToggleDCLink }: {
+function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge, extraFields, linked, readOnly, baseData, trackLinked, onToggleTrack, excludeTracks, dcLinked, onToggleDCLink, open, onToggle, enabled, onToggleEnabled, enabledLabel }: {
   label: string; color: string;
   data: MemberData;
   onUpdate: (patch: Partial<MemberData & Record<string, any>>) => void;
@@ -118,133 +150,139 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
   trackLinked?: (key: TrackKey) => boolean;
   onToggleTrack?: (key: TrackKey) => void;
   excludeTracks?: TrackKey[];
-  dcLinked?: boolean;            // DC受取がベースにリンク中か
-  onToggleDCLink?: () => void;   // DC受取のリンク/解除トグル
+  dcLinked?: boolean;
+  onToggleDCLink?: () => void;
+  open: boolean;
+  onToggle: () => void;
+  enabled?: boolean;              // undefined = always enabled (no toggle shown)
+  onToggleEnabled?: (v: boolean) => void;
+  enabledLabel?: string;
 }) {
-  const [open, setOpen] = useState(false);
   const isRO = readOnly && linked;
   // When linked & readOnly, display base data for scalar settings
   const display = isRO && baseData ? baseData : data;
   const rm = (dcLinked && baseData ? baseData.dcReceiveMethod : data.dcReceiveMethod) || DEFAULT_DC_RM;
   const setRM = (patch: Partial<DCReceiveMethod>) => onUpdate({ dcReceiveMethod: { ...rm, ...patch } });
 
+  const isDisabled = enabled != null && !enabled;
+  const summary = `昇給${display.salaryGrowthRate}% ${rm.type === "lump_sum" ? "一時金" : rm.type === "annuity" ? `年金${rm.annuityYears}年` : "併用"}`;
   return (
-    <div className="border-t pt-1">
-      <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-xs font-bold" style={{ color }}>
-        <span className="text-[10px] text-gray-400">{open ? "▼" : "▶"}</span>
-        {label}
-        <span className="font-normal text-gray-400 text-[10px]">
-          (昇給{display.salaryGrowthRate}% {rm.type === "lump_sum" ? "一時金" : rm.type === "annuity" ? `年金${rm.annuityYears}年` : "併用"})
-        </span>
-      </button>
-      {open && (
-        <div className="mt-1 space-y-1.5 pl-1">
-          <div className="flex flex-wrap gap-2 text-xs">
-            {extraFields}
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">昇給率</span>
-              <input type="number" value={display.salaryGrowthRate} step={0.5} onChange={e => onUpdate({ salaryGrowthRate: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" disabled={isRO} />
-              <span className="text-[10px] text-gray-400">%</span>
-            </div>
-            <details className="text-[10px]">
-              <summary className="cursor-pointer text-gray-500 flex items-center gap-1">
-                社保
-                <span className="font-mono text-gray-700">{display.siParams ? `詳細` : `${display.sirPct}%`}</span>
-                {!display.siParams && <span className="text-gray-300">(フラット)</span>}
-              </summary>
-              <div className="mt-1 rounded border p-1.5 space-y-1 bg-gray-50">
-                {!display.siParams ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-500">一律料率</span>
-                    <input type="number" value={display.sirPct} step={0.25} onChange={e => onUpdate({ sirPct: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5" disabled={isRO} />
-                    <span className="text-gray-400">%</span>
-                    <button onClick={() => onUpdate({ siParams: { ...DEFAULT_SI_PARAMS } })} className="text-blue-500 hover:underline" disabled={isRO}>詳細に切替</button>
-                  </div>
-                ) : (
-                  <div className="space-y-0.5">
-                    <div className="text-gray-400">厚生年金 9.15%(固定) 雇用 0.60%(固定)</div>
-                    {([
-                      ["healthInsuranceRate", "健保率"] as const,
-                      ["nursingInsuranceRate", "介護率"] as const,
-                      ["childSupportRate", "子育支援"] as const,
-                    ] as const).map(([key, lbl]) => (
-                      <div key={key} className="flex items-center gap-1">
-                        <span className="text-gray-500 w-12">{lbl}</span>
-                        <input type="number" value={display.siParams![key]} step={0.05} min={0}
-                          onChange={e => onUpdate({ siParams: { ...display.siParams!, [key]: Number(e.target.value) } })}
-                          className="w-14 rounded border px-1 py-0.5" disabled={isRO} />
-                        <span className="text-gray-400">%</span>
-                      </div>
-                    ))}
-                    <button onClick={() => onUpdate({ siParams: undefined })} className="text-gray-400 hover:text-red-500" disabled={isRO}>フラット率に戻す</button>
-                  </div>
-                )}
-              </div>
-            </details>
-            <label className="flex items-center gap-1 text-[10px] cursor-pointer">
-              <input type="checkbox" checked={display.hasFurusato} onChange={e => onUpdate({ hasFurusato: e.target.checked })} className="accent-blue-600" disabled={isRO} />
-              <span className="text-gray-500">ふるさと納税</span>
-            </label>
+    <Section title={label} borderColor={color} bgOpen="bg-slate-50/60" open={!isDisabled && open} onToggle={isDisabled ? () => {} : onToggle}
+      linked={linked}
+      badge={isDisabled ? <span className="text-[9px] text-gray-400">無効</span> : <span className="font-normal text-gray-400 text-[10px]">({summary})</span>}
+      right={onToggleEnabled ? (
+        <label className="flex items-center gap-1 text-[10px] cursor-pointer">
+          <input type="checkbox" checked={!!enabled} onChange={e => onToggleEnabled(e.target.checked)} className="accent-pink-600" />
+          <span className="text-gray-500">{enabledLabel || "有効"}</span>
+        </label>
+      ) : undefined}>
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap gap-2 text-xs">
+          {extraFields}
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">昇給率</span>
+            <input type="number" value={display.salaryGrowthRate} step={0.5} onChange={e => onUpdate({ salaryGrowthRate: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5 text-xs" disabled={isRO} />
+            <span className="text-[10px] text-gray-400">%</span>
           </div>
-          {/* Track rows */}
-          {TRACKS.filter(t => !excludeTracks?.includes(t.key)).map(t => {
-            const isThisTrackLinked = trackLinked ? trackLinked(t.key) : false;
-            return (
-              <TrackRow key={t.key} track={t}
-                keyframes={(data as any)[t.key] || []}
-                onChange={(kfs) => onUpdate({ [t.key]: kfs })}
-                currentAge={currentAge} retirementAge={retirementAge}
-                linked={isThisTrackLinked}
-                onToggleLink={onToggleTrack ? () => onToggleTrack(t.key) : undefined}
-                baseKFs={baseData ? (baseData as any)[t.key] || [] : undefined} />
-            );
-          })}
-          {/* DC/iDeCo受取方法 — 統合 */}
-          <div className="border-t pt-1">
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] font-semibold text-gray-600">DC受取</span>
-                {(["lump_sum", "annuity", "combined"] as const).map(t => (
-                <button key={t} onClick={() => setRM({ type: t })} disabled={dcLinked}
-                  className={`rounded px-1.5 py-0.5 text-[10px] ${rm.type === t ? "bg-orange-600 text-white" : "bg-gray-100"}`}>
-                  {t === "lump_sum" ? "一時金" : t === "annuity" ? "年金" : "併用"}
-                </button>
-              ))}
-              </div>
-              {onToggleDCLink && (
-                <button onClick={onToggleDCLink} className={`text-[10px] rounded px-1.5 py-0.5 ${dcLinked ? "bg-gray-200 text-gray-500" : "bg-blue-100 text-blue-600"}`}>
-                  {dcLinked ? "🔗A" : "✏️"}
-                </button>
+          <details className="text-[10px]">
+            <summary className="cursor-pointer text-gray-500 flex items-center gap-1">
+              社保
+              <span className="font-mono text-gray-700">{display.siParams ? `詳細` : `${display.sirPct}%`}</span>
+              {!display.siParams && <span className="text-gray-300">(フラット)</span>}
+            </summary>
+            <div className="mt-1 rounded border p-1.5 space-y-1 bg-gray-50">
+              {!display.siParams ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">一律料率</span>
+                  <input type="number" value={display.sirPct} step={0.25} onChange={e => onUpdate({ sirPct: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5" disabled={isRO} />
+                  <span className="text-gray-400">%</span>
+                  <button onClick={() => onUpdate({ siParams: { ...DEFAULT_SI_PARAMS } })} className="text-blue-500 hover:underline" disabled={isRO}>詳細に切替</button>
+                </div>
+              ) : (
+                <div className="space-y-0.5">
+                  <div className="text-gray-400">厚生年金 9.15%(固定) 雇用 0.60%(固定)</div>
+                  {([
+                    ["healthInsuranceRate", "健保率"] as const,
+                    ["nursingInsuranceRate", "介護率"] as const,
+                    ["childSupportRate", "子育支援"] as const,
+                  ] as const).map(([key, lbl]) => (
+                    <div key={key} className="flex items-center gap-1">
+                      <span className="text-gray-500 w-12">{lbl}</span>
+                      <input type="number" value={display.siParams![key]} step={0.05} min={0}
+                        onChange={e => onUpdate({ siParams: { ...display.siParams!, [key]: Number(e.target.value) } })}
+                        className="w-14 rounded border px-1 py-0.5" disabled={isRO} />
+                      <span className="text-gray-400">%</span>
+                    </div>
+                  ))}
+                  <button onClick={() => onUpdate({ siParams: undefined })} className="text-gray-400 hover:text-red-500" disabled={isRO}>フラット率に戻す</button>
+                </div>
               )}
             </div>
-            <div className={`flex flex-wrap gap-2 pl-2 ${dcLinked ? "opacity-50" : ""}`}>
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 text-[10px]">受取開始</span>
-                <input type="number" value={rm.annuityStartAge} min={60} max={75} step={1} disabled={dcLinked}
-                  onChange={e => setRM({ annuityStartAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
-                <span className="text-[10px] text-gray-400">歳</span>
-              </div>
-            {(rm.type === "annuity" || rm.type === "combined") && (<>
-                <div className="flex items-center gap-0.5">
-                  {[5, 10, 15, 20].map(y => (
-                    <button key={y} onClick={() => setRM({ annuityYears: y })} disabled={dcLinked}
-                      className={`rounded px-1 py-0.5 text-[10px] ${rm.annuityYears === y ? "bg-orange-600 text-white" : "bg-gray-100"}`}>{y}年</button>
-                  ))}
-                </div>
-                {rm.type === "combined" && (
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-500 text-[10px]">一時金</span>
-                    <input type="number" value={rm.combinedLumpSumRatio} min={10} max={90} step={10} disabled={dcLinked}
-                      onChange={e => setRM({ combinedLumpSumRatio: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
-                    <span className="text-[10px] text-gray-400">%</span>
-                  </div>
-                )}
-              </>)}
+          </details>
+          <label className="flex items-center gap-1 text-[10px] cursor-pointer">
+            <input type="checkbox" checked={display.hasFurusato} onChange={e => onUpdate({ hasFurusato: e.target.checked })} className="accent-blue-600" disabled={isRO} />
+            <span className="text-gray-500">ふるさと納税</span>
+          </label>
+        </div>
+        {/* Track rows */}
+        {TRACKS.filter(t => !excludeTracks?.includes(t.key)).map(t => {
+          const isThisTrackLinked = trackLinked ? trackLinked(t.key) : false;
+          return (
+            <TrackRow key={t.key} track={t}
+              keyframes={(data as any)[t.key] || []}
+              onChange={(kfs) => onUpdate({ [t.key]: kfs })}
+              currentAge={currentAge} retirementAge={retirementAge}
+              linked={isThisTrackLinked}
+              onToggleLink={onToggleTrack ? () => onToggleTrack(t.key) : undefined}
+              baseKFs={baseData ? (baseData as any)[t.key] || [] : undefined} />
+          );
+        })}
+        {/* DC/iDeCo受取方法 — 統合 */}
+        <div className="border-t pt-1">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] font-semibold text-gray-600">DC受取</span>
+              {(["lump_sum", "annuity", "combined"] as const).map(t => (
+              <button key={t} onClick={() => setRM({ type: t })} disabled={dcLinked}
+                className={`rounded px-1.5 py-0.5 text-[10px] ${rm.type === t ? "bg-orange-600 text-white" : "bg-gray-100"}`}>
+                {t === "lump_sum" ? "一時金" : t === "annuity" ? "年金" : "併用"}
+              </button>
+            ))}
             </div>
+            {onToggleDCLink && (
+              <button onClick={onToggleDCLink} className={`text-[10px] rounded px-1.5 py-0.5 ${dcLinked ? "bg-gray-200 text-gray-500" : "bg-blue-100 text-blue-600"}`}
+                title={dcLinked ? "Aにリンク中（クリックで独自設定）" : "独自設定中（クリックでAにリンク）"}>
+                {dcLinked ? "🔗A" : "✏️独自"}
+              </button>
+            )}
+          </div>
+          <div className={`flex flex-wrap gap-2 pl-2 ${dcLinked ? "opacity-50" : ""}`}>
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-[10px]">受取開始</span>
+              <input type="number" value={rm.annuityStartAge} min={60} max={75} step={1} disabled={dcLinked}
+                onChange={e => setRM({ annuityStartAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-[10px] text-gray-400">歳</span>
+            </div>
+          {(rm.type === "annuity" || rm.type === "combined") && (<>
+              <div className="flex items-center gap-0.5">
+                {[5, 10, 15, 20].map(y => (
+                  <button key={y} onClick={() => setRM({ annuityYears: y })} disabled={dcLinked}
+                    className={`rounded px-1 py-0.5 text-[10px] ${rm.annuityYears === y ? "bg-orange-600 text-white" : "bg-gray-100"}`}>{y}年</button>
+                ))}
+              </div>
+              {rm.type === "combined" && (
+                <div className="flex items-center gap-1">
+                  <span className="text-gray-500 text-[10px]">一時金</span>
+                  <input type="number" value={rm.combinedLumpSumRatio} min={10} max={90} step={10} disabled={dcLinked}
+                    onChange={e => setRM({ combinedLumpSumRatio: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+                  <span className="text-[10px] text-gray-400">%</span>
+                </div>
+              )}
+            </>)}
           </div>
         </div>
-      )}
-    </div>
+      </div>
+    </Section>
   );
 }
 
@@ -340,7 +378,7 @@ function BaseEventList({ baseEvents, excludedIds, disabledIds, onUnlink, onRelin
     const hasChildren = children.length > 0;
     const isCollapsed = collapsed.has(e.id);
     const excluded = excludedIds.includes(e.id) || !!parentExcluded;
-    const isDisabled = disabledIds.includes(e.id) || !!parentDisabled;
+    const isDisabled = disabledIds.includes(e.id) || !!e.disabled || !!parentDisabled;
     const totalChildCost = children.reduce((s, c) => s + c.annualCostMan * Math.max(c.durationYears, 1), 0);
     return (
       <div key={e.id}>
@@ -354,11 +392,13 @@ function BaseEventList({ baseEvents, excludedIds, disabledIds, onUnlink, onRelin
           {e.oneTimeCostMan > 0 && <span className="text-gray-400 text-[10px]">+{e.oneTimeCostMan}万</span>}
           {hasChildren && isCollapsed && <span className="text-[10px] text-gray-400">({children.length}件 計{totalChildCost}万)</span>}
           {!indent && !excluded && <div className="flex items-center gap-1 ml-auto">
-            <button onClick={() => onUnlink(e)} className="text-[10px] rounded px-1 py-0.5 bg-blue-100 text-blue-600">✏️</button>
+            <button onClick={() => onUnlink(e)} className="text-[10px] rounded px-1.5 py-0.5 bg-gray-200 text-gray-500"
+              title="Aにリンク中（クリックで独自設定に切替）">🔗A</button>
             <input type="checkbox" checked={!isDisabled} onChange={() => onToggleDisable(e.id)} className="accent-blue-600 w-3 h-3" title={isDisabled ? "有効にする" : "無効にする"} />
           </div>}
           {!indent && excluded && <div className="flex items-center gap-1 ml-auto">
-            <button onClick={() => onRelink(e.id)} className="text-[10px] rounded px-1 py-0.5 bg-gray-200 text-gray-500">🔗戻す</button>
+            <button onClick={() => onRelink(e.id)} className="text-[10px] rounded px-1.5 py-0.5 bg-blue-100 text-blue-600"
+              title="独自設定中（クリックでAにリンクを戻す）">✏️独自</button>
           </div>}
         </div>
         {hasChildren && !isCollapsed && children.map(c => renderBaseEvent(c, true, excluded, isDisabled))}
@@ -367,26 +407,29 @@ function BaseEventList({ baseEvents, excludedIds, disabledIds, onUnlink, onRelin
   };
   return (
     <div className="mb-1">
-      <div className="text-[10px] text-gray-400 mb-0.5">Aのイベント（✏️で個別編集に切り替え）</div>
+      <div className="flex items-center gap-1 text-[10px] text-gray-400 mb-0.5">
+        <span className="bg-gray-200 text-gray-500 rounded px-1 py-px">🔗A</span>
+        <span>のイベント</span>
+      </div>
       <div className="space-y-0.5">{parents.map(e => renderBaseEvent(e, false))}</div>
     </div>
   );
 }
 
 // ===== Event Section =====
-function EventSection({ scenario, onChange, currentAge, retirementAge, baseScenario, isLinked }: {
+function EventSection({ scenario, onChange, currentAge, retirementAge, baseScenario, isLinked, open, onToggle }: {
   scenario: Scenario; onChange: (s: Scenario) => void;
   currentAge: number; retirementAge: number;
   baseScenario?: Scenario | null; isLinked: boolean;
+  open: boolean; onToggle: () => void;
 }) {
   const events = scenario.events || [];
   const baseEvents = (isLinked && baseScenario) ? (baseScenario.events || []) : [];
   const excludedIds = scenario.excludedBaseEventIds || [];
-  const [showMenu, setShowMenu] = useState(false);
   type ModalType = "child" | "property" | "car" | "death" | "insurance" | null;
   const [openModal, setOpenModal] = useState<ModalType>(null);
   const [editingEvent, setEditingEvent] = useState<LifeEvent | null>(null);
-  const openModalFor = (type: ModalType, evt?: LifeEvent | null) => { setOpenModal(type); setEditingEvent(evt ?? null); setShowMenu(false); };
+  const openModalFor = (type: ModalType, evt?: LifeEvent | null) => { setOpenModal(type); setEditingEvent(evt ?? null); };
   const closeModal = () => { setOpenModal(null); setEditingEvent(null); };
 
   const setEvents = (evts: LifeEvent[]) => onChange({ ...scenario, events: evts });
@@ -394,7 +437,7 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
     const et = EVENT_TYPES[type]; const age = currentAge + 5; const parentId = Date.now();
     const newEvents: LifeEvent[] = [{ id: parentId, age, type, label: et.label, oneTimeCostMan: et.defaultOnetime, annualCostMan: et.defaultAnnual, durationYears: et.defaultDuration }];
     if (type === "marriage") newEvents.push({ id: parentId + 1, age, type: "custom", label: "結婚支援金（親）", oneTimeCostMan: -100, annualCostMan: 0, durationYears: 0, parentId, ageOffset: 0 });
-    setEvents([...events, ...newEvents].sort((a, b) => a.age - b.age)); setShowMenu(false);
+    setEvents([...events, ...newEvents].sort((a, b) => a.age - b.age));
   };
   const addChildEvents = (newEvts: LifeEvent[]) => setEvents([...events, ...newEvts].sort((a, b) => a.age - b.age));
   const removeEvent = (id: number) => setEvents(events.filter(e => e.id !== id && e.parentId !== id));
@@ -412,7 +455,6 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
     onChange({ ...scenario, excludedBaseEventIds: excludedIds.filter(id => !toRestore.includes(id)) });
   };
 
-  const [open, setOpen] = useState(true);
   const allCount = baseEvents.filter(e => !excludedIds.includes(e.id)).length + events.length;
   const topEvents = [...baseEvents.filter(e => !e.parentId && !excludedIds.includes(e.id)), ...events.filter(e => !e.parentId)];
   const summaryText = topEvents.map(e => `${(EVENT_TYPES[e.type] || EVENT_TYPES.custom).icon}${e.label}`).join(" ");
@@ -424,58 +466,47 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
   };
 
   return (
-    <div className="border-t pt-1">
-      <div className="flex items-center justify-between mb-1">
-        <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-xs font-bold text-gray-700">
-          <span className="text-[10px] text-gray-400">{open ? "▼" : "▶"}</span>
-          ライフイベント <span className="font-normal text-gray-400">({allCount}件{summaryText ? ` ${summaryText}` : ""})</span>
-        </button>
-        <button onClick={() => setShowMenu(!showMenu)} className="text-[10px] text-blue-500 hover:text-blue-700">+ 追加</button>
+    <Section title="ライフイベント" icon="📅" borderColor="#d97706" bgOpen="bg-amber-50/30" open={open} onToggle={onToggle}
+      linked={isLinked}
+      badge={<span className="font-normal text-gray-400 text-[10px]">({allCount}件{summaryText ? ` ${summaryText}` : ""})</span>}>
+      <div className="mb-1.5 flex flex-wrap gap-1">
+        {Object.entries(EVENT_TYPES).filter(([k]) => k !== "education" && k !== "marriage").map(([k, v]) => (
+          <button key={k} onClick={() => {
+            if (["child", "property", "car", "death", "insurance"].includes(k)) { openModalFor(k as ModalType); }
+            else addSimpleEvent(k);
+          }} className="rounded border bg-white px-1.5 py-0.5 text-[10px] hover:bg-blue-50 hover:border-blue-300">{v.icon} {v.label}</button>
+        ))}
       </div>
-      {open && (<>
-        {showMenu && (
-          <div className="mb-2 rounded border bg-blue-50 p-2">
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(EVENT_TYPES).filter(([k]) => k !== "education" && k !== "marriage").map(([k, v]) => (
-                <button key={k} onClick={() => {
-                  if (["child", "property", "car", "death", "insurance"].includes(k)) { openModalFor(k as ModalType); }
-                  else addSimpleEvent(k);
-                }} className="rounded border bg-white px-2 py-1 text-xs hover:bg-gray-50">{v.icon} {v.label}</button>
-              ))}
-            </div>
-          </div>
-        )}
-        <ChildEventModal isOpen={openModal === "child"} onClose={closeModal} onAdd={addChildEvents} currentAge={currentAge} retirementAge={retirementAge} />
-        <PropertyModal isOpen={openModal === "property"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
-        <CarModal isOpen={openModal === "car"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
-        <DeathModal isOpen={openModal === "death"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
-        <InsuranceModal isOpen={openModal === "insurance"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
-        {isLinked && baseEvents.length > 0 && <BaseEventList baseEvents={baseEvents} excludedIds={excludedIds} disabledIds={scenario.disabledBaseEventIds || []}
-          onUnlink={unlinkBaseEvent} onRelink={relinkBaseEvent}
-          onToggleDisable={(id) => {
-            const dIds = scenario.disabledBaseEventIds || [];
-            const childIds = baseEvents.filter(c => c.parentId === id).map(c => c.id);
-            const allIds = [id, ...childIds];
-            if (dIds.includes(id)) {
-              onChange({ ...scenario, disabledBaseEventIds: dIds.filter(d => !allIds.includes(d)) });
-            } else {
-              onChange({ ...scenario, disabledBaseEventIds: [...dIds, ...allIds] });
-            }
-          }} />}
-        <EventList events={events} updateEvent={updateEvent} updateEventMulti={updateEventMulti} removeEvent={removeEvent} currentAge={currentAge} retirementAge={retirementAge}
-          label={isLinked && events.length > 0 ? `${scenario.name}の独自イベント` : undefined}
-          onEditProperty={(e) => openModalFor("property", e)} onEditCar={(e) => openModalFor("car", e)}
-          onEditDeath={(e) => openModalFor("death", e)} onEditInsurance={(e) => openModalFor("insurance", e)} />
-        {events.length === 0 && baseEvents.length === 0 && <div className="text-[10px] text-gray-400 pl-2">イベントなし</div>}
-      </>)}
-    </div>
+      <ChildEventModal isOpen={openModal === "child"} onClose={closeModal} onAdd={addChildEvents} currentAge={currentAge} retirementAge={retirementAge} />
+      <PropertyModal isOpen={openModal === "property"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+      <CarModal isOpen={openModal === "car"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+      <DeathModal isOpen={openModal === "death"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+      <InsuranceModal isOpen={openModal === "insurance"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+      {isLinked && baseEvents.length > 0 && <BaseEventList baseEvents={baseEvents} excludedIds={excludedIds} disabledIds={scenario.disabledBaseEventIds || []}
+        onUnlink={unlinkBaseEvent} onRelink={relinkBaseEvent}
+        onToggleDisable={(id) => {
+          const dIds = scenario.disabledBaseEventIds || [];
+          const childIds = baseEvents.filter(c => c.parentId === id).map(c => c.id);
+          const allIds = [id, ...childIds];
+          if (dIds.includes(id)) {
+            onChange({ ...scenario, disabledBaseEventIds: dIds.filter(d => !allIds.includes(d)) });
+          } else {
+            onChange({ ...scenario, disabledBaseEventIds: [...dIds, ...allIds] });
+          }
+        }} />}
+      <EventList events={events} updateEvent={updateEvent} updateEventMulti={updateEventMulti} removeEvent={removeEvent} currentAge={currentAge} retirementAge={retirementAge}
+        label={isLinked && events.length > 0 ? "✏️独自イベント" : undefined}
+        onEditProperty={(e) => openModalFor("property", e)} onEditCar={(e) => openModalFor("car", e)}
+        onEditDeath={(e) => openModalFor("death", e)} onEditInsurance={(e) => openModalFor("insurance", e)} />
+      {events.length === 0 && baseEvents.length === 0 && <div className="text-[10px] text-gray-400 pl-2">イベントなし</div>}
+    </Section>
   );
 }
 
 // ===== NISA / Balance Policy Section =====
 
 
-function NISASection({ s, onChange, isLinked, baseScenario }: { s: Scenario; onChange: (s: Scenario) => void; isLinked?: boolean; baseScenario?: Scenario | null }) {
+function NISASection({ s, onChange, isLinked, baseScenario, open, onToggle }: { s: Scenario; onChange: (s: Scenario) => void; isLinked?: boolean; baseScenario?: Scenario | null; open: boolean; onToggle: () => void }) {
   const defaultNi: NISAConfig = { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 };
   const ni = s.nisa || defaultNi;
   const baseS = isLinked && baseScenario ? baseScenario : null;
@@ -484,23 +515,19 @@ function NISASection({ s, onChange, isLinked, baseScenario }: { s: Scenario; onC
   const bp = s.balancePolicy || (baseS?.balancePolicy ? baseS.balancePolicy : { cashReserveMonths: 6, nisaPriority: true });
   const setNISA = (patch: Partial<NISAConfig>) => onChange({ ...s, nisa: { ...ni, ...patch } });
   const setBP = (patch: Partial<BalancePolicy>) => onChange({ ...s, balancePolicy: { ...bp, ...patch } });
-  const [open, setOpen] = useState(false);
 
   return (
-    <div className="border-t pt-1">
-      <div className="flex items-center justify-between mb-1">
-        <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-xs font-bold text-green-700">
-          <span className="text-[10px] text-gray-400">{open ? "▼" : "▶"}</span>
-          NISA / 投資
-          {effNi.enabled && <span className="font-normal text-gray-400">(有効{inheritedFromBase ? " 🔗A" : ""})</span>}
-        </button>
+    <Section title="NISA / 投資" icon="📈" borderColor="#16a34a" bgOpen="bg-green-50/30" open={open} onToggle={onToggle}
+      linked={!!inheritedFromBase}
+      badge={effNi.enabled ? <span className="font-normal text-gray-400 text-[10px]">(有効)</span> : undefined}
+      right={
         <label className="flex items-center gap-1 text-[10px] cursor-pointer">
-          <input type="checkbox" checked={ni.enabled} onChange={e => setNISA({ enabled: e.target.checked })} className="accent-green-600" />
-          <span className="text-gray-500">{inheritedFromBase ? "独自設定に切替" : "有効"}</span>
+          <input type="checkbox" checked={ni.enabled || !!inheritedFromBase} onChange={e => setNISA({ enabled: e.target.checked })} className="accent-green-600" />
+          <span className="text-gray-500">有効</span>
         </label>
-      </div>
-      {open && ni.enabled && (
-        <div className="space-y-1.5 pl-1 text-xs">
+      }>
+      {ni.enabled && (
+        <div className="space-y-1.5 text-xs">
           <div className="flex flex-wrap gap-2">
             <div className="flex items-center gap-1">
               <span className="text-gray-500 text-[10px]">口座</span>
@@ -521,16 +548,16 @@ function NISASection({ s, onChange, isLinked, baseScenario }: { s: Scenario; onC
           </div>
         </div>
       )}
-    </div>
+    </Section>
   );
 }
 
 // ===== Scenario Settings Section =====
-function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario }: {
+function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario, open, onToggle }: {
   s: Scenario; onChange: (s: Scenario) => void;
   isLinked: boolean; baseScenario?: Scenario | null;
+  open: boolean; onToggle: () => void;
 }) {
-  const [open, setOpen] = useState(true);
   const sp = s.spouse;
   // Global settings link: linked when overrideSettings is empty/undefined
   const settingsLocked = isLinked && !(s.overrideSettings && s.overrideSettings.length > 0);
@@ -555,126 +582,49 @@ function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario }: {
   const ro = settingsLocked; // read-only shorthand
 
   return (
-    <div className="border-t pt-1">
-      <div className="flex items-center justify-between">
-        <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-xs font-bold text-gray-600">
-          <span className="text-[10px] text-gray-400">{open ? "▼" : "▶"}</span>
-          シナリオ設定
-          <span className="font-normal text-gray-400 text-[10px]">
-            (本人{s.currentAge}歳 退職{val("retirementAge", 65)}歳 〜{val("simEndAge", 85)}歳{sp?.enabled ? ` 配偶者${sp.currentAge}歳` : ""})
-          </span>
-        </button>
-        {isLinked && (
-          <button onClick={toggleSettingsLock} className={`text-[10px] px-1.5 py-0.5 rounded ${settingsLocked ? "text-blue-500" : "text-orange-500"}`}
-            title={settingsLocked ? "Aにリンク中（クリックで独自設定）" : "独自設定中（クリックでAにリンク）"}
-          >{settingsLocked ? "🔗A" : "✏️"}</button>
-        )}
-      </div>
-      {open && (
-        <div className="mt-1 space-y-1.5 pl-1 text-xs">
-          <div className="flex flex-wrap gap-2">
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">本人年齢</span>
-              <input type="number" value={val("currentAge", 30)} min={18} max={70} step={1}
-                disabled={ro}
-                onChange={e => onChange({ ...s, currentAge: Number(e.target.value) })}
-                className={`w-12 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
-              <span className="text-[10px] text-gray-400">歳</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">本人退職</span>
-              <input type="number" value={val("retirementAge", 65)} min={s.currentAge + 1} max={80} step={1}
-                disabled={ro}
-                onChange={e => onChange({ ...s, retirementAge: Number(e.target.value) })}
-                className={`w-12 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
-              <span className="text-[10px] text-gray-400">歳</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">シミュ終了</span>
-              <input type="number" value={val("simEndAge", 85)} min={val("retirementAge", 65)} max={100} step={5}
-                disabled={ro}
-                onChange={e => onChange({ ...s, simEndAge: Number(e.target.value) })}
-                className={`w-12 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
-              <span className="text-[10px] text-gray-400">歳</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">初期資産</span>
-              <input type="number" value={val("currentAssetsMan", 0)} step={100}
-                disabled={ro}
-                onChange={e => onChange({ ...s, currentAssetsMan: Number(e.target.value) })}
-                className={`w-20 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
-              <span className="text-[10px] text-gray-400">万</span>
-            </div>
+    <Section title="シナリオ設定" icon="⚙" borderColor="#6b7280" bgOpen="bg-gray-50/50" open={open} onToggle={onToggle}
+      linked={settingsLocked}
+      badge={<span className="font-normal text-gray-400 text-[10px]">(〜{val("simEndAge", 85)}歳 資産{val("currentAssetsMan", 0)}万)</span>}
+      right={isLinked ? (
+        <button onClick={toggleSettingsLock} className={`text-[10px] px-1.5 py-0.5 rounded ${settingsLocked ? "bg-gray-200 text-gray-500" : "bg-blue-100 text-blue-600"}`}
+          title={settingsLocked ? "Aにリンク中（クリックで独自設定）" : "独自設定中（クリックでAにリンク）"}
+        >{settingsLocked ? "🔗A" : "✏️独自"}</button>
+      ) : undefined}>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">シミュ終了</span>
+            <input type="number" value={val("simEndAge", 85)} min={val("retirementAge", 65)} max={100} step={5}
+              disabled={ro}
+              onChange={e => onChange({ ...s, simEndAge: Number(e.target.value) })}
+              className={`w-12 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
+            <span className="text-[10px] text-gray-400">歳</span>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">本人性別</span>
-              <button onClick={() => !ro && onChange({ ...s, selfGender: "male" })}
-                className={`rounded px-1.5 py-0.5 text-[10px] ${(val("selfGender", "male")) === "male" ? "bg-blue-600 text-white" : "bg-gray-100"} ${ro ? "opacity-50 cursor-not-allowed" : ""}`}>男性</button>
-              <button onClick={() => !ro && onChange({ ...s, selfGender: "female" })}
-                className={`rounded px-1.5 py-0.5 text-[10px] ${val("selfGender", "male") === "female" ? "bg-pink-600 text-white" : "bg-gray-100"} ${ro ? "opacity-50 cursor-not-allowed" : ""}`}>女性</button>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">DC通算</span>
-              <input type="number" value={val("years", 0)} step={1}
-                disabled={ro}
-                onChange={e => onChange({ ...s, years: Number(e.target.value) })}
-                className={`w-14 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
-              <span className="text-[10px] text-gray-400">年</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">扶養控除</span>
-              <button onClick={() => !ro && onChange({ ...s, dependentDeductionHolder: "self" })}
-                className={`rounded px-1.5 py-0.5 text-[10px] ${(val("dependentDeductionHolder", "self")) === "self" ? "bg-blue-600 text-white" : "bg-gray-100"} ${ro ? "opacity-50 cursor-not-allowed" : ""}`}>本人</button>
-              <button onClick={() => !ro && onChange({ ...s, dependentDeductionHolder: "spouse" })}
-                className={`rounded px-1.5 py-0.5 text-[10px] ${val("dependentDeductionHolder", "self") === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"} ${ro ? "opacity-50 cursor-not-allowed" : ""}`}>配偶者</button>
-            </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">初期資産</span>
+            <input type="number" value={val("currentAssetsMan", 0)} step={100}
+              disabled={ro}
+              onChange={e => onChange({ ...s, currentAssetsMan: Number(e.target.value) })}
+              className={`w-20 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
+            <span className="text-[10px] text-gray-400">万</span>
           </div>
-          <div className="flex flex-wrap gap-2 border-t pt-1">
-            <span className="text-gray-500 text-[10px] font-semibold">老齢年金（自動計算）</span>
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">本人開始</span>
-              <input type="number" value={val("pensionStartAge", 65)} step={1} min={60} max={75}
-                disabled={ro}
-                onChange={e => onChange({ ...s, pensionStartAge: Number(e.target.value) })}
-                className={`w-12 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
-              <span className="text-[10px] text-gray-400">歳</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">就職</span>
-              <input type="number" value={val("pensionWorkStartAge", 22)} step={1} min={18} max={30}
-                disabled={ro}
-                onChange={e => onChange({ ...s, pensionWorkStartAge: Number(e.target.value) })}
-                className={`w-12 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
-              <span className="text-[10px] text-gray-400">歳</span>
-            </div>
-            {sp?.enabled && (<>
-              <div className="flex items-center gap-1">
-                <span className="text-pink-600 text-[10px]">配偶者開始</span>
-                <input type="number" value={sp.pensionStartAge ?? 65} step={1} min={60} max={75}
-                  onChange={e => onChange({ ...s, spouse: { ...sp, pensionStartAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" />
-                <span className="text-[10px] text-gray-400">歳</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-pink-600 text-[10px]">就職</span>
-                <input type="number" value={sp.pensionWorkStartAge ?? 22} step={1} min={18} max={30}
-                  onChange={e => onChange({ ...s, spouse: { ...sp, pensionWorkStartAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" />
-                <span className="text-[10px] text-gray-400">歳</span>
-              </div>
-            </>)}
-            <div className="text-[10px] text-gray-400">平均年収×加入年数から基礎+厚生を自動計算。繰上げ/繰下げ反映。</div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">扶養控除</span>
+            <button onClick={() => !ro && onChange({ ...s, dependentDeductionHolder: "self" })}
+              className={`rounded px-1.5 py-0.5 text-[10px] ${(val("dependentDeductionHolder", "self")) === "self" ? "bg-blue-600 text-white" : "bg-gray-100"} ${ro ? "opacity-50 cursor-not-allowed" : ""}`}>本人</button>
+            <button onClick={() => !ro && onChange({ ...s, dependentDeductionHolder: "spouse" })}
+              className={`rounded px-1.5 py-0.5 text-[10px] ${val("dependentDeductionHolder", "self") === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"} ${ro ? "opacity-50 cursor-not-allowed" : ""}`}>配偶者</button>
           </div>
         </div>
-      )}
-    </div>
+    </Section>
   );
 }
 
 // ===== Main KeyframeEditor =====
-export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, baseScenario, sirPct }: {
+export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, baseScenario, sirPct, onChangeBase }: {
   s: Scenario; onChange: (s: Scenario) => void; idx: number;
   currentAge: number; retirementAge: number; baseScenario?: Scenario | null;
   sirPct?: number;
+  onChangeBase?: (s: Scenario) => void; // ベースシナリオのonChange（リンク時のsectionOpen同期用）
 }) {
   const isBase = idx === 0;
   const isLinked = s.linkedToBase && !isBase && !!baseScenario;
@@ -722,19 +672,43 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
     }
   };
 
+  // Section open/close: persisted in scenario JSON
+  // リンクシナリオはベースの開閉状態を参照し、開閉操作はベース側を更新
+  const SECTION_DEFAULTS: Record<string, boolean> = { settings: true, self: false, spouse: false, events: true, nisa: false };
+  const ownOpen = s.sectionOpen || {};
+  const baseOpen = (isLinked && baseScenario?.sectionOpen) || {};
+  const secOpen = (key: string): boolean => {
+    if (isLinked) return baseOpen[key] ?? SECTION_DEFAULTS[key] ?? false;
+    return ownOpen[key] ?? SECTION_DEFAULTS[key] ?? false;
+  };
+  const toggleSec = (key: string) => {
+    const next = !secOpen(key);
+    if (isLinked && baseScenario && onChangeBase) {
+      // リンクシナリオ: ベース側の開閉を更新（全シナリオ同期）
+      onChangeBase({ ...baseScenario, sectionOpen: { ...baseOpen, [key]: next } });
+    } else {
+      onChange({ ...s, sectionOpen: { ...ownOpen, [key]: next } });
+    }
+  };
+
+  // Enable/disable linking: spouse & NISA follow base when linked and not explicitly set
+  const spouseEnabled = sp.enabled || spInherited;
+  const nisaEnabled = (s.nisa?.enabled) || (!s.nisa?.enabled && isLinked && !!baseScenario?.nisa?.enabled);
+
   return (
-    <div className="rounded-lg border-2 p-3 space-y-2" style={{ borderColor: COLORS[idx] }}>
+    <div className="rounded-lg border-2 p-3 space-y-1.5" style={{ borderColor: COLORS[idx] }}>
       <div className="flex items-center justify-between">
         <span className="text-sm font-bold" style={{ color: COLORS[idx] }}>{s.name}</span>
         {isLinked && <span className="text-[10px] text-gray-400 bg-gray-100 rounded px-2 py-0.5">🔗 Aベース + 差分</span>}
       </div>
 
       {/* シナリオ設定 */}
-      <ScenarioSettingsSection s={s} onChange={onChange} isLinked={isLinked} baseScenario={baseScenario} />
+      <ScenarioSettingsSection s={s} onChange={onChange} isLinked={isLinked} baseScenario={baseScenario}
+        open={secOpen("settings")} onToggle={() => toggleSec("settings")} />
 
-      {/* 本人設定: MemberEditorを使用 */}
+      {/* 本人設定 */}
       <MemberEditor
-        label={`本人${isLinked ? " 🔗A" : ""}`} color="#374151"
+        label="本人" color="#374151"
         data={{ incomeKF: s.incomeKF, expenseKF: s.expenseKF, dcTotalKF: s.dcTotalKF, companyDCKF: s.companyDCKF, idecoKF: s.idecoKF, salaryGrowthRate: s.salaryGrowthRate, sirPct: sirPct ?? 15.75, hasFurusato: s.hasFurusato, dcReceiveMethod: s.dcReceiveMethod, siParams: s.siParams }}
         onUpdate={(patch) => onChange({ ...s, ...patch })}
         currentAge={currentAge} retirementAge={retirementAge}
@@ -745,68 +719,120 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
         onToggleTrack={isLinked ? toggleTrack : undefined}
         dcLinked={isLinked && !s.dcReceiveMethod}
         onToggleDCLink={isLinked ? () => {
-          if (!s.dcReceiveMethod && baseScenario) {
+          if (!s.dcReceiveMethod) {
             // リンク解除: ベースの値をコピーして独自設定に
-            onChange({ ...s, dcReceiveMethod: baseScenario.dcReceiveMethod || DEFAULT_DC_RECEIVE_METHOD });
+            onChange({ ...s, dcReceiveMethod: baseScenario?.dcReceiveMethod || DEFAULT_DC_RECEIVE_METHOD });
           } else {
-            // リンク復帰: 独自設定をクリア
-            onChange({ ...s, dcReceiveMethod: undefined as any });
+            // リンク復帰: undefinedでベースに追従
+            const { dcReceiveMethod: _, ...rest } = s;
+            onChange({ ...rest, dcReceiveMethod: undefined } as any);
           }
         } : undefined}
+        open={secOpen("self")} onToggle={() => toggleSec("self")}
+        extraFields={<>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">年齢</span>
+            <input type="number" value={s.currentAge} min={18} max={70} step={1} disabled={isLinked}
+              onChange={e => onChange({ ...s, currentAge: Number(e.target.value) })}
+              className={`w-12 rounded border px-1 py-0.5 text-xs ${isLinked ? "bg-gray-100 text-gray-400" : ""}`} />
+            <span className="text-[10px] text-gray-400">歳</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">退職</span>
+            <input type="number" value={s.retirementAge} min={s.currentAge + 1} max={80} step={1} disabled={isLinked}
+              onChange={e => onChange({ ...s, retirementAge: Number(e.target.value) })}
+              className={`w-12 rounded border px-1 py-0.5 text-xs ${isLinked ? "bg-gray-100 text-gray-400" : ""}`} />
+            <span className="text-[10px] text-gray-400">歳</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">性別</span>
+            <button onClick={() => !isLinked && onChange({ ...s, selfGender: "male" })}
+              className={`rounded px-1.5 py-0.5 text-[10px] ${(s.selfGender || "male") === "male" ? "bg-blue-600 text-white" : "bg-gray-100"} ${isLinked ? "opacity-50 cursor-not-allowed" : ""}`}>男</button>
+            <button onClick={() => !isLinked && onChange({ ...s, selfGender: "female" })}
+              className={`rounded px-1.5 py-0.5 text-[10px] ${s.selfGender === "female" ? "bg-pink-600 text-white" : "bg-gray-100"} ${isLinked ? "opacity-50 cursor-not-allowed" : ""}`}>女</button>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">DC通算</span>
+            <input type="number" value={s.years} step={1} disabled={isLinked}
+              onChange={e => onChange({ ...s, years: Number(e.target.value) })}
+              className={`w-14 rounded border px-1 py-0.5 text-xs ${isLinked ? "bg-gray-100 text-gray-400" : ""}`} />
+            <span className="text-[10px] text-gray-400">年</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">年金開始</span>
+            <input type="number" value={s.pensionStartAge ?? 65} step={1} min={60} max={75} disabled={isLinked}
+              onChange={e => onChange({ ...s, pensionStartAge: Number(e.target.value) })}
+              className={`w-12 rounded border px-1 py-0.5 text-xs ${isLinked ? "bg-gray-100 text-gray-400" : ""}`} />
+            <span className="text-[10px] text-gray-400">歳</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">就職</span>
+            <input type="number" value={s.pensionWorkStartAge ?? 22} step={1} min={18} max={30} disabled={isLinked}
+              onChange={e => onChange({ ...s, pensionWorkStartAge: Number(e.target.value) })}
+              className={`w-12 rounded border px-1 py-0.5 text-xs ${isLinked ? "bg-gray-100 text-gray-400" : ""}`} />
+            <span className="text-[10px] text-gray-400">歳</span>
+          </div>
+        </>}
       />
 
-      <EventSection scenario={s} onChange={onChange} currentAge={currentAge} retirementAge={retirementAge} baseScenario={baseScenario} isLinked={isLinked} />
+      {/* 配偶者: 本人と同レベルのSection */}
+      <MemberEditor
+        label="配偶者" color="#be185d"
+        excludeTracks={["expenseKF"]}
+        data={{ incomeKF: sp.incomeKF || [], expenseKF: sp.expenseKF || [], dcTotalKF: sp.dcTotalKF || [], companyDCKF: sp.companyDCKF || [], idecoKF: sp.idecoKF || [], salaryGrowthRate: sp.salaryGrowthRate || effectiveSp.salaryGrowthRate, sirPct: sp.sirPct ?? effectiveSp.sirPct ?? 15.75, hasFurusato: sp.hasFurusato ?? effectiveSp.hasFurusato ?? true, dcReceiveMethod: sp.dcReceiveMethod, siParams: sp.siParams ?? effectiveSp.siParams }}
+        onUpdate={(patch) => onChange({ ...s, spouse: { ...sp, ...patch } })}
+        currentAge={effectiveSp.currentAge} retirementAge={retirementAge}
+        linked={spInherited}
+        readOnly={false}
+        baseData={baseSp ? { incomeKF: baseSp.incomeKF || [], expenseKF: baseSp.expenseKF || [], dcTotalKF: baseSp.dcTotalKF || [], companyDCKF: baseSp.companyDCKF || [], idecoKF: baseSp.idecoKF || [], salaryGrowthRate: baseSp.salaryGrowthRate, sirPct: baseSp.sirPct ?? 15.75, hasFurusato: baseSp.hasFurusato ?? true, dcReceiveMethod: baseSp.dcReceiveMethod, siParams: baseSp.siParams } : undefined}
+        trackLinked={spInherited ? isSpouseTrackLinked : undefined}
+        onToggleTrack={spInherited ? toggleSpouseTrack : undefined}
+        dcLinked={isSpouseDCLinked}
+        onToggleDCLink={spInherited ? toggleSpouseDCLink : undefined}
+        extraFields={<>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">年齢</span>
+            <input type="number" value={effectiveSp.currentAge} step={1} onChange={e => onChange({ ...s, spouse: { ...sp, currentAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" disabled={spInherited} />
+            <span className="text-[10px] text-gray-400">歳</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">退職</span>
+            <input type="number" value={effectiveSp.retirementAge ?? 65} step={1} min={effectiveSp.currentAge + 1} max={80}
+              onChange={e => onChange({ ...s, spouse: { ...sp, retirementAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" disabled={spInherited} />
+            <span className="text-[10px] text-gray-400">歳</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">年金開始</span>
+            <input type="number" value={effectiveSp.pensionStartAge ?? 65} step={1} min={60} max={75}
+              onChange={e => onChange({ ...s, spouse: { ...sp, pensionStartAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" disabled={spInherited} />
+            <span className="text-[10px] text-gray-400">歳</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">就職</span>
+            <input type="number" value={effectiveSp.pensionWorkStartAge ?? 22} step={1} min={18} max={30}
+              onChange={e => onChange({ ...s, spouse: { ...sp, pensionWorkStartAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" disabled={spInherited} />
+            <span className="text-[10px] text-gray-400">歳</span>
+          </div>
+        </>}
+        open={secOpen("spouse")} onToggle={() => toggleSec("spouse")}
+        enabled={spouseEnabled}
+        onToggleEnabled={(v) => {
+          if (spInherited && !v) {
+            onChange({ ...s, spouse: { ...defaultSp, enabled: false } });
+          } else if (!sp.enabled && v && baseSp?.enabled) {
+            onChange({ ...s, spouse: { ...baseSp, enabled: true } });
+          } else {
+            onChange({ ...s, spouse: { ...sp, enabled: v } });
+          }
+        }}
+        enabledLabel="有効"
+      />
 
+      <EventSection scenario={s} onChange={onChange} currentAge={currentAge} retirementAge={retirementAge} baseScenario={baseScenario} isLinked={isLinked}
+        open={secOpen("events")} onToggle={() => toggleSec("events")} />
 
-      {/* 配偶者: MemberEditorを使用（リンク時は🔗/✏️トグル） */}
-      <div className="border-t pt-1">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs font-bold text-pink-700">配偶者{spInherited ? " 🔗A" : ""}</span>
-          <label className="flex items-center gap-1 text-[10px] cursor-pointer">
-            <input type="checkbox" checked={sp.enabled || spInherited} onChange={e => {
-              if (spInherited && !e.target.checked) {
-                onChange({ ...s, spouse: { ...defaultSp, enabled: false } });
-              } else if (!sp.enabled && e.target.checked && baseSp?.enabled) {
-                onChange({ ...s, spouse: { ...baseSp, enabled: true } });
-              } else {
-                onChange({ ...s, spouse: { ...sp, enabled: e.target.checked } });
-              }
-            }} className="accent-pink-600" />
-            <span className="text-gray-500">{spInherited ? "🔗A (✏️で独自設定)" : "有効"}</span>
-          </label>
-        </div>
-        {(sp.enabled || spInherited) && (
-          <MemberEditor
-            label="配偶者" color="#be185d"
-            excludeTracks={["expenseKF"]}
-            data={{ incomeKF: sp.incomeKF || [], expenseKF: sp.expenseKF || [], dcTotalKF: sp.dcTotalKF || [], companyDCKF: sp.companyDCKF || [], idecoKF: sp.idecoKF || [], salaryGrowthRate: sp.salaryGrowthRate || effectiveSp.salaryGrowthRate, sirPct: sp.sirPct ?? effectiveSp.sirPct ?? 15.75, hasFurusato: sp.hasFurusato ?? effectiveSp.hasFurusato ?? true, dcReceiveMethod: sp.dcReceiveMethod, siParams: sp.siParams ?? effectiveSp.siParams }}
-            onUpdate={(patch) => onChange({ ...s, spouse: { ...sp, ...patch } })}
-            currentAge={effectiveSp.currentAge} retirementAge={retirementAge}
-            linked={spInherited}
-            readOnly={false}
-            baseData={baseSp ? { incomeKF: baseSp.incomeKF || [], expenseKF: baseSp.expenseKF || [], dcTotalKF: baseSp.dcTotalKF || [], companyDCKF: baseSp.companyDCKF || [], idecoKF: baseSp.idecoKF || [], salaryGrowthRate: baseSp.salaryGrowthRate, sirPct: baseSp.sirPct ?? 15.75, hasFurusato: baseSp.hasFurusato ?? true, dcReceiveMethod: baseSp.dcReceiveMethod, siParams: baseSp.siParams } : undefined}
-            trackLinked={spInherited ? isSpouseTrackLinked : undefined}
-            onToggleTrack={spInherited ? toggleSpouseTrack : undefined}
-            dcLinked={isSpouseDCLinked}
-            onToggleDCLink={spInherited ? toggleSpouseDCLink : undefined}
-            extraFields={<>
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 text-[10px]">年齢</span>
-                <input type="number" value={effectiveSp.currentAge} step={1} onChange={e => onChange({ ...s, spouse: { ...sp, currentAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" disabled={spInherited} />
-                <span className="text-[10px] text-gray-400">歳</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 text-[10px]">退職</span>
-                <input type="number" value={effectiveSp.retirementAge ?? 65} step={1} min={effectiveSp.currentAge + 1} max={80}
-                  onChange={e => onChange({ ...s, spouse: { ...sp, retirementAge: Number(e.target.value) } })} className="w-12 rounded border px-1 py-0.5 text-xs" disabled={spInherited} />
-                <span className="text-[10px] text-gray-400">歳</span>
-              </div>
-            </>}
-          />
-        )}
-      </div>
-
-      <NISASection s={s} onChange={onChange} isLinked={isLinked} baseScenario={baseScenario} />
+      <NISASection s={s} onChange={onChange} isLinked={isLinked} baseScenario={baseScenario}
+        open={secOpen("nisa")} onToggle={() => toggleSec("nisa")} />
     </div>
   );
 }

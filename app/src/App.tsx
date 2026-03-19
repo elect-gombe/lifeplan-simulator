@@ -41,7 +41,7 @@ function migrateScenario(s: any, oldFields?: any): Scenario {
     dependentDeductionHolder: s.dependentDeductionHolder ?? "self",
     pensionStartAge: s.pensionStartAge ?? 65,
     pensionWorkStartAge: s.pensionWorkStartAge ?? 22,
-    dcReceiveMethod: s.dcReceiveMethod ?? DEFAULT_DC_RECEIVE_METHOD,
+    dcReceiveMethod: s.dcReceiveMethod, // undefined=Aにリンク（リンクシナリオの場合）
     spouse: s.spouse ? {
       retirementAge: 65,
       ...s.spouse,
@@ -94,9 +94,73 @@ function exportJSON(state: SavedState) {
   a.click(); URL.revokeObjectURL(url);
 }
 
+// デフォルト値除去（URL圧縮前に適用。読み込み時にmigrateScenarioで復元）
+function stripDefaults(state: SavedState): any {
+  const d: any = { ...state };
+  if (d.rr === 4) delete d.rr;
+  if (d.hasRet === false) delete d.hasRet;
+  if (d.retAmt === 10000000) delete d.retAmt;
+  if (d.PY === 30) delete d.PY;
+  if (d.sirPct === 15.75) delete d.sirPct;
+  if (d.inflationRate === 1) delete d.inflationRate;
+  d.scenarios = state.scenarios.map(sc => {
+    const s: any = { ...sc };
+    // Empty arrays
+    for (const k of ["excludedBaseEventIds", "disabledBaseEventIds", "overrideTracks", "spouseOverrideTracks", "overrideSettings"] as const) {
+      if (s[k] && Array.isArray(s[k]) && s[k].length === 0) delete s[k];
+    }
+    // Scalar defaults
+    if (s.salaryGrowthRate === 2) delete s.salaryGrowthRate;
+    if (s.hasFurusato === true) delete s.hasFurusato;
+    if (s.dependentDeductionHolder === "self") delete s.dependentDeductionHolder;
+    if (s.pensionStartAge === 65) delete s.pensionStartAge;
+    if (s.pensionWorkStartAge === 22) delete s.pensionWorkStartAge;
+    if (s.years === 35) delete s.years;
+    if (s.selfGender === "male") delete s.selfGender;
+    // DC receive method default
+    const drm = s.dcReceiveMethod;
+    if (drm && drm.type === "lump_sum" && drm.annuityYears === 20 && drm.annuityStartAge === 65 && drm.combinedLumpSumRatio === 50) delete s.dcReceiveMethod;
+    // NISA disabled default
+    if (s.nisa && !s.nisa.enabled) delete s.nisa;
+    // Balance policy default
+    const bp = s.balancePolicy;
+    if (bp && bp.cashReserveMonths === 6 && bp.nisaPriority === true) delete s.balancePolicy;
+    // Spouse defaults
+    const sp = s.spouse;
+    if (sp) {
+      if (!sp.enabled && (!sp.incomeKF || sp.incomeKF.length === 0)) {
+        delete s.spouse;
+      } else {
+        s.spouse = { ...sp };
+        if (s.spouse.salaryGrowthRate === 2) delete s.spouse.salaryGrowthRate;
+        if (s.spouse.sirPct === 15.75) delete s.spouse.sirPct;
+        if (s.spouse.hasFurusato === true) delete s.spouse.hasFurusato;
+        if (s.spouse.pensionStartAge === 65) delete s.spouse.pensionStartAge;
+        if (s.spouse.pensionWorkStartAge === 22) delete s.spouse.pensionWorkStartAge;
+        if (s.spouse.retirementAge === 65) delete s.spouse.retirementAge;
+        for (const k of ["expenseKF", "dcTotalKF", "companyDCKF", "idecoKF"] as const) {
+          if (s.spouse[k] && s.spouse[k].length === 0) delete s.spouse[k];
+        }
+      }
+    }
+    // Events: strip zero fields
+    if (s.events) {
+      s.events = s.events.map((e: any) => {
+        const ev = { ...e };
+        if (ev.oneTimeCostMan === 0) delete ev.oneTimeCostMan;
+        if (ev.annualCostMan === 0) delete ev.annualCostMan;
+        if (ev.durationYears === 0) delete ev.durationYears;
+        return ev;
+      });
+    }
+    return s;
+  });
+  return d;
+}
+
 // gzip + base64 encode/decode for URL sharing
 async function encodeStateToURL(state: SavedState): Promise<string> {
-  const json = JSON.stringify(state);
+  const json = JSON.stringify(stripDefaults(state));
   const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
   const compressed = await new Response(stream).arrayBuffer();
   const base64 = btoa(String.fromCharCode(...new Uint8Array(compressed)));
@@ -156,7 +220,7 @@ function mkScenario(id: number): Scenario {
     years: 35, hasFurusato: true,
     dependentDeductionHolder: "self",
     pensionStartAge: 65, pensionWorkStartAge: 22,
-    dcReceiveMethod: DEFAULT_DC_RECEIVE_METHOD,
+    dcReceiveMethod: isBase ? DEFAULT_DC_RECEIVE_METHOD : undefined as any, // B: undefined=Aにリンク
     spouse: { enabled: false, currentAge: 28, retirementAge: 65, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true, pensionStartAge: 65, pensionWorkStartAge: 22 },
     nisa: { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 },
     balancePolicy: { cashReserveMonths: 6, nisaPriority: true },
@@ -248,9 +312,11 @@ export default function App() {
   useEffect(() => { saveToStorage(currentState); }, [currentState]);
 
   // 設定変更時にURLハッシュも更新（共有リンクが常に最新を反映）
+  const [urlLength, setUrlLength] = useState(0);
   useEffect(() => {
     encodeStateToURL(currentState).then(hash => {
       window.history.replaceState(null, "", `#${hash}`);
+      setUrlLength(window.location.href.length);
     });
   }, [currentState]);
 
@@ -300,10 +366,13 @@ export default function App() {
 
   return (
     <div className="flex p-3 text-gray-900">
-      <div className="flex flex-col gap-3 max-w-5xl w-full shrink-0">
+      <div className="flex flex-col gap-3 max-w-6xl w-full shrink-0">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold">資産シミュレーター</h1>
           <div className="flex items-center gap-2">
+            <span className={`text-[10px] tabular-nums ${urlLength > 4096 ? "text-red-600 font-bold" : urlLength > 3072 ? "text-amber-600" : "text-gray-400"}`}>
+              URL {urlLength.toLocaleString()}/4,096 ({Math.round(urlLength / 4096 * 100)}%){urlLength > 4096 ? " ⚠️超過" : ""}
+            </span>
             <button onClick={() => { setJsonText(JSON.stringify(currentState, null, 2)); setCopied(false); setJsonModal("export"); }}
               className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">共有・エクスポート</button>
             <button onClick={() => { setJsonText(""); setJsonModal("import"); }}
@@ -338,7 +407,8 @@ export default function App() {
                 onChange={(ns) => updS(i, ns)}
                 currentAge={s.currentAge} retirementAge={s.simEndAge}
                 baseScenario={i === 0 ? null : scenarios[0]}
-                sirPct={sirPct} />
+                sirPct={sirPct}
+                onChangeBase={i > 0 ? (ns) => updS(0, ns) : undefined} />
             ))}
           </div>
         </details>
