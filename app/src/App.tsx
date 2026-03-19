@@ -349,7 +349,40 @@ export default function App() {
     setScenarios(p => {
       if (p.length >= 4) return p;
       const src = p[i];
-      return src ? [...p.slice(0, i + 1), { ...src, id: Date.now(), name: `${src.name} コピー` }, ...p.slice(i + 1)] : p;
+      if (!src) return p;
+      // リンク付き複製: ベースシナリオ(i=0)からの複製はリンク、それ以外はsrcのリンク設定を引き継ぎ
+      const isFromBase = i === 0;
+      const dup: Scenario = {
+        ...mkScenario(p.length),
+        id: Date.now(),
+        name: `${src.name} コピー`,
+        linkedToBase: isFromBase ? true : src.linkedToBase,
+        overrideTracks: isFromBase ? [...DEFAULT_OVERRIDE_TRACKS] : [...(src.overrideTracks || [])],
+        overrideSettings: src.overrideSettings ? [...src.overrideSettings] : undefined,
+        spouseOverrideTracks: src.spouseOverrideTracks ? [...src.spouseOverrideTracks] : undefined,
+        // リンク時: イベント・住居は空（ベースから継承）。非リンク時: コピー
+        events: isFromBase ? [] : [...(src.events || []).map(e => ({ ...e, id: Date.now() + Math.round(Math.random() * 100000) }))],
+        excludedBaseEventIds: isFromBase ? [] : [...(src.excludedBaseEventIds || [])],
+        disabledBaseEventIds: src.disabledBaseEventIds ? [...src.disabledBaseEventIds] : undefined,
+        housingTimeline: isFromBase ? undefined : src.housingTimeline ? [...src.housingTimeline] : undefined,
+        // 非リンク設定をコピー
+        ...(isFromBase ? {} : {
+          currentAge: src.currentAge, retirementAge: src.retirementAge, simEndAge: src.simEndAge,
+          currentAssetsMan: src.currentAssetsMan, selfGender: src.selfGender,
+          salaryGrowthRate: src.salaryGrowthRate, years: src.years,
+          hasFurusato: src.hasFurusato, dependentDeductionHolder: src.dependentDeductionHolder,
+          pensionStartAge: src.pensionStartAge, pensionWorkStartAge: src.pensionWorkStartAge,
+          incomeKF: [...src.incomeKF], expenseKF: [...src.expenseKF],
+          dcTotalKF: [...src.dcTotalKF], companyDCKF: [...src.companyDCKF], idecoKF: [...src.idecoKF],
+          dcReceiveMethod: src.dcReceiveMethod, siParams: src.siParams,
+          spouse: src.spouse ? { ...src.spouse } : undefined,
+          nisa: src.nisa ? { ...src.nisa } : undefined,
+          balancePolicy: src.balancePolicy ? { ...src.balancePolicy } : undefined,
+          dcReturnRate: src.dcReturnRate, nisaReturnRate: src.nisaReturnRate,
+          taxableReturnRate: src.taxableReturnRate, cashInterestRate: src.cashInterestRate,
+        }),
+      };
+      return [...p.slice(0, i + 1), dup, ...p.slice(i + 1)];
     });
   }, []);
 

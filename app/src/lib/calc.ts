@@ -1159,11 +1159,11 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   // NISA config — 個人別に枠を管理
   const nisa: NISAConfig | undefined = nisaConfig;
   const nisaAccounts = nisa ? (nisa.accounts || 1) : 1;
-  // Phase 3: 個別資産クラス利回り
-  const dcRate = (s.dcReturnRate ?? rr) / 100;
-  const nisaReturnRate = (s.nisaReturnRate ?? rr) / 100;
-  const taxableReturnRate_ = (s.taxableReturnRate ?? rr) / 100;
-  const cashRate = (s.cashInterestRate ?? 0) / 100;
+  // Phase 3: 個別資産クラス利回り（リンク時はベースの値を参照）
+  const dcRate = (s.dcReturnRate ?? (linked ? base_.dcReturnRate : undefined) ?? rr) / 100;
+  const nisaReturnRate = (s.nisaReturnRate ?? (linked ? base_.nisaReturnRate : undefined) ?? rr) / 100;
+  const taxableReturnRate_ = (s.taxableReturnRate ?? (linked ? base_.taxableReturnRate : undefined) ?? rr) / 100;
+  const cashRate = (s.cashInterestRate ?? (linked ? base_.cashInterestRate : undefined) ?? 0) / 100;
   // 本人NISA枠
   const selfNISAAnnualLimit = nisa ? nisa.annualLimitMan * 10000 : 0;
   const selfNISALifetimeLimit = nisa ? nisa.lifetimeLimitMan * 10000 : 0;

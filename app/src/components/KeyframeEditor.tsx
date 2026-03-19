@@ -4,6 +4,7 @@ import { DEFAULT_DC_RECEIVE_METHOD, DEFAULT_SI_PARAMS } from "../lib/types";
 import { sortKF, EVENT_TYPES, resolveEventAge } from "../lib/types";
 import { ChildEventModal } from "./ChildEventModal";
 import { PropertyModal } from "./PropertyModal";
+import { Modal } from "./ui";
 import { CarModal } from "./CarModal";
 import { DeathModal } from "./DeathModal";
 import { InsuranceModal } from "./InsuranceModal";
