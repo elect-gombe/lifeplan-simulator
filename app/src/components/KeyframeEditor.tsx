@@ -192,36 +192,23 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
           <details className="text-[10px]">
             <summary className="cursor-pointer text-gray-500 flex items-center gap-1">
               社保
-              <span className="font-mono text-gray-700">{display.siParams ? `詳細` : `${display.sirPct}%`}</span>
-              {!display.siParams && <span className="text-gray-300">(フラット)</span>}
+              <span className="font-mono text-gray-700">詳細</span>
             </summary>
-            <div className="mt-1 rounded border p-1.5 space-y-1 bg-gray-50">
-              {!display.siParams ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-500">一律料率</span>
-                  <input type="number" value={display.sirPct} step={0.25} onChange={e => onUpdate({ sirPct: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5" disabled={isRO} />
+            <div className="mt-1 rounded border p-1.5 space-y-0.5 bg-gray-50">
+              <div className="text-gray-400">厚生年金 9.15%(固定) 雇用 0.60%(固定)</div>
+              {([
+                ["healthInsuranceRate", "健保率"] as const,
+                ["nursingInsuranceRate", "介護率"] as const,
+                ["childSupportRate", "子育支援"] as const,
+              ] as const).map(([key, lbl]) => (
+                <div key={key} className="flex items-center gap-1">
+                  <span className="text-gray-500 w-12">{lbl}</span>
+                  <input type="number" value={(display.siParams || DEFAULT_SI_PARAMS)[key]} step={0.05} min={0}
+                    onChange={e => onUpdate({ siParams: { ...(display.siParams || DEFAULT_SI_PARAMS), [key]: Number(e.target.value) } })}
+                    className="w-14 rounded border px-1 py-0.5" disabled={isRO} />
                   <span className="text-gray-400">%</span>
-                  <button onClick={() => onUpdate({ siParams: { ...DEFAULT_SI_PARAMS } })} className="text-blue-500 hover:underline" disabled={isRO}>詳細に切替</button>
                 </div>
-              ) : (
-                <div className="space-y-0.5">
-                  <div className="text-gray-400">厚生年金 9.15%(固定) 雇用 0.60%(固定)</div>
-                  {([
-                    ["healthInsuranceRate", "健保率"] as const,
-                    ["nursingInsuranceRate", "介護率"] as const,
-                    ["childSupportRate", "子育支援"] as const,
-                  ] as const).map(([key, lbl]) => (
-                    <div key={key} className="flex items-center gap-1">
-                      <span className="text-gray-500 w-12">{lbl}</span>
-                      <input type="number" value={display.siParams![key]} step={0.05} min={0}
-                        onChange={e => onUpdate({ siParams: { ...display.siParams!, [key]: Number(e.target.value) } })}
-                        className="w-14 rounded border px-1 py-0.5" disabled={isRO} />
-                      <span className="text-gray-400">%</span>
-                    </div>
-                  ))}
-                  <button onClick={() => onUpdate({ siParams: undefined })} className="text-gray-400 hover:text-red-500" disabled={isRO}>フラット率に戻す</button>
-                </div>
-              )}
+              ))}
             </div>
           </details>
           <label className="flex items-center gap-1 text-[10px] cursor-pointer">

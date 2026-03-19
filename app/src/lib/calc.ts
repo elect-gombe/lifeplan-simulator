@@ -816,29 +816,17 @@ const LATE_ELDERLY_RATE = 0.09;     // 後期高齢者医療 概算率
 const NURSING_1ST_RATE = 0.02;      // 介護保険 第1号被保険者 概算率
 const LATE_ELDERLY_AGE = 75;        // 後期高齢者医療 開始年齢
 
-function calcSocialInsurance(gross: number, age: number, siParams?: SocialInsuranceParams, fallbackSirPct?: number, pensionIncome: number = 0): SIBreakdown {
-  // 在職中: 給与ベースで社保計算
+function calcSocialInsurance(gross: number, age: number, siParams?: SocialInsuranceParams, _fallbackSirPct?: number, pensionIncome: number = 0): SIBreakdown {
+  // 在職中: 給与ベースで社保計算（常にsiParamsベース、未設定はデフォルト値）
   if (gross > 0) {
-    if (!siParams) {
-      // レガシーモード: フラット率だが内訳も概算で算出
-      const rate = (fallbackSirPct ?? 15.75) / 100;
-      const total = Math.round(gross * rate);
-      const monthlyGross = gross / 12;
-      const pensionBase = Math.min(monthlyGross, PENSION_MONTHLY_CAP);
-      const estPension = Math.round(pensionBase * (PENSION_INSURANCE_RATE / 100) * 12);
-      const estHealth = Math.round(gross * 0.05); // 協会けんぽ概算5%
-      const estNursing = (age >= NURSING_INSURANCE_MIN_AGE && age < NURSING_INSURANCE_MAX_AGE) ? Math.round(gross * 0.008) : 0;
-      const estEmploy = Math.round(gross * EMPLOYMENT_INSURANCE_RATE / 100);
-      return { total, pension: estPension, health: estHealth, nursing: estNursing, employment: estEmploy, childSupport: 0, ratePct: rate * 100 };
-    }
-
+    const sp = siParams || DEFAULT_SI_PARAMS;
     const monthlyGross = gross / 12;
     const pensionBase = Math.min(monthlyGross, PENSION_MONTHLY_CAP);
     const pension = Math.round(pensionBase * (PENSION_INSURANCE_RATE / 100) * 12);
-    const health = Math.round(gross * siParams.healthInsuranceRate / 100);
+    const health = Math.round(gross * sp.healthInsuranceRate / 100);
     const nursing = (age >= NURSING_INSURANCE_MIN_AGE && age < NURSING_INSURANCE_MAX_AGE)
-      ? Math.round(gross * siParams.nursingInsuranceRate / 100) : 0;
-    const childSupport = Math.round(gross * siParams.childSupportRate / 100);
+      ? Math.round(gross * sp.nursingInsuranceRate / 100) : 0;
+    const childSupport = Math.round(gross * sp.childSupportRate / 100);
     const employment = Math.round(gross * EMPLOYMENT_INSURANCE_RATE / 100);
     const total = pension + health + nursing + employment + childSupport;
     const ratePct = gross > 0 ? total / gross * 100 : 0;
@@ -901,8 +889,8 @@ function calcMemberTax(
   // 社保計算: DC自己負担控除後のgrossで計算（DC選択制は社保の対象外）
   // 在職中: 給与ベースで社保計算。退職後: 年金ベースで国保+介護
   const adjGForSI = gross - aDS;
-  const sib = calcSocialInsurance(adjGForSI, age, siParams, sirPct, pensionIncome);
-  const sir = sib.ratePct / 100 || sirPct / 100;
+  const sib = calcSocialInsurance(adjGForSI, age, siParams, undefined, pensionIncome);
+  const sir = sib.ratePct / 100;
 
   // 年金の雑所得 = 年金収入 - 公的年金等控除
   const pensionDed = pensionIncome > 0 ? publicPensionDeduction(pensionIncome, age) : 0;
@@ -913,7 +901,7 @@ function calcMemberTax(
   // 基礎控除48万・扶養控除・配偶者控除・生命保険料控除は合算所得に1回だけ適用
   const calcTaxBlockWithPension = (g: number, extraDeduction: number) => {
     // 給与所得 = 給与 − 給与所得控除 − 社保控除（在職中のみ）
-    const siDeduction = g > 0 ? g * (sib.ratePct > 0 ? sib.ratePct / 100 : sirPct / 100) : 0;
+    const siDeduction = g > 0 ? g * (sib.ratePct / 100) : 0;
     const salaryIncome = g > 0 ? Math.max(g - empDed(g) - siDeduction, 0) : 0;
     // 合算所得 = 給与所得 + 年金雑所得
     const totalIncome = salaryIncome + pensionTaxable;
@@ -937,7 +925,7 @@ function calcMemberTax(
   const socialInsurance = sib.total;
 
   // 社保節約: DC自己負担分の社保料差額
-  const sibBase = calcSocialInsurance(gross, age, siParams, sirPct, pensionIncome);
+  const sibBase = calcSocialInsurance(gross, age, siParams, undefined, pensionIncome);
   const siSv = includeSISaving ? sibBase.total - sib.total : 0;
 
   const itSv = base.adj.it - dc.adj.it;
@@ -952,7 +940,7 @@ function calcMemberTax(
   if (pensionTaxable > 0) {
     // 年金なしの場合の税を計算
     const salaryOnly = (() => {
-      const siDed2 = adjG > 0 ? adjG * (sib.ratePct > 0 ? sib.ratePct / 100 : sirPct / 100) : 0;
+      const siDed2 = adjG > 0 ? adjG * (sib.ratePct / 100) : 0;
       const salaryIncome = adjG > 0 ? Math.max(adjG - empDed(adjG) - siDed2, 0) : 0;
       const ti = Math.max(salaryIncome - 480000 - dependentDeductionTotal - lifeInsuranceDed - aI - spouseDeductionAmount, 0);
       const fl = fLm(ti, mR(ti), housingLoanDed > 0 ? Math.min(Math.max(housingLoanDed - iTx(ti), 0), hlResidentCap(ti)) : 0);
@@ -1384,9 +1372,8 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         const spDCTotal = spouseRetired ? 0 : resolveKF(spouse.dcTotalKF || [], spouseAge, 0);
         const spCompanyDC = spouseRetired ? 0 : resolveKF(spouse.companyDCKF || [], spouseAge, 0);
         const spIdeco = spouseRetired ? 0 : resolveKF(spouse.idecoKF || [], spouseAge, 0);
-        const spSirPct = spouse.sirPct || sirPct;
         if (spGrossMan > 0 || spousePensionIncome > 0) {
-          spouseTaxResult = calcMemberTax(spGrossMan, spSirPct, spDCTotal, spCompanyDC, spIdeco, spouse.hasFurusato, preSpouseHLDed, spouseDepDed, preSpouseLifeInsDed, 0, false, spouseAge, spouse.siParams, spousePensionIncome);
+          spouseTaxResult = calcMemberTax(spGrossMan, 0, spDCTotal, spCompanyDC, spIdeco, spouse.hasFurusato, preSpouseHLDed, spouseDepDed, preSpouseLifeInsDed, 0, false, spouseAge, spouse.siParams, spousePensionIncome);
         } else {
           spouseTaxResult = ZERO_MEMBER_TAX;
         }
@@ -1800,7 +1787,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
 
     // *** Self tax via unified calcMemberTax (年金収入を統合) ***
     const selfTaxResult = calcMemberTax(
-      grownGrossMan, sirPct, dcTotal, companyDC, idecoMonthly,
+      grownGrossMan, 0, dcTotal, companyDC, idecoMonthly,
       hasFuru, hlDed, selfDepDed, selfLifeInsDed,
       spouseDedAmount, true, age, selfSIParams,
       selfPensionIncome,
