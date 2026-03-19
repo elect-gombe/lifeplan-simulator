@@ -13,9 +13,13 @@ function RepaymentPreview({ schedule, pp, purchaseAge }: {
   const loanAmount = (pp.priceMan - pp.downPaymentMan) * 10000;
   const isPair = pp.loanStructure === "pair";
   let totalPayment = 0, totalPrepayment = 0;
-  for (const e of schedule) { totalPayment += e.annualPayment; totalPrepayment += e.prepaymentAmount; }
-  const totalInterest = Math.max(totalPayment - loanAmount + totalPrepayment, 0);
-  const actualYears = schedule.filter(e => e.balance > 0 && !e.isSold).length;
+  const activeEntries = schedule.filter(e => !e.isSold);
+  for (const e of activeEntries) { totalPayment += e.annualPayment; totalPrepayment += e.prepaymentAmount; }
+  // 売却時は残債が残るため、返済した元本 = 借入額 − 最終残高
+  const lastBalance = activeEntries.length > 0 ? activeEntries[activeEntries.length - 1].balance : 0;
+  const principalPaid = loanAmount - lastBalance;
+  const totalInterest = Math.max(totalPayment + totalPrepayment - principalPaid, 0);
+  const actualYears = activeEntries.length;
 
   const yearData = schedule.filter(e => !e.isSold).map((e, i) => {
     const interest = Math.round(e.balance * e.rate / 100);

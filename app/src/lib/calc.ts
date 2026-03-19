@@ -149,7 +149,7 @@ function buildSingleLoanSchedule(
   initialBalance: number, loanYears: number, repType: string,
   pp: PropertyParams, startAge: number,
   prepayments: PrepaymentEntry[],
-): { entries: { balance: number; annualPayment: number; monthlyPayment: number; remainingYears: number; prepaymentAmount: number; isRefinanced: boolean }[]; } {
+): { entries: { balance: number; annualPayment: number; monthlyPayment: number; remainingYears: number; prepaymentAmount: number; isRefinanced: boolean; rate: number }[]; } {
   const entries: { balance: number; annualPayment: number; monthlyPayment: number; remainingYears: number; prepaymentAmount: number; isRefinanced: boolean }[] = [];
   if (initialBalance <= 0) return { entries };
 
@@ -161,6 +161,7 @@ function buildSingleLoanSchedule(
 
   let monthlyPayment = repType === "equal_payment"
     ? calcMonthlyPaymentEqual(initialBalance, currentRate, remainingYears) : 0;
+  let hasRefinanced = false; // 借換済みフラグ
 
   for (let y = 0; y < maxYears && balance > 0; y++) {
     const currentAge = startAge + y;
@@ -168,12 +169,12 @@ function buildSingleLoanSchedule(
     let prepaymentAmount = 0;
 
     if (pp.saleAge != null && currentAge >= pp.saleAge) {
-      entries.push({ balance, annualPayment: 0, monthlyPayment: 0, remainingYears: 0, prepaymentAmount: 0, isRefinanced: false });
+      entries.push({ balance, annualPayment: 0, monthlyPayment: 0, remainingYears: 0, prepaymentAmount: 0, isRefinanced: false, rate: currentRate });
       break;
     }
 
-    // Rate change
-    if (pp.rateType === "variable") {
+    // Rate change (借換後は変動金利ロジックをスキップ — 借換で固定金利に切り替わったため)
+    if (pp.rateType === "variable" && !hasRefinanced) {
       const newRate = y >= pp.variableRiseAfter ? pp.variableRiskRate : pp.variableInitRate;
       if (newRate !== currentRate) {
         currentRate = newRate;
@@ -186,6 +187,7 @@ function buildSingleLoanSchedule(
       currentRate = refinance.newRate;
       remainingYears = refinance.newLoanYears;
       isRefinanced = true;
+      hasRefinanced = true;
       if (repType === "equal_payment") monthlyPayment = calcMonthlyPaymentEqual(balance, currentRate, remainingYears);
     }
 
@@ -237,7 +239,7 @@ function buildSingleLoanSchedule(
     entries.push({
       balance: prepaymentAmount > 0 ? balance : balBefore,
       annualPayment, monthlyPayment: displayMonthly, remainingYears,
-      prepaymentAmount, isRefinanced,
+      prepaymentAmount, isRefinanced, rate: currentRate,
     });
 
     // Advance
@@ -273,9 +275,9 @@ export function buildLoanSchedule(pp: PropertyParams, startAge: number): LoanSch
   if (!isPair) {
     // Single loan: simple path
     const { entries } = buildSingleLoanSchedule(loanAmount, pp.loanYears, repType, pp, startAge, prepayments);
-    return entries.map(e => ({
-      ...e, rate: e.isRefinanced ? (pp.refinance?.newRate ?? 0) : (entries.indexOf(e) >= pp.variableRiseAfter && pp.rateType === "variable" ? pp.variableRiskRate : (pp.rateType === "fixed" ? pp.fixedRate : pp.variableInitRate)),
-      isSold: pp.saleAge != null && (startAge + entries.indexOf(e)) >= pp.saleAge,
+    return entries.map((e, i) => ({
+      ...e,
+      isSold: pp.saleAge != null && (startAge + i) >= pp.saleAge,
     }));
   }
 
@@ -297,9 +299,7 @@ export function buildLoanSchedule(pp: PropertyParams, startAge: number): LoanSch
     const currentAge = startAge + y;
     const isSold = pp.saleAge != null && currentAge >= pp.saleAge;
 
-    const rate = se?.isRefinanced || sp?.isRefinanced
-      ? (pp.refinance?.newRate ?? 0)
-      : (y >= pp.variableRiseAfter && pp.rateType === "variable" ? pp.variableRiskRate : (pp.rateType === "fixed" ? pp.fixedRate : pp.variableInitRate));
+    const rate = se?.rate ?? sp?.rate ?? (pp.rateType === "fixed" ? pp.fixedRate : pp.variableInitRate);
 
     schedule.push({
       balance: (se?.balance ?? 0) + (sp?.balance ?? 0),
