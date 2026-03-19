@@ -44,16 +44,16 @@ function migrateScenario(s: any, oldFields?: any): Scenario {
     const ht: any[] = [];
     for (const e of events) {
       if (e.disabled) continue;
-      if (e.type === "rent" && !e.parentId) ht.push({ startAge: e.age, type: "rent", rentAnnualMan: e.annualCostMan || 10 });
+      if (e.type === "rent" && !e.parentId) ht.push({ startAge: e.age, type: "rent", rentMonthlyMan: Math.round((e.annualCostMan || 120) / 12) });
       else if (e.type === "property" && e.propertyParams) ht.push({ startAge: e.age, type: "own", propertyParams: e.propertyParams });
       else if (e.type === "relocation" && e.relocationParams) {
         const rp = e.relocationParams;
-        if (rp.newHousingType === "rent") ht.push({ startAge: e.age, type: "rent", rentAnnualMan: rp.newRentAnnualMan || 120 });
+        if (rp.newHousingType === "rent") ht.push({ startAge: e.age, type: "rent", rentMonthlyMan: Math.round((rp.newRentAnnualMan || 120) / 12) });
         else if (rp.newPropertyParams) ht.push({ startAge: e.age, type: "own", propertyParams: rp.newPropertyParams });
       }
     }
     if (ht.length > 0) housingTimeline = ht;
-    else housingTimeline = [{ startAge: currentAge, type: "rent", rentAnnualMan: 10 }];
+    else housingTimeline = [{ startAge: currentAge, type: "rent", rentMonthlyMan: 10 }];
   }
 
   return {
@@ -173,7 +173,7 @@ function mkScenario(id: number): Scenario {
     idecoKF: [{ age: 30, value: isB ? 20000 : 0 }],
     salaryGrowthRate: 2,
     events: [], excludedBaseEventIds: [],
-    housingTimeline: isBase ? [{ startAge: 30, type: "rent", rentAnnualMan: 10 }] : undefined, // Bはundefined=Aにリンク
+    housingTimeline: isBase ? [{ startAge: 30, type: "rent", rentMonthlyMan: 10 }] : undefined, // Bはundefined=Aにリンク
     linkedToBase: !isBase,
     overrideTracks: isBase ? [] : [...DEFAULT_OVERRIDE_TRACKS],
     years: 35, hasFurusato: true,

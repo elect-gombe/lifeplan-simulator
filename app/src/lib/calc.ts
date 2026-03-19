@@ -1109,8 +1109,8 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       if (phase.type === "rent") {
         events.push({
           id: syntheticId, age: phase.startAge, type: "rent",
-          label: `家賃(${phase.rentAnnualMan ?? 0}万/年)`,
-          oneTimeCostMan: 0, annualCostMan: phase.rentAnnualMan ?? 0,
+          label: `家賃(${phase.rentMonthlyMan ?? 0}万/月)`,
+          oneTimeCostMan: 0, annualCostMan: (phase.rentMonthlyMan ?? 0) * 12,
           durationYears: endAge - phase.startAge,
         });
       } else if (phase.type === "own" && phase.propertyParams) {

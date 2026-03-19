@@ -123,7 +123,7 @@ export interface BalancePolicy {
 export interface HousingPhase {
   startAge: number;
   type: "rent" | "own";
-  rentAnnualMan?: number;         // 賃貸時の年間家賃（万円）
+  rentMonthlyMan?: number;        // 賃貸時の月額家賃（万円）
   propertyParams?: PropertyParams; // 購入時の物件設定
 }
 
