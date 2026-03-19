@@ -15,16 +15,25 @@ interface TaxDetailProps {
   sirPct: number;
 }
 
-export function TaxDetailModal({ isOpen, onClose, age, results, base, sirPct }: TaxDetailProps & {
+export function TaxDetailModal({ isOpen, onClose, age: initialAge, results, base, sirPct }: TaxDetailProps & {
   isOpen: boolean; onClose: () => void;
 }) {
+  const [age, setAge] = useState(initialAge);
+  // 外から開き直された時に同期
+  React.useEffect(() => { if (initialAge != null) setAge(initialAge); }, [initialAge]);
+
   if (!isOpen || age == null) return null;
+  const minAge = results[0]?.yearResults[0]?.age ?? 20;
+  const maxAge = results[0]?.yearResults[results[0].yearResults.length - 1]?.age ?? 85;
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center bg-black/40" onClick={onClose}>
       <div className="flex-1 min-h-0 w-[calc(100%-60px)] max-w-[1400px] my-1 sm:my-2 rounded-lg bg-white shadow-xl flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b px-3 py-1.5 shrink-0">
-          <p className="text-sm font-bold">{age}歳時点の詳細</p>
-          <button onClick={onClose} className="rounded px-3 py-1 text-xs text-gray-500 hover:bg-gray-100">閉じる</button>
+        <div className="flex items-center gap-3 border-b px-3 py-1.5 shrink-0">
+          <p className="text-sm font-bold whitespace-nowrap">{age}歳時点の詳細</p>
+          <input type="range" min={minAge} max={maxAge} value={age} onChange={e => setAge(Number(e.target.value))}
+            className="flex-1 h-1.5 accent-blue-600" />
+          <span className="text-[10px] text-gray-400 whitespace-nowrap">{minAge}〜{maxAge}歳</span>
+          <button onClick={onClose} className="rounded px-3 py-1 text-xs text-gray-500 hover:bg-gray-100 shrink-0">閉じる</button>
         </div>
         <div className="flex-1 min-h-0 overflow-auto p-1 sm:p-2">
           <TaxDetailContent age={age} results={results} base={base} sirPct={sirPct} />
