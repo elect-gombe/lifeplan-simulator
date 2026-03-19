@@ -7,6 +7,8 @@ import { PropertyModal } from "./PropertyModal";
 import { CarModal } from "./CarModal";
 import { DeathModal } from "./DeathModal";
 import { InsuranceModal } from "./InsuranceModal";
+import { GiftModal } from "./GiftModal";
+import { RelocationModal } from "./RelocationModal";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
 
@@ -287,7 +289,7 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
 }
 
 // ===== Collapsible Event List =====
-function EventList({ events, updateEvent, updateEventMulti, removeEvent, currentAge, retirementAge, label, onEditProperty, onEditCar, onEditDeath, onEditInsurance }: {
+function EventList({ events, updateEvent, updateEventMulti, removeEvent, currentAge, retirementAge, label, onEditProperty, onEditCar, onEditDeath, onEditInsurance, onEditGift, onEditRelocation, onEditChild }: {
   events: LifeEvent[];
   updateEvent: (id: number, f: string, v: any) => void;
   updateEventMulti?: (id: number, patch: Record<string, any>) => void;
@@ -298,6 +300,9 @@ function EventList({ events, updateEvent, updateEventMulti, removeEvent, current
   onEditCar?: (e: LifeEvent) => void;
   onEditDeath?: (e: LifeEvent) => void;
   onEditInsurance?: (e: LifeEvent) => void;
+  onEditGift?: (e: LifeEvent) => void;
+  onEditRelocation?: (e: LifeEvent) => void;
+  onEditChild?: (e: LifeEvent) => void;
 }) {
   const [collapsed, setCollapsed] = usePersistedSet("sim-evt-collapsed");
   if (events.length === 0) return null;
@@ -319,10 +324,13 @@ function EventList({ events, updateEvent, updateEventMulti, removeEvent, current
         <div className={`flex flex-wrap items-center gap-1 text-xs rounded px-2 py-0.5 bg-gray-50 ${indent ? "ml-4 border-l-2 border-gray-200" : ""} ${isDisabled ? "opacity-30 line-through" : ""}`}>
           {hasChildren && <button onClick={() => toggleCollapse(e.id)} className="text-[10px] text-gray-400 w-4">{isCollapsed ? "▶" : "▼"}</button>}
           <span style={{ color: et.color }}>{et.icon}</span>
+          {e.type === "child" && !e.parentId && onEditChild && <button onClick={() => onEditChild(e)} className="text-[10px] rounded px-1 py-0.5 bg-amber-100 text-amber-600">✏️</button>}
           {e.propertyParams && onEditProperty && <button onClick={() => onEditProperty(e)} className="text-[10px] rounded px-1 py-0.5 bg-blue-100 text-blue-600">✏️</button>}
           {e.carParams && onEditCar && <button onClick={() => onEditCar(e)} className="text-[10px] rounded px-1 py-0.5 bg-green-100 text-green-600">✏️</button>}
           {e.deathParams && onEditDeath && <button onClick={() => onEditDeath(e)} className="text-[10px] rounded px-1 py-0.5 bg-gray-200 text-gray-600">✏️</button>}
           {e.insuranceParams && onEditInsurance && <button onClick={() => onEditInsurance(e)} className="text-[10px] rounded px-1 py-0.5 bg-indigo-100 text-indigo-600">✏️</button>}
+          {e.giftParams && onEditGift && <button onClick={() => onEditGift(e)} className="text-[10px] rounded px-1 py-0.5 bg-purple-100 text-purple-600">✏️</button>}
+          {e.relocationParams && onEditRelocation && <button onClick={() => onEditRelocation(e)} className="text-[10px] rounded px-1 py-0.5 bg-cyan-100 text-cyan-600">✏️</button>}
           <input value={e.label} onChange={ev => updateEvent(e.id, "label", ev.target.value)} className="w-28 rounded border px-1.5 py-1 text-xs" />
           {e.propertyParams && updateEventMulti && (
             <span className="flex items-center gap-0.5">
@@ -426,11 +434,12 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
   const events = scenario.events || [];
   const baseEvents = (isLinked && baseScenario) ? (baseScenario.events || []) : [];
   const excludedIds = scenario.excludedBaseEventIds || [];
-  type ModalType = "child" | "property" | "car" | "death" | "insurance" | null;
+  type ModalType = "child" | "property" | "car" | "death" | "insurance" | "gift" | "relocation" | null;
   const [openModal, setOpenModal] = useState<ModalType>(null);
   const [editingEvent, setEditingEvent] = useState<LifeEvent | null>(null);
+  const [editingChildEvents, setEditingChildEvents] = useState<LifeEvent[]>([]);
   const openModalFor = (type: ModalType, evt?: LifeEvent | null) => { setOpenModal(type); setEditingEvent(evt ?? null); };
-  const closeModal = () => { setOpenModal(null); setEditingEvent(null); };
+  const closeModal = () => { setOpenModal(null); setEditingEvent(null); setEditingChildEvents([]); };
 
   const setEvents = (evts: LifeEvent[]) => onChange({ ...scenario, events: evts });
   const addSimpleEvent = (type: string) => {
@@ -472,16 +481,20 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
       <div className="mb-1.5 flex flex-wrap gap-1">
         {Object.entries(EVENT_TYPES).filter(([k]) => k !== "education" && k !== "marriage").map(([k, v]) => (
           <button key={k} onClick={() => {
-            if (["child", "property", "car", "death", "insurance"].includes(k)) { openModalFor(k as ModalType); }
+            if (["child", "property", "car", "death", "insurance", "gift", "relocation"].includes(k)) { openModalFor(k as ModalType); }
             else addSimpleEvent(k);
           }} className="rounded border bg-white px-1.5 py-0.5 text-[10px] hover:bg-blue-50 hover:border-blue-300">{v.icon} {v.label}</button>
         ))}
       </div>
-      <ChildEventModal isOpen={openModal === "child"} onClose={closeModal} onAdd={addChildEvents} currentAge={currentAge} retirementAge={retirementAge} />
+      <ChildEventModal isOpen={openModal === "child"} onClose={closeModal} onAdd={addChildEvents} currentAge={currentAge} retirementAge={retirementAge}
+        existingEvents={editingChildEvents.length > 0 ? editingChildEvents : undefined}
+        onUpdate={(oldIds, newEvts) => { setEvents([...events.filter(e => !oldIds.includes(e.id)), ...newEvts].sort((a, b) => a.age - b.age)); closeModal(); }} />
       <PropertyModal isOpen={openModal === "property"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <CarModal isOpen={openModal === "car"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <DeathModal isOpen={openModal === "death"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <InsuranceModal isOpen={openModal === "insurance"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+      <GiftModal isOpen={openModal === "gift"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+      <RelocationModal isOpen={openModal === "relocation"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       {isLinked && baseEvents.length > 0 && <BaseEventList baseEvents={baseEvents} excludedIds={excludedIds} disabledIds={scenario.disabledBaseEventIds || []}
         onUnlink={unlinkBaseEvent} onRelink={relinkBaseEvent}
         onToggleDisable={(id) => {
@@ -497,7 +510,9 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
       <EventList events={events} updateEvent={updateEvent} updateEventMulti={updateEventMulti} removeEvent={removeEvent} currentAge={currentAge} retirementAge={retirementAge}
         label={isLinked && events.length > 0 ? "✏️独自イベント" : undefined}
         onEditProperty={(e) => openModalFor("property", e)} onEditCar={(e) => openModalFor("car", e)}
-        onEditDeath={(e) => openModalFor("death", e)} onEditInsurance={(e) => openModalFor("insurance", e)} />
+        onEditDeath={(e) => openModalFor("death", e)} onEditInsurance={(e) => openModalFor("insurance", e)}
+        onEditGift={(e) => openModalFor("gift", e)} onEditRelocation={(e) => openModalFor("relocation", e)}
+        onEditChild={(e) => { const childEvts = [e, ...events.filter(c => c.parentId === e.id)]; setEditingChildEvents(childEvts); setOpenModal("child"); }} />
       {events.length === 0 && baseEvents.length === 0 && <div className="text-[10px] text-gray-400 pl-2">イベントなし</div>}
     </Section>
   );
@@ -536,15 +551,82 @@ function NISASection({ s, onChange, isLinked, baseScenario, open, onToggle }: { 
             </div>
             <div className="flex items-center gap-1"><span className="text-gray-500 text-[10px]">年間枠</span><input type="number" value={ni.annualLimitMan} step={10} onChange={e => setNISA({ annualLimitMan: Number(e.target.value) })} className="w-16 rounded border px-1 py-0.5 text-xs" /><span className="text-[10px] text-gray-400">万/人</span></div>
             <div className="flex items-center gap-1"><span className="text-gray-500 text-[10px]">生涯枠</span><input type="number" value={ni.lifetimeLimitMan} step={100} onChange={e => setNISA({ lifetimeLimitMan: Number(e.target.value) })} className="w-16 rounded border px-1 py-0.5 text-xs" /><span className="text-[10px] text-gray-400">万/人</span></div>
-            <span className="text-[10px] text-gray-400">利回り: 共通設定</span>
           </div>
           <div className="text-[10px] text-gray-400">合計: 年{ni.annualLimitMan * (ni.accounts || 1)}万 / 生涯{ni.lifetimeLimitMan * (ni.accounts || 1)}万 ｜ NISA非課税、超過→特定口座(20.315%課税)</div>
+          {/* Phase 3: 個別利回り */}
+          <div className="border-t border-green-100 pt-1">
+            <details className="text-[10px]">
+              <summary className="cursor-pointer font-semibold text-gray-600">
+                利回り設定
+                <span className="font-normal text-gray-400 ml-1">
+                  {(s.dcReturnRate != null || s.nisaReturnRate != null || s.taxableReturnRate != null || s.cashInterestRate != null)
+                    ? `(個別: DC${s.dcReturnRate ?? "共通"}% NISA${s.nisaReturnRate ?? "共通"}% 特定${s.taxableReturnRate ?? "共通"}% 現金${s.cashInterestRate ?? 0}%)`
+                    : "(共通利回りを使用)"}
+                </span>
+              </summary>
+              <div className="mt-1 space-y-1 bg-green-50 rounded p-1.5">
+                <div className="text-gray-500">未設定の場合、グローバル運用利回り(rr)が適用されます</div>
+                <div className="flex flex-wrap gap-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-500">DC</span>
+                    <input type="number" value={s.dcReturnRate ?? ""} step={0.5} placeholder="共通"
+                      onChange={e => onChange({ ...s, dcReturnRate: e.target.value ? Number(e.target.value) : undefined })}
+                      className="w-14 rounded border px-1 py-0.5" />
+                    <span className="text-gray-400">%</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-500">NISA</span>
+                    <input type="number" value={s.nisaReturnRate ?? ""} step={0.5} placeholder="共通"
+                      onChange={e => onChange({ ...s, nisaReturnRate: e.target.value ? Number(e.target.value) : undefined })}
+                      className="w-14 rounded border px-1 py-0.5" />
+                    <span className="text-gray-400">%</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-500">特定口座</span>
+                    <input type="number" value={s.taxableReturnRate ?? ""} step={0.5} placeholder="共通"
+                      onChange={e => onChange({ ...s, taxableReturnRate: e.target.value ? Number(e.target.value) : undefined })}
+                      className="w-14 rounded border px-1 py-0.5" />
+                    <span className="text-gray-400">%</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-500">現金</span>
+                    <input type="number" value={s.cashInterestRate ?? 0} step={0.1} min={0}
+                      onChange={e => onChange({ ...s, cashInterestRate: Number(e.target.value) || undefined })}
+                      className="w-14 rounded border px-1 py-0.5" />
+                    <span className="text-gray-400">%</span>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
           <div className="border-t border-green-100 pt-1">
             <span className="text-[10px] font-semibold text-gray-600">残高ポリシー</span>
             <div className="flex flex-wrap gap-2 mt-0.5">
               <div className="flex items-center gap-1"><span className="text-gray-500 text-[10px]">防衛資金</span><input type="number" value={bp.cashReserveMonths} step={1} min={0} onChange={e => setBP({ cashReserveMonths: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" /><span className="text-[10px] text-gray-400">ヶ月分</span></div>
               <label className="flex items-center gap-1 text-[10px] cursor-pointer"><input type="checkbox" checked={bp.nisaPriority} onChange={e => setBP({ nisaPriority: e.target.checked })} className="accent-green-600" /><span className="text-gray-500">余剰→NISA/特定優先</span></label>
             </div>
+            {/* Phase 8: 引出戦略 */}
+            <details className="text-[10px] mt-1">
+              <summary className="cursor-pointer text-gray-500">引出順序{bp.withdrawalOrder ? " (カスタム)" : " (デフォルト)"}</summary>
+              <div className="mt-1 space-y-1 bg-gray-50 rounded p-1.5">
+                <div className="text-gray-400">資産取り崩し順序（上から優先）</div>
+                {(() => {
+                  const order = bp.withdrawalOrder || ["taxable", "spouseNisa", "selfNisa"];
+                  const labels: Record<string, string> = { taxable: "特定口座", spouseNisa: "配偶者NISA", selfNisa: "本人NISA" };
+                  const moveUp = (i: number) => { if (i <= 0) return; const o = [...order]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setBP({ withdrawalOrder: o as any }); };
+                  const moveDown = (i: number) => { if (i >= order.length - 1) return; const o = [...order]; [o[i], o[i + 1]] = [o[i + 1], o[i]]; setBP({ withdrawalOrder: o as any }); };
+                  return order.map((src, i) => (
+                    <div key={src} className="flex items-center gap-1">
+                      <span className="w-4 text-center text-gray-400">{i + 1}.</span>
+                      <span className="flex-1">{labels[src]}</span>
+                      <button onClick={() => moveUp(i)} className="text-gray-400 hover:text-blue-500" disabled={i === 0}>▲</button>
+                      <button onClick={() => moveDown(i)} className="text-gray-400 hover:text-blue-500" disabled={i === order.length - 1}>▼</button>
+                    </div>
+                  ));
+                })()}
+                {bp.withdrawalOrder && <button onClick={() => setBP({ withdrawalOrder: undefined })} className="text-blue-500 hover:underline">デフォルトに戻す</button>}
+              </div>
+            </details>
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
-import type { Scenario, YearResult, ScenarioResult, BaseResult, TaxOpts, Keyframe, LifeEvent, EventYearCost, PropertyParams, CarParams, DeathParams, SpouseConfig, NISAConfig, BalancePolicy, SocialInsuranceParams } from "./types";
+import type { Scenario, YearResult, ScenarioResult, BaseResult, TaxOpts, Keyframe, LifeEvent, EventYearCost, PropertyParams, CarParams, DeathParams, SpouseConfig, NISAConfig, BalancePolicy, SocialInsuranceParams, PrepaymentEntry, RelocationParams, GiftParams } from "./types";
 import { resolveKF, isEventActive, resolveEventAge, DEFAULT_DC_RECEIVE_METHOD, DEFAULT_SI_PARAMS, PENSION_INSURANCE_RATE, PENSION_MONTHLY_CAP, EMPLOYMENT_INSURANCE_RATE, NURSING_INSURANCE_MIN_AGE, NURSING_INSURANCE_MAX_AGE } from "./types";
-import { txInc, mR, fLm, calcFurusatoDonation, iTx, rTx, apTxCr, hlResidentCap, rDed, rTxC, annuityTax, estimatePublicPension, empDed, spouseDeduction, calcLifeInsuranceDeduction } from "./tax";
+import { txInc, mR, fLm, calcFurusatoDonation, iTx, rTx, apTxCr, hlResidentCap, rDed, rTxC, annuityTax, estimatePublicPension, empDed, spouseDeduction, calcLifeInsuranceDeduction, calcPropertyCapitalGainsTax, calcGiftTax, publicPensionDeduction } from "./tax";
 
 // ===== Pension-related constants (令和6年度基準) =====
 /** 遺族基礎年金 基本額（円/年） */
@@ -94,6 +94,232 @@ export function loanBalanceAfterYears(principal: number, annualRate: number, tot
   const m = elapsedYears * 12;
   const monthly = principal * r * Math.pow(1 + r, n) / (Math.pow(1 + r, n) - 1);
   return Math.max(Math.round(principal * Math.pow(1 + r, m) - monthly * (Math.pow(1 + r, m) - 1) / r), 0);
+}
+
+// ===== Phase 1: ローンスケジュール =====
+// 繰上返済・借換を反映した年ごとのローン残高・返済額を計算
+export interface LoanScheduleEntry {
+  balance: number;        // 残高合計（繰上後）
+  annualPayment: number;  // 年間返済額合計
+  rate: number;           // 適用金利（%）
+  monthlyPayment: number; // 月額返済額合計（表示用）
+  remainingYears: number; // 残返済年数（最大値）
+  prepaymentAmount: number; // 繰上返済額合計（この年に実施した場合）
+  isRefinanced: boolean;  // この年に借換を実施したか
+  isSold: boolean;        // この年に売却したか
+  // ペアローン個別残高
+  selfBalance?: number;      // 本人残高
+  spouseBalance?: number;    // 配偶者残高
+  selfRemainingYears?: number;
+  spouseRemainingYears?: number;
+  selfMonthlyPayment?: number;
+  spouseMonthlyPayment?: number;
+}
+
+// Simulate monthly payments for 12 months and return remaining balance
+function simulateOneYear(balance: number, monthlyPayment: number, annualRate: number, repType: string): number {
+  if (balance <= 0) return 0;
+  const r = annualRate / 100 / 12;
+  let bal = balance;
+  for (let m = 0; m < 12 && bal > 0; m++) {
+    const interest = bal * r;
+    if (repType === "equal_principal") {
+      // 元金均等: 元金部分は月額固定（= 当初balance / 総月数 だが、ここでは monthlyPayment - interest で算出）
+      const principalPart = monthlyPayment - interest; // monthlyPayment = 元金部分 + 初月利息 で渡される想定ではない
+      // 元金均等の場合、元金返済額は balance / (remainingYears * 12) で固定なので別関数で処理
+      bal -= (monthlyPayment > interest ? monthlyPayment - interest : monthlyPayment);
+    } else {
+      // 元利均等: 月額固定、元金部分 = 月額 - 利息
+      const principalPart = monthlyPayment - interest;
+      if (principalPart <= 0) { bal = 0; break; } // 金利0の場合
+      bal -= principalPart;
+    }
+  }
+  return Math.max(Math.round(bal), 0);
+}
+
+// Single sub-loan simulation state
+interface SubLoanState {
+  balance: number;
+  remainingYears: number;
+  monthlyPayment: number; // equal_payment only
+}
+
+function buildSingleLoanSchedule(
+  initialBalance: number, loanYears: number, repType: string,
+  pp: PropertyParams, startAge: number,
+  prepayments: PrepaymentEntry[],
+): { entries: { balance: number; annualPayment: number; monthlyPayment: number; remainingYears: number; prepaymentAmount: number; isRefinanced: boolean }[]; } {
+  const entries: { balance: number; annualPayment: number; monthlyPayment: number; remainingYears: number; prepaymentAmount: number; isRefinanced: boolean }[] = [];
+  if (initialBalance <= 0) return { entries };
+
+  let balance = initialBalance;
+  let currentRate = pp.rateType === "fixed" ? pp.fixedRate : pp.variableInitRate;
+  let remainingYears = loanYears;
+  const refinance = pp.refinance;
+  const maxYears = loanYears + 10;
+
+  let monthlyPayment = repType === "equal_payment"
+    ? calcMonthlyPaymentEqual(initialBalance, currentRate, remainingYears) : 0;
+
+  for (let y = 0; y < maxYears && balance > 0; y++) {
+    const currentAge = startAge + y;
+    let isRefinanced = false;
+    let prepaymentAmount = 0;
+
+    if (pp.saleAge != null && currentAge >= pp.saleAge) {
+      entries.push({ balance, annualPayment: 0, monthlyPayment: 0, remainingYears: 0, prepaymentAmount: 0, isRefinanced: false });
+      break;
+    }
+
+    // Rate change
+    if (pp.rateType === "variable") {
+      const newRate = y >= pp.variableRiseAfter ? pp.variableRiskRate : pp.variableInitRate;
+      if (newRate !== currentRate) {
+        currentRate = newRate;
+        if (repType === "equal_payment") monthlyPayment = calcMonthlyPaymentEqual(balance, currentRate, remainingYears);
+      }
+    }
+
+    // Refinance
+    if (refinance && currentAge === refinance.age && balance > 0) {
+      currentRate = refinance.newRate;
+      remainingYears = refinance.newLoanYears;
+      isRefinanced = true;
+      if (repType === "equal_payment") monthlyPayment = calcMonthlyPaymentEqual(balance, currentRate, remainingYears);
+    }
+
+    // Calc payment
+    let annualPayment: number;
+    let displayMonthly: number;
+    if (repType === "equal_principal") {
+      const mp = balance / (remainingYears * 12);
+      displayMonthly = Math.round(mp + balance * (currentRate / 100 / 12));
+      annualPayment = 0;
+      let t = balance;
+      for (let m = 0; m < 12 && t > 0; m++) { annualPayment += mp + t * (currentRate / 100 / 12); t -= mp; }
+      annualPayment = Math.round(annualPayment);
+    } else {
+      displayMonthly = monthlyPayment;
+      annualPayment = Math.round(Math.min(monthlyPayment * 12, balance * (1 + currentRate / 100)));
+    }
+
+    const balBefore = balance;
+
+    // Prepayments
+    for (const prep of prepayments) {
+      if (prep.age === currentAge && balance > 0 && prep.amountMan > 0) {
+        const amt = Math.min(prep.amountMan * 10000, balance);
+        prepaymentAmount += amt;
+        balance -= amt;
+        if (balance <= 0) break;
+        if (prep.type === "shorten") {
+          if (repType === "equal_payment" && monthlyPayment > 0 && currentRate > 0) {
+            const r = currentRate / 100 / 12;
+            const ratio = balance * r / monthlyPayment;
+            if (ratio < 1) remainingYears = Math.max(Math.ceil(Math.ceil(-Math.log(1 - ratio) / Math.log(1 + r)) / 12), 1);
+          } else if (repType === "equal_principal") {
+            const origMP = balBefore / (remainingYears * 12);
+            if (origMP > 0) remainingYears = Math.max(Math.ceil(balance / origMP / 12), 1);
+          }
+        } else {
+          if (repType === "equal_payment") {
+            monthlyPayment = calcMonthlyPaymentEqual(balance, currentRate, remainingYears);
+            displayMonthly = monthlyPayment;
+            annualPayment = Math.round(Math.min(monthlyPayment * 12, balance * (1 + currentRate / 100)));
+          } else {
+            displayMonthly = Math.round(balance / (remainingYears * 12) + balance * (currentRate / 100 / 12));
+          }
+        }
+      }
+    }
+
+    entries.push({
+      balance: prepaymentAmount > 0 ? balance : balBefore,
+      annualPayment, monthlyPayment: displayMonthly, remainingYears,
+      prepaymentAmount, isRefinanced,
+    });
+
+    // Advance
+    if (repType === "equal_principal") {
+      const mp = balance / (remainingYears * 12);
+      balance = Math.max(Math.round(balance - mp * 12), 0);
+    } else {
+      const r = currentRate / 100 / 12;
+      if (r > 0 && monthlyPayment > 0) {
+        let b = balance;
+        for (let m = 0; m < 12 && b > 0; m++) b -= (monthlyPayment - b * r);
+        balance = Math.max(Math.round(b), 0);
+      } else {
+        balance = Math.max(Math.round(balance - monthlyPayment * 12), 0);
+      }
+    }
+    remainingYears = Math.max(remainingYears - 1, 0);
+    if (remainingYears <= 0 || balance <= 0) break;
+  }
+  return { entries };
+}
+
+export function buildLoanSchedule(pp: PropertyParams, startAge: number): LoanScheduleEntry[] {
+  const loanAmount = (pp.priceMan - pp.downPaymentMan) * 10000;
+  if (loanAmount <= 0) return [];
+
+  const isPair = pp.loanStructure === "pair";
+  const selfRatio = isPair ? (pp.pairRatio ?? 50) / 100 : 1;
+  const spouseRatio = isPair ? 1 - selfRatio : 0;
+  const repType = pp.repaymentType || "equal_payment";
+  const prepayments = pp.prepayments || [];
+
+  if (!isPair) {
+    // Single loan: simple path
+    const { entries } = buildSingleLoanSchedule(loanAmount, pp.loanYears, repType, pp, startAge, prepayments);
+    return entries.map(e => ({
+      ...e, rate: e.isRefinanced ? (pp.refinance?.newRate ?? 0) : (entries.indexOf(e) >= pp.variableRiseAfter && pp.rateType === "variable" ? pp.variableRiskRate : (pp.rateType === "fixed" ? pp.fixedRate : pp.variableInitRate)),
+      isSold: pp.saleAge != null && (startAge + entries.indexOf(e)) >= pp.saleAge,
+    }));
+  }
+
+  // Pair loan: simulate two sub-loans independently
+  const selfPreps = prepayments.filter(p => (p.target || "self") === "self");
+  const spousePreps = prepayments.filter(p => p.target === "spouse");
+  const selfAmount = Math.round(loanAmount * selfRatio);
+  const spouseAmount = loanAmount - selfAmount;
+
+  const selfResult = buildSingleLoanSchedule(selfAmount, pp.loanYears, repType, pp, startAge, selfPreps);
+  const spouseResult = buildSingleLoanSchedule(spouseAmount, pp.loanYears, repType, pp, startAge, spousePreps);
+
+  const maxLen = Math.max(selfResult.entries.length, spouseResult.entries.length);
+  const schedule: LoanScheduleEntry[] = [];
+
+  for (let y = 0; y < maxLen; y++) {
+    const se = y < selfResult.entries.length ? selfResult.entries[y] : null;
+    const sp = y < spouseResult.entries.length ? spouseResult.entries[y] : null;
+    const currentAge = startAge + y;
+    const isSold = pp.saleAge != null && currentAge >= pp.saleAge;
+
+    const rate = se?.isRefinanced || sp?.isRefinanced
+      ? (pp.refinance?.newRate ?? 0)
+      : (y >= pp.variableRiseAfter && pp.rateType === "variable" ? pp.variableRiskRate : (pp.rateType === "fixed" ? pp.fixedRate : pp.variableInitRate));
+
+    schedule.push({
+      balance: (se?.balance ?? 0) + (sp?.balance ?? 0),
+      annualPayment: (se?.annualPayment ?? 0) + (sp?.annualPayment ?? 0),
+      rate,
+      monthlyPayment: (se?.monthlyPayment ?? 0) + (sp?.monthlyPayment ?? 0),
+      remainingYears: Math.max(se?.remainingYears ?? 0, sp?.remainingYears ?? 0),
+      prepaymentAmount: (se?.prepaymentAmount ?? 0) + (sp?.prepaymentAmount ?? 0),
+      isRefinanced: !!(se?.isRefinanced || sp?.isRefinanced),
+      isSold,
+      selfBalance: se?.balance,
+      spouseBalance: sp?.balance,
+      selfRemainingYears: se?.remainingYears,
+      spouseRemainingYears: sp?.remainingYears,
+      selfMonthlyPayment: se?.monthlyPayment,
+      spouseMonthlyPayment: sp?.monthlyPayment,
+    });
+  }
+
+  return schedule;
 }
 
 // ===== 遺族年金の自動計算（令和7年度基準） =====
@@ -192,10 +418,16 @@ function loanRate(pp: PropertyParams, yearsSince: number): number {
 }
 
 // Compute yearly costs from a property event
-function computePropertyYearCost(pp: PropertyParams, yearsSincePurchase: number, inflationFactor: number = 1): EventYearCost[] {
+// loanScheduleCache: optional pre-built schedule to avoid recomputation
+function computePropertyYearCost(pp: PropertyParams, yearsSincePurchase: number, inflationFactor: number = 1, startAge?: number, loanScheduleCache?: LoanScheduleEntry[]): EventYearCost[] {
   const costs: EventYearCost[] = [];
   const loanAmount = (pp.priceMan - pp.downPaymentMan) * 10000;
   const repType = pp.repaymentType || "equal_payment";
+
+  // Check if property has been sold
+  if (pp.saleAge != null && startAge != null && (startAge + yearsSincePurchase) >= pp.saleAge) {
+    return costs; // Post-sale: no costs
+  }
 
   // Down payment + closing costs (year 0 only)
   if (yearsSincePurchase === 0) {
@@ -203,78 +435,145 @@ function computePropertyYearCost(pp: PropertyParams, yearsSincePurchase: number,
     costs.push({ label: "頭金＋諸費用", icon: "🏠", color: "#3b82f6", amount: (pp.downPaymentMan + closingCost) * 10000 });
   }
 
+  // Use loan schedule if available for accurate prepayment/refinance tracking
+  const schedule = loanScheduleCache || (startAge != null ? buildLoanSchedule(pp, startAge) : null);
+  const scheduleEntry = schedule && yearsSincePurchase < schedule.length ? schedule[yearsSincePurchase] : null;
+
   // Mortgage payment (ローンがある場合のみ)
-  if (loanAmount > 0 && yearsSincePurchase < pp.loanYears) {
+  // If schedule exists, loan is done when yearsSincePurchase >= schedule.length (schedule covers all active loan years)
+  const loanDoneBySchedule = schedule != null && yearsSincePurchase >= schedule.length;
+  const hasRemainingLoan = loanDoneBySchedule ? false
+    : scheduleEntry ? scheduleEntry.balance > 0 && !scheduleEntry.isSold
+    : (loanAmount > 0 && yearsSincePurchase < pp.loanYears);
+
+  if (hasRemainingLoan) {
     let rate: number;
     let rateLabel: string;
     let isPhaseChange = false;
     let phaseLabel: string | undefined;
-
-    if (pp.rateType === "fixed") {
-      rate = pp.fixedRate;
-      rateLabel = `固定${rate}%`;
-    } else {
-      const isRisk = yearsSincePurchase >= pp.variableRiseAfter;
-      rate = isRisk ? pp.variableRiskRate : pp.variableInitRate;
-      rateLabel = isRisk ? `変動→${rate}%` : `変動${rate}%`;
-      if (yearsSincePurchase === pp.variableRiseAfter) {
-        isPhaseChange = true;
-        phaseLabel = `金利上昇 ${pp.variableInitRate}%→${pp.variableRiskRate}%`;
-      }
-    }
-
     let annualPayment: number;
     let monthlyDisplay: number;
-    const repLabel = repType === "equal_principal" ? "元金均等" : "元利均等";
+    let balance: number;
 
-    if (repType === "equal_principal") {
-      annualPayment = calcAnnualPaymentPrincipalEqual(loanAmount, rate, pp.loanYears, yearsSincePurchase);
-      monthlyDisplay = calcMonthlyPaymentPrincipalEqual(loanAmount, rate, pp.loanYears, yearsSincePurchase);
+    if (scheduleEntry) {
+      // Use schedule data
+      rate = scheduleEntry.rate;
+      annualPayment = scheduleEntry.annualPayment;
+      monthlyDisplay = scheduleEntry.monthlyPayment;
+      balance = scheduleEntry.balance;
+
+      if (scheduleEntry.isRefinanced) {
+        isPhaseChange = true;
+        phaseLabel = `借換 → ${rate}%/${pp.refinance?.newLoanYears}年`;
+        rateLabel = `借換${rate}%`;
+      } else if (pp.rateType === "fixed") {
+        rateLabel = `固定${rate}%`;
+      } else {
+        const isRisk = yearsSincePurchase >= pp.variableRiseAfter;
+        rateLabel = isRisk ? `変動→${rate}%` : `変動${rate}%`;
+        if (yearsSincePurchase === pp.variableRiseAfter) {
+          isPhaseChange = true;
+          phaseLabel = `金利上昇 ${pp.variableInitRate}%→${pp.variableRiskRate}%`;
+        }
+      }
+
+      // Show prepayment info
+      if (scheduleEntry.prepaymentAmount > 0) {
+        const prepAtAge = pp.prepayments?.find(p => startAge != null && p.age === startAge + yearsSincePurchase);
+        costs.push({
+          label: `繰上返済(${prepAtAge?.type === "reduce" ? "返済額軽減" : "期間短縮"})`,
+          icon: "💴", color: "#16a34a", amount: scheduleEntry.prepaymentAmount,
+          isPhaseChange: true, phaseLabel: `繰上返済 ${Math.round(scheduleEntry.prepaymentAmount / 10000)}万円`,
+          detail: `残高${Math.round(balance / 10000)}万 残${scheduleEntry.remainingYears}年`,
+        });
+      }
+
+      // Refinance cost
+      if (scheduleEntry.isRefinanced && pp.refinance) {
+        costs.push({
+          label: "借換手数料", icon: "🏦", color: "#ea580c", amount: pp.refinance.costMan * 10000,
+        });
+      }
     } else {
-      const monthly = calcMonthlyPaymentEqual(loanAmount, rate, pp.loanYears);
-      annualPayment = monthly * 12;
-      monthlyDisplay = monthly;
+      // Fallback: original calculation
+      if (pp.rateType === "fixed") {
+        rate = pp.fixedRate;
+        rateLabel = `固定${rate}%`;
+      } else {
+        const isRisk = yearsSincePurchase >= pp.variableRiseAfter;
+        rate = isRisk ? pp.variableRiskRate : pp.variableInitRate;
+        rateLabel = isRisk ? `変動→${rate}%` : `変動${rate}%`;
+        if (yearsSincePurchase === pp.variableRiseAfter) {
+          isPhaseChange = true;
+          phaseLabel = `金利上昇 ${pp.variableInitRate}%→${pp.variableRiskRate}%`;
+        }
+      }
+
+      if (repType === "equal_principal") {
+        annualPayment = calcAnnualPaymentPrincipalEqual(loanAmount, rate, pp.loanYears, yearsSincePurchase);
+        monthlyDisplay = calcMonthlyPaymentPrincipalEqual(loanAmount, rate, pp.loanYears, yearsSincePurchase);
+      } else {
+        const monthly = calcMonthlyPaymentEqual(loanAmount, rate, pp.loanYears);
+        annualPayment = monthly * 12;
+        monthlyDisplay = monthly;
+      }
+      balance = loanBalanceAfterYears(loanAmount, rate, pp.loanYears, yearsSincePurchase, repType);
     }
 
-    const balance = loanBalanceAfterYears(loanAmount, rate, pp.loanYears, yearsSincePurchase, repType);
+    const repLabel = repType === "equal_principal" ? "元金均等" : "元利均等";
+    const isPairLoan = pp.loanStructure === "pair" && scheduleEntry?.selfBalance != null;
+    const selfAnnual = isPairLoan && balance > 0 ? Math.round(annualPayment * ((scheduleEntry!.selfBalance ?? 0) / balance)) : annualPayment;
+    const spouseAnnual = isPairLoan ? annualPayment - selfAnnual : 0;
     costs.push({
       label: `ローン返済(${repLabel}/${rateLabel})`, icon: "🏦", color: "#3b82f6",
-      amount: annualPayment, detail: `残高${Math.round(balance / 10000)}万 月額${Math.round(monthlyDisplay / 10000)}万`,
+      amount: annualPayment,
+      detail: isPairLoan
+        ? `本人${Math.round((scheduleEntry!.selfBalance ?? 0) / 10000)}万(月${Math.round((scheduleEntry!.selfMonthlyPayment ?? 0) / 10000)}万) 配偶者${Math.round((scheduleEntry!.spouseBalance ?? 0) / 10000)}万(月${Math.round((scheduleEntry!.spouseMonthlyPayment ?? 0) / 10000)}万)`
+        : `残高${Math.round(balance / 10000)}万 月額${Math.round(monthlyDisplay / 10000)}万`,
       isPhaseChange, phaseLabel,
+      // ペアローン按分情報を埋め込み（TaxDetailModalで使用）
+      selfAmount: isPairLoan ? selfAnnual : undefined,
+      spouseAmount: isPairLoan ? spouseAnnual : undefined,
     });
 
     // Loan deduction (13 years, 0.7% of balance, max 35万)
-    // ペアローン: deductionTarget に応じて本人/配偶者に分割
     if (pp.hasLoanDeduction && yearsSincePurchase < HOUSING_LOAN_DEDUCTION_YEARS) {
-      const deduction = Math.min(Math.round(balance * HOUSING_LOAN_DEDUCTION_RATE), HOUSING_LOAN_DEDUCTION_MAX);
       const isLastYear = yearsSincePurchase === HOUSING_LOAN_DEDUCTION_YEARS - 1;
-      const detailBase = `残高${Math.round(balance / 10000)}万×0.7% (${yearsSincePurchase + 1}/13年目)`;
       const dedTarget = pp.deductionTarget || "self";
-      if (dedTarget === "both") {
-        const selfRatio = (pp.pairRatio ?? 50) / 100;
-        const selfDed = Math.round(deduction * selfRatio);
-        const spouseDed = deduction - selfDed;
+      if (dedTarget === "both" && pp.loanStructure === "pair" && scheduleEntry) {
+        // ペアローン: 個別残高で控除を計算
+        const selfBal = scheduleEntry.selfBalance ?? 0;
+        const spouseBal = scheduleEntry.spouseBalance ?? 0;
+        const selfDed = Math.min(Math.round(selfBal * HOUSING_LOAN_DEDUCTION_RATE), HOUSING_LOAN_DEDUCTION_MAX);
+        const spouseDed = Math.min(Math.round(spouseBal * HOUSING_LOAN_DEDUCTION_RATE), HOUSING_LOAN_DEDUCTION_MAX);
         if (selfDed > 0) {
           costs.push({
             label: "住宅ローン控除(本人)", icon: "🏠", color: "#16a34a", amount: -selfDed,
-            detail: `${detailBase} 本人${Math.round(selfRatio * 100)}%`,
+            detail: `本人残高${Math.round(selfBal / 10000)}万×0.7% (${yearsSincePurchase + 1}/13年目)`,
             isPhaseChange: isLastYear, phaseLabel: isLastYear ? "住宅ローン控除 終了" : undefined,
           });
         }
         if (spouseDed > 0) {
           costs.push({
             label: "住宅ローン控除(配偶者)", icon: "🏠", color: "#16a34a", amount: -spouseDed,
-            detail: `${detailBase} 配偶者${Math.round((1 - selfRatio) * 100)}%`,
+            detail: `配偶者残高${Math.round(spouseBal / 10000)}万×0.7% (${yearsSincePurchase + 1}/13年目)`,
             isPhaseChange: isLastYear, phaseLabel: isLastYear ? "住宅ローン控除 終了" : undefined,
           });
         }
       } else {
-        const dedLabel = dedTarget === "spouse" ? "住宅ローン控除(配偶者)" : "住宅ローン控除(本人)";
-        costs.push({
-          label: dedLabel, icon: "🏠", color: "#16a34a", amount: -deduction,
-          detail: detailBase,
-          isPhaseChange: isLastYear, phaseLabel: isLastYear ? "住宅ローン控除 終了" : undefined,
-        });
+        const deduction = Math.min(Math.round(balance * HOUSING_LOAN_DEDUCTION_RATE), HOUSING_LOAN_DEDUCTION_MAX);
+        const detailBase = `残高${Math.round(balance / 10000)}万×0.7% (${yearsSincePurchase + 1}/13年目)`;
+        if (dedTarget === "both") {
+          // 単独ローンだが両方指定の場合 (fallback: 按分)
+          const selfRatio = (pp.pairRatio ?? 50) / 100;
+          const selfDed = Math.round(deduction * selfRatio);
+          const spouseDed = deduction - selfDed;
+          if (selfDed > 0) costs.push({ label: "住宅ローン控除(本人)", icon: "🏠", color: "#16a34a", amount: -selfDed, detail: `${detailBase} 本人${Math.round(selfRatio * 100)}%`, isPhaseChange: isLastYear, phaseLabel: isLastYear ? "住宅ローン控除 終了" : undefined });
+          if (spouseDed > 0) costs.push({ label: "住宅ローン控除(配偶者)", icon: "🏠", color: "#16a34a", amount: -spouseDed, detail: `${detailBase} 配偶者${Math.round((1 - selfRatio) * 100)}%`, isPhaseChange: isLastYear, phaseLabel: isLastYear ? "住宅ローン控除 終了" : undefined });
+        } else {
+          const dedLabel = dedTarget === "spouse" ? "住宅ローン控除(配偶者)" : "住宅ローン控除(本人)";
+          costs.push({ label: dedLabel, icon: "🏠", color: "#16a34a", amount: -deduction, detail: detailBase, isPhaseChange: isLastYear, phaseLabel: isLastYear ? "住宅ローン控除 終了" : undefined });
+        }
       }
     } else if (pp.hasLoanDeduction && yearsSincePurchase === HOUSING_LOAN_DEDUCTION_YEARS) {
       costs.push({
@@ -282,11 +581,16 @@ function computePropertyYearCost(pp: PropertyParams, yearsSincePurchase: number,
         isPhaseChange: true, phaseLabel: "住宅ローン控除 終了",
       });
     }
-  } else if (loanAmount > 0 && yearsSincePurchase === pp.loanYears) {
-    costs.push({
-      label: "ローン完済", icon: "🎉", color: "#16a34a", amount: 0,
-      isPhaseChange: true, phaseLabel: "住宅ローン完済",
-    });
+  } else if (loanAmount > 0 && !scheduleEntry?.isSold) {
+    // Check if this is the year of loan completion
+    const isCompletionYear = loanDoneBySchedule && yearsSincePurchase === (schedule?.length ?? pp.loanYears)
+      || (!schedule && yearsSincePurchase === pp.loanYears);
+    if (isCompletionYear) {
+      costs.push({
+        label: "ローン完済", icon: "🎉", color: "#16a34a", amount: 0,
+        isPhaseChange: true, phaseLabel: "住宅ローン完済",
+      });
+    }
   }
 
   // Maintenance (inflation applied)
@@ -485,6 +789,11 @@ interface MemberTaxResult {
   hlAvail: number;              // 住宅ローン控除 可能額
   hlIT: number;                 // 住宅ローン控除 所得税から
   hlRT: number;                 // 住宅ローン控除 住民税から
+  // 年金統合課税の内訳
+  pensionIncomeTax: number;     // 年金にかかる所得税
+  pensionResidentTax: number;   // 年金にかかる住民税
+  pensionDeduction: number;     // 公的年金等控除額
+  pensionTaxableIncome: number; // 年金の雑所得（控除後）
 }
 // ===== 社会保険料の詳細計算 =====
 interface SIBreakdown {
@@ -497,38 +806,59 @@ interface SIBreakdown {
   ratePct: number;     // 実効社保料率(%)（税計算用、DC控除前grossベース）
 }
 
-function calcSocialInsurance(gross: number, age: number, siParams?: SocialInsuranceParams, fallbackSirPct?: number): SIBreakdown {
-  if (gross <= 0) return { total: 0, pension: 0, health: 0, nursing: 0, employment: 0, childSupport: 0, ratePct: 0 };
+// ===== 退職後の社会保険料（国民健康保険・介護保険・後期高齢者医療）=====
+// 退職後は厚生年金・雇用保険・子育て支援金はなし
+// 国民健康保険: 所得割（前年所得ベース）+ 均等割。自治体差が大きいが概算で所得の約8-10%
+// 75歳〜: 後期高齢者医療制度（所得割約8%+均等割）
+// 介護保険（65歳〜）: 第1号被保険者。所得段階別だが概算で年金の約2%
+const NHI_RATE = 0.10;              // 国民健康保険 概算所得割率（均等割込み）
+const LATE_ELDERLY_RATE = 0.09;     // 後期高齢者医療 概算率
+const NURSING_1ST_RATE = 0.02;      // 介護保険 第1号被保険者 概算率
+const LATE_ELDERLY_AGE = 75;        // 後期高齢者医療 開始年齢
 
-  if (!siParams) {
-    // レガシー: フラット率で計算（内訳は推定で分配）
-    const rate = (fallbackSirPct ?? 15.75) / 100;
-    const total = Math.round(gross * rate);
-    return { total, pension: 0, health: 0, nursing: 0, employment: 0, childSupport: 0, ratePct: rate * 100 };
+function calcSocialInsurance(gross: number, age: number, siParams?: SocialInsuranceParams, fallbackSirPct?: number, pensionIncome: number = 0): SIBreakdown {
+  // 在職中: 給与ベースで社保計算
+  if (gross > 0) {
+    if (!siParams) {
+      const rate = (fallbackSirPct ?? 15.75) / 100;
+      const total = Math.round(gross * rate);
+      return { total, pension: 0, health: 0, nursing: 0, employment: 0, childSupport: 0, ratePct: rate * 100 };
+    }
+
+    const monthlyGross = gross / 12;
+    const pensionBase = Math.min(monthlyGross, PENSION_MONTHLY_CAP);
+    const pension = Math.round(pensionBase * (PENSION_INSURANCE_RATE / 100) * 12);
+    const health = Math.round(gross * siParams.healthInsuranceRate / 100);
+    const nursing = (age >= NURSING_INSURANCE_MIN_AGE && age < NURSING_INSURANCE_MAX_AGE)
+      ? Math.round(gross * siParams.nursingInsuranceRate / 100) : 0;
+    const childSupport = Math.round(gross * siParams.childSupportRate / 100);
+    const employment = Math.round(gross * EMPLOYMENT_INSURANCE_RATE / 100);
+    const total = pension + health + nursing + employment + childSupport;
+    const ratePct = gross > 0 ? total / gross * 100 : 0;
+    return { total, pension, health, nursing, employment, childSupport, ratePct };
   }
 
-  // 厚生年金: 標準報酬月額上限あり
-  const monthlyGross = gross / 12;
-  const pensionBase = Math.min(monthlyGross, PENSION_MONTHLY_CAP);
-  const pension = Math.round(pensionBase * (PENSION_INSURANCE_RATE / 100) * 12);
+  // 退職後: 年金収入ベースで国保/後期高齢者+介護
+  if (pensionIncome <= 0) return { total: 0, pension: 0, health: 0, nursing: 0, employment: 0, childSupport: 0, ratePct: 0 };
 
-  // 健康保険（上限なし簡易計算）
-  const health = Math.round(gross * siParams.healthInsuranceRate / 100);
+  // 年金の雑所得をベースに算出
+  const pensionDed = publicPensionDeduction(pensionIncome, age);
+  const pensionTaxable = Math.max(pensionIncome - pensionDed, 0);
+  // 基礎控除43万（住民税ベース）を差し引いた課税標準
+  const taxBase = Math.max(pensionTaxable - 430000, 0);
 
-  // 介護保険（40歳以上65歳未満のみ）
-  const nursing = (age >= NURSING_INSURANCE_MIN_AGE && age < NURSING_INSURANCE_MAX_AGE)
-    ? Math.round(gross * siParams.nursingInsuranceRate / 100) : 0;
+  // 健康保険: 国保 or 後期高齢者
+  const healthRate = age >= LATE_ELDERLY_AGE ? LATE_ELDERLY_RATE : NHI_RATE;
+  const health = Math.round(taxBase * healthRate);
 
-  // 子ども・子育て支援金
-  const childSupport = Math.round(gross * siParams.childSupportRate / 100);
+  // 介護保険: 65歳以上は第1号（年金天引き）、40-64は国保に含む
+  const nursing = age >= 65 ? Math.round(taxBase * NURSING_1ST_RATE)
+    : age >= NURSING_INSURANCE_MIN_AGE ? Math.round(taxBase * 0.02) : 0;
 
-  // 雇用保険
-  const employment = Math.round(gross * EMPLOYMENT_INSURANCE_RATE / 100);
+  const total = health + nursing;
+  const ratePct = pensionIncome > 0 ? total / pensionIncome * 100 : 0;
 
-  const total = pension + health + nursing + employment + childSupport;
-  const ratePct = gross > 0 ? total / gross * 100 : 0;
-
-  return { total, pension, health, nursing, employment, childSupport, ratePct };
+  return { total, pension: 0, health, nursing, employment: 0, childSupport: 0, ratePct };
 }
 
 const ZERO_MEMBER_TAX: MemberTaxResult = {
@@ -538,6 +868,7 @@ const ZERO_MEMBER_TAX: MemberTaxResult = {
   incomeTaxSaving: 0, residentTaxSaving: 0, socialInsuranceSaving: 0,
   furusatoLimit: 0, furusatoDonation: 0, takeHome: 0,
   taxableIncome: 0, marginalRate: 0, hlDeduction: 0, hlAvail: 0, hlIT: 0, hlRT: 0,
+  pensionIncomeTax: 0, pensionResidentTax: 0, pensionDeduction: 0, pensionTaxableIncome: 0,
 };
 
 function calcMemberTax(
@@ -550,9 +881,10 @@ function calcMemberTax(
   includeSISaving: boolean = false,
   age: number = 30,
   siParams?: SocialInsuranceParams,
+  pensionIncome: number = 0,    // 公的年金収入（円/年）
 ): MemberTaxResult {
   const gross = grossMan * 10000;
-  if (gross <= 0) return ZERO_MEMBER_TAX;
+  if (gross <= 0 && pensionIncome <= 0) return ZERO_MEMBER_TAX;
 
   const ds = Math.max(dcTotal - companyDC, 0);
   const aDS = ds * 12;
@@ -560,49 +892,74 @@ function calcMemberTax(
   const aT = (dcTotal + idecoMonthly) * 12;
   const selfDC = ds * 12;
   // 社保計算: DC自己負担控除後のgrossで計算（DC選択制は社保の対象外）
+  // 在職中: 給与ベースで社保計算。退職後: 年金ベースで国保+介護
   const adjGForSI = gross - aDS;
-  const sib = calcSocialInsurance(adjGForSI, age, siParams, sirPct);
+  const sib = calcSocialInsurance(adjGForSI, age, siParams, sirPct, pensionIncome);
   const sir = sib.ratePct / 100 || sirPct / 100;
-  const taxOpts = { dependentsCount: 0, lifeInsuranceDeduction: lifeInsuranceDed, sirPct: sib.ratePct || sirPct, dependentDeductionTotal };
 
-  const estHLRT = (ti: number) => {
-    if (housingLoanDed <= 0) return 0;
-    const estIT = iTx(ti);
-    const itUsed = Math.min(estIT, housingLoanDed);
-    return Math.min(housingLoanDed - itUsed, hlResidentCap(ti));
-  };
+  // 年金の雑所得 = 年金収入 - 公的年金等控除
+  const pensionDed = pensionIncome > 0 ? publicPensionDeduction(pensionIncome, age) : 0;
+  const pensionTaxable = Math.max(pensionIncome - pensionDed, 0);
 
-  // 税計算共通: 課税所得→ふるさと納税→税額控除
-  const calcTaxBlock = (g: number, extraDeduction: number) => {
-    const ti = Math.max(txInc(g, taxOpts) - extraDeduction - spouseDeductionAmount, 0);
-    const fl = fLm(ti, mR(ti), estHLRT(ti));
+  // 給与所得 + 雑所得(年金) を合算して総合課税
+  // 給与所得控除・社保控除は給与のみに適用、公的年金等控除は年金のみに適用
+  // 基礎控除48万・扶養控除・配偶者控除・生命保険料控除は合算所得に1回だけ適用
+  const calcTaxBlockWithPension = (g: number, extraDeduction: number) => {
+    // 給与所得 = 給与 − 給与所得控除 − 社保控除（在職中のみ）
+    const siDeduction = g > 0 ? g * (sib.ratePct > 0 ? sib.ratePct / 100 : sirPct / 100) : 0;
+    const salaryIncome = g > 0 ? Math.max(g - empDed(g) - siDeduction, 0) : 0;
+    // 合算所得 = 給与所得 + 年金雑所得
+    const totalIncome = salaryIncome + pensionTaxable;
+    // 所得控除: 退職後の国保保険料も社会保険料控除の対象
+    const retiredSIDeduction = g <= 0 ? sib.total : 0;
+    const ti = Math.max(totalIncome - 480000 - retiredSIDeduction - dependentDeductionTotal - lifeInsuranceDed - extraDeduction - spouseDeductionAmount, 0);
+    const fl = fLm(ti, mR(ti), housingLoanDed > 0 ? Math.min(Math.max(housingLoanDed - iTx(ti), 0), hlResidentCap(ti)) : 0);
     const furuDon = hasFurusato ? calcFurusatoDonation(fl) : 0;
     const fDed = hasFurusato ? Math.max(furuDon - 2000, 0) : 0;
     const tiaF = Math.max(ti - fDed, 0);
     const adj = apTxCr(iTx(tiaF), rTx(tiaF), housingLoanDed, tiaF);
-    return { ti, fl, furuDon, fDed, tiaF, adj };
+    return { ti, fl, furuDon, fDed, tiaF, adj, salaryIncome, pensionTaxable };
   };
 
-  const base = calcTaxBlock(gross, 0);
+  const base = calcTaxBlockWithPension(gross, 0);
   const adjG = gross - aDS;
-  const dc = calcTaxBlock(adjG, aI);
+  const dc = calcTaxBlockWithPension(adjG, aI);
 
   const incomeTax = dc.adj.it;
   const residentTax = dc.adj.rt;
   const socialInsurance = sib.total;
 
   // 社保節約: DC自己負担分の社保料差額
-  const sibBase = calcSocialInsurance(gross, age, siParams, sirPct);
+  const sibBase = calcSocialInsurance(gross, age, siParams, sirPct, pensionIncome);
   const siSv = includeSISaving ? sibBase.total - sib.total : 0;
 
   const itSv = base.adj.it - dc.adj.it;
   const rtSv = base.adj.rt - dc.adj.rt;
 
-  const takeHome = gross - incomeTax - residentTax - socialInsurance - selfDC - aI;
+  // 手取り = 給与 + 年金 - 税 - 社保 - DC拠出
+  const takeHome = gross + pensionIncome - incomeTax - residentTax - socialInsurance - selfDC - aI;
+
+  // 年金による税の増加分 = 「給与+年金の合算税」−「給与のみの税」
+  // 累進課税なので按分ではなく差額で正確に算出
+  let pensionIT = 0, pensionRT = 0;
+  if (pensionTaxable > 0) {
+    // 年金なしの場合の税を計算
+    const salaryOnly = (() => {
+      const siDed2 = adjG > 0 ? adjG * (sib.ratePct > 0 ? sib.ratePct / 100 : sirPct / 100) : 0;
+      const salaryIncome = adjG > 0 ? Math.max(adjG - empDed(adjG) - siDed2, 0) : 0;
+      const ti = Math.max(salaryIncome - 480000 - dependentDeductionTotal - lifeInsuranceDed - aI - spouseDeductionAmount, 0);
+      const fl = fLm(ti, mR(ti), housingLoanDed > 0 ? Math.min(Math.max(housingLoanDed - iTx(ti), 0), hlResidentCap(ti)) : 0);
+      const fDed = hasFurusato ? Math.max((hasFurusato ? calcFurusatoDonation(fl) : 0) - 2000, 0) : 0;
+      const tiaF = Math.max(ti - fDed, 0);
+      return apTxCr(iTx(tiaF), rTx(tiaF), housingLoanDed, tiaF);
+    })();
+    pensionIT = Math.max(incomeTax - salaryOnly.it, 0);
+    pensionRT = Math.max(residentTax - salaryOnly.rt, 0);
+  }
 
   return {
     gross, adjGross: adjG, sir,
-    employeeDeduction: Math.round(empDed(adjG)),
+    employeeDeduction: Math.round(gross > 0 ? empDed(adjG) : 0),
     incomeTax, residentTax, socialInsurance,
     socialInsuranceDeduction: sib.total,
     siPension: sib.pension, siHealth: sib.health, siNursing: sib.nursing,
@@ -613,6 +970,8 @@ function calcMemberTax(
     takeHome, taxableIncome: Math.round(dc.tiaF), marginalRate: mR(dc.tiaF),
     hlDeduction: dc.adj.itUsed + dc.adj.rtUsed, hlAvail: housingLoanDed,
     hlIT: dc.adj.itUsed, hlRT: dc.adj.rtUsed,
+    pensionIncomeTax: pensionIT, pensionResidentTax: pensionRT,
+    pensionDeduction: pensionDed, pensionTaxableIncome: pensionTaxable,
   };
 }
 
@@ -758,7 +1117,11 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   // NISA config — 個人別に枠を管理
   const nisa: NISAConfig | undefined = nisaConfig;
   const nisaAccounts = nisa ? (nisa.accounts || 1) : 1;
-  const nisaReturnRate = r; // 共通の運用利回りを使用
+  // Phase 3: 個別資産クラス利回り
+  const dcRate = (s.dcReturnRate ?? rr) / 100;
+  const nisaReturnRate = (s.nisaReturnRate ?? rr) / 100;
+  const taxableReturnRate_ = (s.taxableReturnRate ?? rr) / 100;
+  const cashRate = (s.cashInterestRate ?? 0) / 100;
   // 本人NISA枠
   const selfNISAAnnualLimit = nisa ? nisa.annualLimitMan * 10000 : 0;
   const selfNISALifetimeLimit = nisa ? nisa.lifetimeLimitMan * 10000 : 0;
@@ -769,9 +1132,9 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   // 新NISA（2024～）: 売却すると翌年に簿価分の枠が復活
   let selfNISACostBasis = 0;   // 本人NISA内の元本
   let spouseNISACostBasis = 0; // 配偶者NISA内の元本
-  // 特定口座 (taxable): same return rate, but gains taxed at 20.315%
+  // 特定口座 (taxable): gains taxed at 20.315%
   const TAXABLE_TAX_RATE = TAXABLE_ACCOUNT_TAX_RATE;
-  const taxableReturnRate = nisaReturnRate;
+  const taxableReturnRate = taxableReturnRate_;
 
   // Balance policy
   const bp: BalancePolicy | undefined = bpConfig;
@@ -927,40 +1290,57 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       if (isEffDisabled(e) || !isEventActive(e, age, events) || !e.propertyParams) continue;
       const pp = e.propertyParams;
       if (!pp.hasLoanDeduction) continue;
+      if (pp.saleAge != null && age >= pp.saleAge) continue; // sold
       const eAge = resolveEventAge(e, events);
       const yearsSince = age - eAge;
       if (yearsSince >= HOUSING_LOAN_DEDUCTION_YEARS) continue;
       const loanAmt = (pp.priceMan - pp.downPaymentMan) * 10000;
       if (loanAmt <= 0) continue;
-      const rate = loanRate(pp, yearsSince);
-      const bal = loanBalanceAfterYears(loanAmt, rate, pp.loanYears, yearsSince, pp.repaymentType || "equal_payment");
-      const ded = Math.min(Math.round(bal * HOUSING_LOAN_DEDUCTION_RATE), HOUSING_LOAN_DEDUCTION_MAX);
+      // Use schedule for accurate balance with prepayments (pair loan: individual balances)
+      const schedule = buildLoanSchedule(pp, eAge);
+      const entry = yearsSince < schedule.length ? schedule[yearsSince] : null;
       const dedTarget = pp.deductionTarget || "self";
-      if (dedTarget === "spouse") {
-        preSpouseHLDed += ded;
-      } else if (dedTarget === "both") {
-        const selfRatio = (pp.pairRatio ?? 50) / 100;
-        preSpouseHLDed += ded - Math.round(ded * selfRatio);
+      if (pp.loanStructure === "pair" && entry && dedTarget === "both") {
+        // ペアローン: 個別残高で控除を計算
+        const spouseBal = entry.spouseBalance ?? 0;
+        const spouseDed = Math.min(Math.round(spouseBal * HOUSING_LOAN_DEDUCTION_RATE), HOUSING_LOAN_DEDUCTION_MAX);
+        preSpouseHLDed += spouseDed;
+      } else {
+        const bal = entry ? entry.balance : (schedule.length > 0 ? 0 : loanBalanceAfterYears(loanAmt, loanRate(pp, yearsSince), pp.loanYears, yearsSince, pp.repaymentType || "equal_payment"));
+        const ded = Math.min(Math.round(bal * HOUSING_LOAN_DEDUCTION_RATE), HOUSING_LOAN_DEDUCTION_MAX);
+        if (dedTarget === "spouse") {
+          preSpouseHLDed += ded;
+        } else if (dedTarget === "both") {
+          const selfRatio = (pp.pairRatio ?? 50) / 100;
+          preSpouseHLDed += ded - Math.round(ded * selfRatio);
+        }
       }
     }
 
     if (spouse) {
       const spouseAge = spouse.currentAge + yearsFromStart;
       const spouseRetired = spouseAge >= (spouse.retirementAge ?? 65);
-      if (isSpouseDead || spouseRetired) {
+      if (isSpouseDead) {
         spouseTaxResult = ZERO_MEMBER_TAX;
       } else {
-        const spGrossMan = resolveKF(spouse.incomeKF, spouseAge, 0);
-        let spGrowthYears = 0;
-        for (let ki = spouse.incomeKF.length - 1; ki >= 0; ki--) {
-          if (spouse.incomeKF[ki].age <= spouseAge) { spGrowthYears = spouseAge - spouse.incomeKF[ki].age; break; }
-        }
-        const grownSpGrossMan = spGrossMan * Math.pow(1 + (spouse.salaryGrowthRate || 0) / 100, spGrowthYears);
-        const spDCTotal = resolveKF(spouse.dcTotalKF || [], spouseAge, 0);
-        const spCompanyDC = resolveKF(spouse.companyDCKF || [], spouseAge, 0);
-        const spIdeco = resolveKF(spouse.idecoKF || [], spouseAge, 0);
+        // 退職後でも年金収入があれば税計算が必要
+        const spGrossMan = spouseRetired ? 0 : (() => {
+          const base = resolveKF(spouse.incomeKF, spouseAge, 0);
+          let gy = 0;
+          for (let ki = spouse.incomeKF.length - 1; ki >= 0; ki--) {
+            if (spouse.incomeKF[ki].age <= spouseAge) { gy = spouseAge - spouse.incomeKF[ki].age; break; }
+          }
+          return base * Math.pow(1 + (spouse.salaryGrowthRate || 0) / 100, gy);
+        })();
+        const spDCTotal = spouseRetired ? 0 : resolveKF(spouse.dcTotalKF || [], spouseAge, 0);
+        const spCompanyDC = spouseRetired ? 0 : resolveKF(spouse.companyDCKF || [], spouseAge, 0);
+        const spIdeco = spouseRetired ? 0 : resolveKF(spouse.idecoKF || [], spouseAge, 0);
         const spSirPct = spouse.sirPct || sirPct;
-        spouseTaxResult = calcMemberTax(grownSpGrossMan, spSirPct, spDCTotal, spCompanyDC, spIdeco, spouse.hasFurusato, preSpouseHLDed, spouseDepDed, preSpouseLifeInsDed, 0, false, spouseAge, spouse.siParams);
+        if (spGrossMan > 0 || spousePensionIncome > 0) {
+          spouseTaxResult = calcMemberTax(spGrossMan, spSirPct, spDCTotal, spCompanyDC, spIdeco, spouse.hasFurusato, preSpouseHLDed, spouseDepDed, preSpouseLifeInsDed, 0, false, spouseAge, spouse.siParams, spousePensionIncome);
+        } else {
+          spouseTaxResult = ZERO_MEMBER_TAX;
+        }
       }
     }
     if (spouseTaxResult.gross > 0) {
@@ -1003,6 +1383,9 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     let inheritanceTax = 0;
     let inheritanceEstate = 0;
     let dcReceiveTax = 0;
+    let propertySaleProceeds = 0;
+    let propertyCapitalGainsTax = 0;
+    let giftTax = 0;
 
     // Insurance premiums and payouts
     let insurancePremiumTotal = 0;
@@ -1024,12 +1407,50 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       }
     };
 
+    // Track property sale proceeds for later cash addition
+    const propertySaleEntries: { pp: PropertyParams; eAge: number }[] = [];
+
     for (const e of activeEvts) {
       const eAge = resolveEventAge(e, events);
       const yearsSince = age - eAge;
 
       if (e.propertyParams) {
         const pp = e.propertyParams;
+
+        // Phase 2: Check property sale
+        if (pp.saleAge != null && age === pp.saleAge) {
+          const purchasePrice = pp.priceMan * 10000;
+          const appreciationRate = (pp.appreciationRate ?? 0) / 100;
+          const salePrice = pp.salePriceMan != null ? pp.salePriceMan * 10000 : Math.round(purchasePrice * Math.pow(1 + appreciationRate, yearsSince));
+          // Remaining loan balance
+          const schedule = buildLoanSchedule(pp, eAge);
+          const schedEntry = yearsSince < schedule.length ? schedule[yearsSince] : null;
+          const remainingLoan = schedEntry ? schedEntry.balance : 0;
+          // Capital gains tax
+          const cgtResult = calcPropertyCapitalGainsTax(purchasePrice, salePrice, yearsSince, true);
+          propertyCapitalGainsTax += cgtResult.tax;
+          const netProceeds = salePrice - remainingLoan - cgtResult.tax;
+          propertySaleProceeds += netProceeds;
+          propertySaleEntries.push({ pp, eAge });
+
+          eventCostBreakdown.push({
+            label: "物件売却", icon: "🏠", color: "#16a34a", amount: -netProceeds,
+            detail: `売却${Math.round(salePrice / 10000)}万 - 残債${Math.round(remainingLoan / 10000)}万 - 譲渡税${Math.round(cgtResult.tax / 10000)}万${cgtResult.isLongTerm ? "(長期)" : "(短期)"}`,
+            isPhaseChange: true, phaseLabel: `物件売却 ${Math.round(salePrice / 10000)}万`,
+          });
+          if (cgtResult.tax > 0) {
+            eventCostBreakdown.push({
+              label: "不動産譲渡所得税", icon: "🏛️", color: "#dc2626", amount: cgtResult.tax,
+              detail: `譲渡益${Math.round(cgtResult.gain / 10000)}万 - 特別控除${Math.round(cgtResult.specialDeduction / 10000)}万 = 課税${Math.round(cgtResult.taxableGain / 10000)}万`,
+            });
+          }
+          // No further property costs this year (sale completes)
+          continue;
+        }
+
+        // Skip if already sold
+        if (pp.saleAge != null && age > pp.saleAge) continue;
+
         const danshinCoverRatio = calcDanshinCover(pp);
 
         if (danshinCoverRatio >= 1) {
@@ -1039,11 +1460,10 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
             eventCostBreakdown.push({ label: "団信によるローン免除(全額)", icon: "🛡️", color: "#16a34a", amount: 0, isPhaseChange: true, phaseLabel: "団信発動" });
           }
         } else {
-          // 通常計算（部分免除の場合は残りの分を計算）
-          const costs = computePropertyYearCost(pp, yearsSince, inflationFactor);
+          // 通常計算（部分免除の場合は残りの分を計算）— pass startAge for schedule
+          const costs = computePropertyYearCost(pp, yearsSince, inflationFactor, eAge);
           for (const c of costs) {
             if (danshinCoverRatio > 0 && c.label.includes("ローン返済")) {
-              // 部分免除: ローン返済額を減額
               const reduced = Math.round(c.amount * (1 - danshinCoverRatio));
               eventCostBreakdown.push({ ...c, amount: reduced, detail: `${c.detail} (団信${Math.round(danshinCoverRatio * 100)}%免除)` });
               eventOngoing += reduced;
@@ -1065,7 +1485,6 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         const insuredDead = insTarget === "self" ? isSelfDead : isSpouseDead;
         const insuredDeathYear = insTarget === "self" ? isDeathYear : isSpouseDeathYear;
 
-        // Premium: pay if insured person is alive and within coverage period
         if (!insuredDead && age < ip.coverageEndAge) {
           const premium = ip.premiumMonthlyMan * 12 * 10000;
           insurancePremiumTotal += premium;
@@ -1073,9 +1492,6 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
           eventCostBreakdown.push({ label: `保険料(${e.label})`, icon: "🛡️", color: "#6366f1", amount: premium });
           eventOngoing += premium;
         }
-        // Payout: on insured person's death
-        // 保険金はeventCostBreakdown/eventOngoingには入れない（収入セクションで表示）
-        // takeHomePayに直接加算
         if (insuredDead) {
           if (ip.insuranceType === "term_life" && insuredDeathYear) {
             insurancePayoutTotal += ip.lumpSumPayoutMan * 10000;
@@ -1083,7 +1499,33 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
             insurancePayoutTotal += ip.monthlyPayoutMan * 12 * 10000;
           }
         }
-      } else if (!e.parentId) {
+      } else if (e.giftParams && eAge === age) {
+        // Phase 6: 贈与税
+        const gp = e.giftParams;
+        const amountYen = gp.amountMan * 10000;
+        const giftResult = calcGiftTax(amountYen, gp.giftType, gp.recipientRelation);
+        giftTax += giftResult.tax;
+        const totalCost = amountYen + giftResult.tax;
+        eventCostBreakdown.push({
+          label: `贈与(${gp.giftType === "calendar" ? "暦年" : "精算"})`, icon: "🎁", color: "#a855f7",
+          amount: totalCost,
+          detail: giftResult.detail,
+          isPhaseChange: true, phaseLabel: `贈与 ${gp.amountMan}万円`,
+        });
+        eventOnetime += totalCost;
+      } else if (e.relocationParams && eAge === age) {
+        // Phase 5: 住み替え
+        const rp = e.relocationParams;
+        // Moving cost
+        const movingCost = rp.movingCostMan * 10000;
+        eventCostBreakdown.push({ label: "引越費用", icon: "🏡", color: "#0891b2", amount: movingCost });
+        eventOnetime += movingCost;
+        // New housing: rent
+        if (rp.newHousingType === "rent" && rp.newRentAnnualMan) {
+          // Rent is handled as an ongoing cost for the duration
+          // (The relocation event itself just triggers the one-time costs)
+        }
+      } else if (!e.parentId && !e.giftParams && !e.relocationParams) {
         // Simple event (non-child sub-events only)
         const ongoing = e.annualCostMan * 10000 * inflationFactor;
         if (ongoing !== 0) {
@@ -1094,12 +1536,45 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       }
     }
 
+    // Phase 5: Relocation ongoing rent costs
+    for (const e of activeEvts) {
+      if (e.relocationParams && e.relocationParams.newHousingType === "rent" && e.relocationParams.newRentAnnualMan) {
+        const rp = e.relocationParams;
+        const eAge = resolveEventAge(e, events);
+        const yearsSince = age - eAge;
+        const duration = rp.newRentDurationYears ?? 999;
+        if (yearsSince < duration) {
+          const rent = rp.newRentAnnualMan * 10000 * inflationFactor;
+          eventCostBreakdown.push({ label: "家賃(住み替え後)", icon: "🏢", color: "#0891b2", amount: rent });
+          eventOngoing += rent;
+        }
+      }
+      // Phase 5: New property purchase ongoing costs
+      if (e.relocationParams && e.relocationParams.newHousingType === "purchase" && e.relocationParams.newPropertyParams) {
+        const eAge = resolveEventAge(e, events);
+        const yearsSince = age - eAge;
+        if (yearsSince >= 0) {
+          const newPP = e.relocationParams.newPropertyParams;
+          const costs = computePropertyYearCost(newPP, yearsSince, inflationFactor, eAge);
+          for (const c of costs) {
+            eventCostBreakdown.push({ ...c, label: `新居:${c.label}` });
+            eventOngoing += c.amount;
+          }
+        }
+      }
+    }
+
     // Property fixed costs that continue after durationYears (管理費・固定資産税)
-    for (const e of propertyFixedCostEvts) addPropertyFixedCosts(e.propertyParams!);
+    // But skip if property is sold
+    for (const e of propertyFixedCostEvts) {
+      const pp = e.propertyParams!;
+      if (pp.saleAge != null && age >= pp.saleAge) continue; // sold
+      addPropertyFixedCosts(pp);
+    }
 
     // One-time costs for simple events (non-structured)
     for (const e of onetimeEvts) {
-      if (!e.propertyParams && !e.carParams && !e.insuranceParams) {
+      if (!e.propertyParams && !e.carParams && !e.insuranceParams && !e.giftParams && !e.relocationParams) {
         const onetime = e.oneTimeCostMan * 10000 * inflationFactor;
         if (onetime !== 0) {
           eventCostBreakdown.push({ label: `${e.label}（一時）`, icon: "", color: "#64748b", amount: onetime });
@@ -1124,17 +1599,44 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       }
     }
 
-    // Track loan balance (consider 団信 coverage per property)
+    // Track loan balance (consider 団信 coverage per property, sale, and prepayments)
     let loanBalance = 0;
+    let selfLoanBalance = 0;
+    let spouseLoanBalance = 0;
     for (const e of activeEvts) {
       if (e.propertyParams) {
         const pp = e.propertyParams;
-        const ys = age - resolveEventAge(e, events);
+        const eAge = resolveEventAge(e, events);
+        if (pp.saleAge != null && age >= pp.saleAge) continue;
+        const ys = age - eAge;
         const loanAmt = (pp.priceMan - pp.downPaymentMan) * 10000;
-        if (ys < pp.loanYears && loanAmt > 0) {
-          const rate = loanRate(pp, ys);
-          const bal = loanBalanceAfterYears(loanAmt, rate, pp.loanYears, ys, pp.repaymentType);
-          loanBalance += Math.round(bal * (1 - calcDanshinCover(pp)));
+        if (loanAmt > 0) {
+          const schedule = buildLoanSchedule(pp, eAge);
+          const entry = ys < schedule.length ? schedule[ys] : null;
+          const bal = entry ? entry.balance : (schedule.length > 0 ? 0 : (ys < pp.loanYears ? loanBalanceAfterYears(loanAmt, loanRate(pp, ys), pp.loanYears, ys, pp.repaymentType) : 0));
+          const danshinAdj = 1 - calcDanshinCover(pp);
+          loanBalance += Math.round(bal * danshinAdj);
+          // ペアローン個別残高
+          if (entry && pp.loanStructure === "pair") {
+            selfLoanBalance += Math.round((entry.selfBalance ?? 0) * danshinAdj);
+            spouseLoanBalance += Math.round((entry.spouseBalance ?? 0) * danshinAdj);
+          } else {
+            selfLoanBalance += Math.round(bal * danshinAdj);
+          }
+        }
+      }
+      // Also track relocation new property loan balance
+      if (e.relocationParams?.newPropertyParams && e.relocationParams.newHousingType === "purchase") {
+        const newPP = e.relocationParams.newPropertyParams;
+        const eAge = resolveEventAge(e, events);
+        const ys = age - eAge;
+        if (ys >= 0) {
+          const loanAmt = (newPP.priceMan - newPP.downPaymentMan) * 10000;
+          if (loanAmt > 0) {
+            const schedule = buildLoanSchedule(newPP, eAge);
+            const entry = ys < schedule.length ? schedule[ys] : null;
+            loanBalance += entry ? entry.balance : (ys < newPP.loanYears ? loanBalanceAfterYears(loanAmt, loanRate(newPP, ys), newPP.loanYears, ys, newPP.repaymentType) : 0);
+          }
         }
       }
     }
@@ -1235,18 +1737,24 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     const spouseLifeInsDed = calcLifeInsuranceDeduction(insurancePremiumSpouse);
 
     // 配偶者控除/配偶者特別控除の計算
-    const selfIncomeForSpouseDed = gross > 0 ? gross - empDed(gross) : 0;
+    // 合計所得 = 給与所得 + 年金雑所得（配偶者控除の判定は合計所得ベース）
+    const selfSalaryIncome = gross > 0 ? gross - empDed(gross) : 0;
+    const selfPensionTaxable = selfPensionIncome > 0 ? Math.max(selfPensionIncome - publicPensionDeduction(selfPensionIncome, age), 0) : 0;
+    const selfIncomeForSpouseDed = selfSalaryIncome + selfPensionTaxable;
     const spGrossForDed = spouseTaxResult.gross;
-    const spouseIncomeForDed = spGrossForDed > 0 ? spGrossForDed - empDed(spGrossForDed) : 0;
+    const spSalaryIncome = spGrossForDed > 0 ? spGrossForDed - empDed(spGrossForDed) : 0;
+    const spPensionTaxable = spousePensionIncome > 0 ? Math.max(spousePensionIncome - publicPensionDeduction(spousePensionIncome, spouseAge), 0) : 0;
+    const spouseIncomeForDed = spSalaryIncome + spPensionTaxable;
     const spouseDedAmount = spouse ? spouseDeduction(selfIncomeForSpouseDed, spouseIncomeForDed) : 0;
 
     const hlDed = yearHousingLoanDed;
 
-    // *** Self tax via unified calcMemberTax ***
+    // *** Self tax via unified calcMemberTax (年金収入を統合) ***
     const selfTaxResult = calcMemberTax(
       grownGrossMan, sirPct, dcTotal, companyDC, idecoMonthly,
       hasFuru, hlDed, selfDepDed, selfLifeInsDed,
-      spouseDedAmount, true, age, selfSIParams
+      spouseDedAmount, true, age, selfSIParams,
+      selfPensionIncome,
     );
 
     const st = selfTaxResult; // alias
@@ -1254,22 +1762,26 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     const aBen = st.incomeTaxSaving + st.residentTaxSaving + st.socialInsuranceSaving;
     const selfFuruDed = st.furusatoDonation > 0 ? Math.max(st.furusatoDonation - 2000, 0) : 0;
 
-    // 年金の課税（公的年金等控除適用）
-    let pensionTax = 0;
-    if (selfPensionIncome > 0) pensionTax += annuityTax(selfPensionIncome, age);
-    if (spousePensionIncome > 0) pensionTax += annuityTax(spousePensionIncome, spouseAge);
-    const pensionNetIncome = selfPensionIncome + spousePensionIncome - pensionTax;
+    // 年金課税はcalcMemberTax内で統合済み（給与+年金の総合課税）
+    const pensionTax = st.pensionIncomeTax + st.pensionResidentTax + spouseTaxResult.pensionIncomeTax + spouseTaxResult.pensionResidentTax;
 
-    const takeHomePay = st.takeHome + childAllowance + survivorIncome + spouseTaxResult.takeHome + pensionNetIncome + insurancePayoutTotal;
+    // takeHome = 給与+年金-税-社保-DC（calcMemberTax内で計算済み）+ 手当+遺族+保険
+    const takeHomePay = st.takeHome + childAllowance + survivorIncome + spouseTaxResult.takeHome + insurancePayoutTotal;
     const pensionLossAnnual = (st.selfDCContribution / 12 * PENSION_RATE_PER_MILLE) / 1000 * 12;
     const spousePensionLossAnnual = spouse ? (spouseTaxResult.selfDCContribution / 12 * PENSION_RATE_PER_MILLE) / 1000 * 12 : 0;
     const annualNetCashFlow = takeHomePay - totalExpense;
 
-    selfDCAsset = selfDCAsset * (1 + r) + aT;
-    spouseDCAsset = spouseDCAsset * (1 + r) + spouseDCTotal;
+    // Phase 2: Add property sale proceeds to cash
+    if (propertySaleProceeds !== 0) cumulativeCash += propertySaleProceeds;
+
+    // Phase 3: Cash interest
+    if (cashRate > 0 && cumulativeCash > 0) cumulativeCash = Math.round(cumulativeCash * (1 + cashRate));
+
+    selfDCAsset = selfDCAsset * (1 + dcRate) + aT;
+    spouseDCAsset = spouseDCAsset * (1 + dcRate) + spouseDCTotal;
     cumulativeDCAsset = selfDCAsset + spouseDCAsset;
     // DC節税分は現金に加算（再投資は目安として複利計算のみ維持）
-    cumulativeReinvest = cumulativeReinvest * (1 + r) + aBen; // 目安用
+    cumulativeReinvest = cumulativeReinvest * (1 + dcRate) + aBen; // 目安用
 
     // ===== 死亡年: 相続計算（全資産統合） =====
     const processDeathInheritance = (label: string, dcAsset: number, nisaAssetForEstate: number, hasSpouseSurvivor: boolean) => {
@@ -1347,38 +1859,38 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       return sell;
     };
 
-    // 取り崩しヘルパー: 特定口座 → 配偶者NISA → 本人NISA の順
+    // Phase 8: 取り崩しヘルパー（configurable withdrawal order）
+    const withdrawOrder = bp?.withdrawalOrder || ["taxable", "spouseNisa", "selfNisa"];
     const withdrawToTarget = (targetCash: number) => {
       let deficit = targetCash - cumulativeCash;
       if (deficit <= 0) return;
 
-      // 1. 特定口座
-      if (deficit > 0 && cumulativeTaxable > 0) {
-        const gainRatio = cumulativeTaxableCost > 0
-          ? Math.max(cumulativeTaxable - cumulativeTaxableCost, 0) / cumulativeTaxable : 0;
-        const netRatio = 1 - gainRatio * TAXABLE_TAX_RATE;
-        const sellNeeded = Math.min(Math.ceil(deficit / netRatio), cumulativeTaxable);
-        const tax = Math.round(sellNeeded * gainRatio * TAXABLE_TAX_RATE);
-        taxableWithdrawal += sellNeeded;
-        cumulativeTaxable -= sellNeeded;
-        cumulativeTaxableCost = Math.max(cumulativeTaxableCost * (cumulativeTaxable / (cumulativeTaxable + sellNeeded) || 0), 0);
-        cumulativeCash += sellNeeded - tax;
-        deficit = Math.max(targetCash - cumulativeCash, 0);
-      }
-      // 2. 配偶者NISA（非課税で売却、簿価分の枠が翌年復活）
-      if (deficit > 0 && spouseNISAAsset > 0) {
-        const spRef = { v: spouseNISAAsset, c: spouseNISACostBasis };
-        const sold = sellNISA(spRef, deficit);
-        spouseNISAAsset = spRef.v; spouseNISACostBasis = spRef.c;
-        nisaWithdrawal += sold; cumulativeCash += sold;
-        deficit = Math.max(targetCash - cumulativeCash, 0);
-      }
-      // 3. 本人NISA
-      if (deficit > 0 && selfNISAAsset > 0) {
-        const selfRef = { v: selfNISAAsset, c: selfNISACostBasis };
-        const sold = sellNISA(selfRef, deficit);
-        selfNISAAsset = selfRef.v; selfNISACostBasis = selfRef.c;
-        nisaWithdrawal += sold; cumulativeCash += sold;
+      for (const source of withdrawOrder) {
+        if (deficit <= 0) break;
+        if (source === "taxable" && cumulativeTaxable > 0) {
+          const gainRatio = cumulativeTaxableCost > 0
+            ? Math.max(cumulativeTaxable - cumulativeTaxableCost, 0) / cumulativeTaxable : 0;
+          const netRatio = 1 - gainRatio * TAXABLE_TAX_RATE;
+          const sellNeeded = Math.min(Math.ceil(deficit / netRatio), cumulativeTaxable);
+          const tax = Math.round(sellNeeded * gainRatio * TAXABLE_TAX_RATE);
+          taxableWithdrawal += sellNeeded;
+          cumulativeTaxable -= sellNeeded;
+          cumulativeTaxableCost = Math.max(cumulativeTaxableCost * (cumulativeTaxable / (cumulativeTaxable + sellNeeded) || 0), 0);
+          cumulativeCash += sellNeeded - tax;
+          deficit = Math.max(targetCash - cumulativeCash, 0);
+        } else if (source === "spouseNisa" && spouseNISAAsset > 0) {
+          const spRef = { v: spouseNISAAsset, c: spouseNISACostBasis };
+          const sold = sellNISA(spRef, deficit);
+          spouseNISAAsset = spRef.v; spouseNISACostBasis = spRef.c;
+          nisaWithdrawal += sold; cumulativeCash += sold;
+          deficit = Math.max(targetCash - cumulativeCash, 0);
+        } else if (source === "selfNisa" && selfNISAAsset > 0) {
+          const selfRef = { v: selfNISAAsset, c: selfNISACostBasis };
+          const sold = sellNISA(selfRef, deficit);
+          selfNISAAsset = selfRef.v; selfNISACostBasis = selfRef.c;
+          nisaWithdrawal += sold; cumulativeCash += sold;
+          deficit = Math.max(targetCash - cumulativeCash, 0);
+        }
       }
     };
 
@@ -1421,20 +1933,25 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     // ===== DC/iDeCo受取: 受取開始年齢に達したら振替 =====
     // iDeCo/DCは60歳から75歳まで受取可能（退職年齢とは独立）
     // 受取開始年齢(annuityStartAge)に達した年にDC→現金振替
-    // 一時金: 全額を現金化
-    // 併用: 一時金割合分を現金化、残りは年金として毎年取崩し（calcDCReceiveTaxで計算済み）
-    // 年金: 全額を年金として毎年取崩し
+    let dcReceiveLumpSum = 0;
+    let dcReceiveAnnuityAnnual = 0;
+    let selfDCReceiveTax = 0, spouseDCReceiveTax = 0;
+    let selfDCReceiveLumpSum = 0, spouseDCReceiveLumpSum = 0;
+    let selfDCReceiveAnnuityAnnual = 0, spouseDCReceiveAnnuityAnnual = 0;
+    let selfDCRetirementDeduction = 0, spouseDCRetirementDeduction = 0;
     {
-      const processDCReceive = (label: string, asset: number, rm: DCReceiveMethod, retDed: number, otherRet: number): number => {
+      const processDCReceive = (label: string, asset: number, rm: DCReceiveMethod, retDed: number, otherRet: number, memberAge: number): number => {
         if (asset <= 0) return asset;
         const startAge = rm.annuityStartAge || 65;
-        if (age !== startAge) return asset;
+        if (memberAge !== startAge) return asset;
         // 受取開始年齢に到達
+        // DC受取は「資産の現金化」であり支出ではない。税金のみ dcReceiveTax に計上。
         if (rm.type === "lump_sum") {
           const tax = rTxC(asset + otherRet, retDed) - rTxC(otherRet, retDed);
           dcReceiveTax += tax;
-          eventCostBreakdown.push({ label: `DC一時金受取(${label})`, icon: "💰", color: "#ea580c", amount: tax,
-            detail: `${age}歳: DC${Math.round(asset/10000)}万 退職所得控除${Math.round(retDed/10000)}万 退職所得税${Math.round(tax/10000)}万`,
+          dcReceiveLumpSum += asset;
+          eventCostBreakdown.push({ label: `DC一時金受取(${label})`, icon: "💰", color: "#16a34a", amount: 0,
+            detail: `DC${Math.round(asset/10000)}万→現金化 控除${Math.round(retDed/10000)}万 税${Math.round(tax/10000)}万`,
             isPhaseChange: true, phaseLabel: `DC一時金受取(${label})` });
           cumulativeCash += asset - tax;
           return 0;
@@ -1443,28 +1960,45 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
           const ratio = (rm.combinedLumpSumRatio || 50) / 100;
           const lumpPart = Math.round(asset * ratio);
           const annuityPart = asset - lumpPart;
+          const annuityAnnual = Math.round(annuityPart / (rm.annuityYears || 20));
           const tax = rTxC(lumpPart + otherRet, retDed) - rTxC(otherRet, retDed);
           dcReceiveTax += tax;
-          eventCostBreakdown.push({ label: `DC併用受取開始(${label})`, icon: "💰", color: "#ea580c", amount: tax,
-            detail: `${age}歳: 一時金${Math.round(lumpPart/10000)}万(${Math.round(ratio*100)}%) 退職所得税${Math.round(tax/10000)}万 年金${Math.round(annuityPart/10000)}万×${rm.annuityYears||20}年`,
+          dcReceiveLumpSum += lumpPart;
+          dcReceiveAnnuityAnnual += annuityAnnual;
+          eventCostBreakdown.push({ label: `DC併用受取(${label})`, icon: "💰", color: "#16a34a", amount: 0,
+            detail: `一時金${Math.round(lumpPart/10000)}万 年金${Math.round(annuityAnnual/10000)}万/年×${rm.annuityYears||20}年`,
             isPhaseChange: true, phaseLabel: `DC併用受取(${label})` });
           cumulativeCash += lumpPart - tax;
           return annuityPart;
         }
         // 年金のみ
-        eventCostBreakdown.push({ label: `DC年金受取開始(${label})`, icon: "📋", color: "#ea580c", amount: 0,
-          detail: `${age}歳: DC${Math.round(asset/10000)}万を${rm.annuityYears||20}年で取崩し開始`,
+        const annuityAnnual = Math.round(asset / (rm.annuityYears || 20));
+        dcReceiveAnnuityAnnual += annuityAnnual;
+        eventCostBreakdown.push({ label: `DC年金受取開始(${label})`, icon: "📋", color: "#16a34a", amount: 0,
+          detail: `DC${Math.round(asset/10000)}万→年金${Math.round(annuityAnnual/10000)}万/年×${rm.annuityYears||20}年`,
           isPhaseChange: true, phaseLabel: `DC年金受取開始(${label})` });
         return asset;
       };
 
       const rm = effectiveDCReceiveMethod || DEFAULT_DC_RECEIVE_METHOD;
-      selfDCAsset = processDCReceive("本人", selfDCAsset, rm, rDed(effectiveYears), otherRet);
+      const selfRetDed = rDed(effectiveYears);
+      const preSelfTax = dcReceiveTax, preSelfLump = dcReceiveLumpSum, preSelfAnn = dcReceiveAnnuityAnnual;
+      selfDCAsset = processDCReceive("本人", selfDCAsset, rm, selfRetDed, otherRet, age);
+      selfDCReceiveTax = dcReceiveTax - preSelfTax;
+      selfDCReceiveLumpSum = dcReceiveLumpSum - preSelfLump;
+      selfDCReceiveAnnuityAnnual = dcReceiveAnnuityAnnual - preSelfAnn;
+      if (selfDCReceiveLumpSum > 0 || selfDCReceiveAnnuityAnnual > 0) selfDCRetirementDeduction = selfRetDed;
 
       if (spouseDCAsset > 0 && spouse) {
+        const preSpTax = dcReceiveTax, preSpLump = dcReceiveLumpSum, preSpAnn = dcReceiveAnnuityAnnual;
         const spRM = spouse.dcReceiveMethod || DEFAULT_DC_RECEIVE_METHOD;
         const spContribYears = yearResults.filter(yr => yr.spouse.dcContribution > 0).length + 1;
-        spouseDCAsset = processDCReceive("配偶者", spouseDCAsset, spRM, rDed(Math.max(spContribYears, 1)), 0);
+        const spRetDed = rDed(Math.max(spContribYears, 1));
+        spouseDCAsset = processDCReceive("配偶者", spouseDCAsset, spRM, spRetDed, 0, spouseAge);
+        spouseDCReceiveTax = dcReceiveTax - preSpTax;
+        spouseDCReceiveLumpSum = dcReceiveLumpSum - preSpLump;
+        spouseDCReceiveAnnuityAnnual = dcReceiveAnnuityAnnual - preSpAnn;
+        if (spouseDCReceiveLumpSum > 0 || spouseDCReceiveAnnuityAnnual > 0) spouseDCRetirementDeduction = spRetDed;
       }
       cumulativeDCAsset = selfDCAsset + spouseDCAsset;
     }
@@ -1496,7 +2030,9 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       taxableContribution, taxableWithdrawal, taxableAsset: cumulativeTaxable, taxableGain,
       cashSavings: cumulativeCash,
       insurancePremiumTotal, insurancePayoutTotal,
-      inheritanceTax, inheritanceEstate, dcReceiveTax,
+      inheritanceTax, inheritanceEstate,
+      dcReceiveTax,
+      propertySaleProceeds, propertyCapitalGainsTax, giftTax,
       activeEvents: [...activeEvts, ...propertyFixedCostEvts], eventCostBreakdown,
       self: {
         gross, employeeDeduction: st.employeeDeduction,
@@ -1512,7 +2048,12 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         incomeTaxSaving: st.incomeTaxSaving, residentTaxSaving: st.residentTaxSaving, socialInsuranceSaving: st.socialInsuranceSaving,
         furusatoLimit: st.furusatoLimit, furusatoDonation: st.furusatoDonation,
         takeHome: st.takeHome,
-        pensionIncome: selfPensionIncome, dcAsset: selfDCAsset,
+        pensionIncome: selfPensionIncome,
+        pensionDeduction: st.pensionDeduction, pensionTaxableIncome: st.pensionTaxableIncome,
+        pensionIncomeTax: st.pensionIncomeTax, pensionResidentTax: st.pensionResidentTax,
+        dcAsset: selfDCAsset, loanBalance: selfLoanBalance,
+        dcReceiveLumpSum: selfDCReceiveLumpSum, dcReceiveAnnuityAnnual: selfDCReceiveAnnuityAnnual,
+        dcRetirementDeduction: selfDCRetirementDeduction, dcReceiveTax: selfDCReceiveTax,
         nisaAsset: selfNISAAsset, nisaCostBasis: selfNISACostBasis, nisaContribution: selfNISAContribution,
       },
       spouse: {
@@ -1531,7 +2072,12 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         incomeTaxSaving: sp.incomeTaxSaving, residentTaxSaving: sp.residentTaxSaving,
         socialInsuranceSaving: sp.socialInsuranceSaving,
         furusatoLimit: sp.furusatoLimit, furusatoDonation: sp.furusatoDonation,
-        takeHome: sp.takeHome, pensionIncome: spousePensionIncome, dcAsset: spouseDCAsset,
+        takeHome: sp.takeHome, pensionIncome: spousePensionIncome,
+        pensionDeduction: sp.pensionDeduction, pensionTaxableIncome: sp.pensionTaxableIncome,
+        pensionIncomeTax: sp.pensionIncomeTax, pensionResidentTax: sp.pensionResidentTax,
+        dcAsset: spouseDCAsset, loanBalance: spouseLoanBalance,
+        dcReceiveLumpSum: spouseDCReceiveLumpSum, dcReceiveAnnuityAnnual: spouseDCReceiveAnnuityAnnual,
+        dcRetirementDeduction: spouseDCRetirementDeduction, dcReceiveTax: spouseDCReceiveTax,
         nisaAsset: spouseNISAAsset, nisaCostBasis: spouseNISACostBasis, nisaContribution: spouseNISAContribution,
       },
     });
@@ -1570,4 +2116,72 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     multiPhase: dcTotalKF.length > 1 || idecoKF.length > 1 || incomeKF.length > 1,
     hasFuru, dcReceiveDetail, spouseDCReceiveDetail,
   };
+}
+
+// ===== Phase 7: 必要保障額の自動算出 =====
+// 死亡年齢ごとの遺族必要保障額を計算
+export interface ProtectionNeedEntry {
+  deathAge: number;
+  totalExpense: number;       // 遺族の総支出（死亡年〜simEnd）
+  totalIncome: number;        // 遺族の総収入（配偶者給与+遺族年金+老齢年金）
+  gap: number;                // 不足額 = 必要保障額
+  currentCoverage: number;    // 現在の保険カバー（定期保険一時金+収入保障保険総額）
+  shortage: number;           // カバー不足 = gap - currentCoverage - 既存資産
+}
+
+export function calcNecessaryProtection(
+  yearResults: YearResult[],
+  scenario: Scenario,
+): ProtectionNeedEntry[] {
+  if (yearResults.length === 0) return [];
+
+  const results: ProtectionNeedEntry[] = [];
+  const currentAge = scenario.currentAge;
+  const simEndAge = scenario.simEndAge;
+
+  // Calculate insurance coverage from events
+  const events = scenario.events || [];
+  const insuranceEvents = events.filter(e => e.insuranceParams && !e.disabled);
+
+  for (let deathAge = currentAge; deathAge < simEndAge; deathAge++) {
+    const deathIdx = deathAge - currentAge;
+    if (deathIdx < 0 || deathIdx >= yearResults.length) continue;
+
+    // Total remaining expenses after death (with reduction)
+    let totalExpense = 0;
+    for (let a = deathAge; a < simEndAge && (a - currentAge) < yearResults.length; a++) {
+      const yr = yearResults[a - currentAge];
+      // Use 70% of base living expense as default death reduction estimate
+      totalExpense += yr.baseLivingExpense * 0.7 + yr.eventOngoing;
+    }
+
+    // Total remaining income (spouse income + survivor pension estimate)
+    let totalIncome = 0;
+    for (let a = deathAge; a < simEndAge && (a - currentAge) < yearResults.length; a++) {
+      const yr = yearResults[a - currentAge];
+      totalIncome += yr.spouse.takeHome + yr.survivorIncome;
+    }
+
+    // Insurance coverage
+    let currentCoverage = 0;
+    for (const e of insuranceEvents) {
+      const ip = e.insuranceParams!;
+      if (ip.insuranceType === "term_life") {
+        currentCoverage += ip.lumpSumPayoutMan * 10000;
+      } else if (ip.insuranceType === "income_protection" && ip.payoutUntilAge > deathAge) {
+        currentCoverage += ip.monthlyPayoutMan * 12 * (ip.payoutUntilAge - deathAge) * 10000;
+      }
+    }
+
+    // Existing assets at death time
+    const yrAtDeath = yearResults[deathIdx];
+    const existingAssets = yrAtDeath ? yrAtDeath.cumulativeSavings + yrAtDeath.cumulativeDCAsset : 0;
+
+    const gap = Math.max(totalExpense - totalIncome, 0);
+    const shortage = Math.max(gap - currentCoverage - existingAssets, 0);
+
+    results.push({ deathAge, totalExpense, totalIncome, gap, currentCoverage, shortage });
+  }
+
+  return results;
 }

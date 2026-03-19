@@ -50,20 +50,46 @@ export function Row({ l, vs, neg, bold, bg, sub, help, formula }: any) {
   );
 }
 
-export function Modal({ isOpen, onClose, title, btnClass, onSave, saveLabel, children }: {
+export function Modal({ isOpen, onClose, title, btnClass, onSave, saveLabel, wide, children }: {
   isOpen: boolean; onClose: () => void; title: string; btnClass?: string;
-  onSave: () => void; saveLabel?: string; children: React.ReactNode;
+  onSave: () => void; saveLabel?: string; wide?: boolean; children: React.ReactNode;
 }) {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-8" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-lg bg-white shadow-xl" onClick={e => e.stopPropagation()}>
+      <div className={`w-full rounded-lg bg-white shadow-xl ${wide ? "max-w-4xl" : "max-w-lg"}`} onClick={e => e.stopPropagation()}>
         <div className="border-b px-4 py-3"><p className="text-sm font-bold">{title}</p></div>
-        <div className="max-h-[70vh] overflow-y-auto p-4 space-y-4 text-xs">{children}</div>
+        <div className="max-h-[75vh] overflow-y-auto p-4 space-y-4 text-xs">{children}</div>
         <div className="border-t px-4 py-3 flex items-center justify-end gap-2">
           <button onClick={onClose} className="rounded px-4 py-1.5 text-xs text-gray-500 hover:bg-gray-100">キャンセル</button>
           <button onClick={onSave} className={`rounded px-4 py-1.5 text-xs text-white font-bold ${btnClass || "bg-blue-600 hover:bg-blue-700"}`}>{saveLabel || "追加"}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Bar chart wrapper with Y-axis labels (max / mid) */
+export function BarChart({ height, maxValue, unit, children }: {
+  height: number; maxValue: number; unit?: string; children: React.ReactNode;
+}) {
+  const fmt = (v: number) => {
+    if (v >= 10000) return `${Math.round(v / 10000).toLocaleString()}万`;
+    if (v >= 1000) return `${Math.round(v / 1000).toLocaleString()}千`;
+    return `${Math.round(v)}`;
+  };
+  const label = unit || "万";
+  const maxLabel = maxValue >= 10000 ? `${(maxValue / 10000).toFixed(maxValue >= 100000 ? 0 : 1)}${label}` : `${Math.round(maxValue)}${label}`;
+  const midLabel = maxValue >= 10000 ? `${(maxValue / 2 / 10000).toFixed(maxValue >= 100000 ? 0 : 1)}` : `${Math.round(maxValue / 2)}`;
+  return (
+    <div className="flex">
+      <div className="flex flex-col justify-between text-[8px] text-gray-400 pr-1 shrink-0 w-8 text-right" style={{ height }}>
+        <span className="leading-none">{maxLabel}</span>
+        <span className="leading-none">{midLabel}</span>
+        <span className="leading-none">0</span>
+      </div>
+      <div className="flex-1 flex items-end gap-px border-l border-gray-200" style={{ height }}>
+        {children}
       </div>
     </div>
   );

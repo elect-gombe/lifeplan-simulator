@@ -13,6 +13,14 @@ export interface DCReceiveMethod {
 
 export type LoanStructure = "single" | "pair"; // 単独ローン | ペアローン
 
+// 繰上返済エントリ
+export interface PrepaymentEntry {
+  age: number;
+  amountMan: number;
+  type: "shorten" | "reduce"; // 期間短縮型 | 返済額軽減型
+  target?: "self" | "spouse"; // ペアローン時: どちらのローンに充てるか（未設定=本人）
+}
+
 export interface PropertyParams {
   priceMan: number;         // 物件価格（万円）
   downPaymentMan: number;   // 頭金（万円）
@@ -30,6 +38,19 @@ export interface PropertyParams {
   pairRatio: number;               // ペアローン時の本人負担割合 (0-100%)
   deductionTarget: "self" | "spouse" | "both"; // 住宅ローン控除の対象
   danshinTarget: "self" | "spouse" | "both";   // 団信の対象
+  // Phase 1: 繰上返済
+  prepayments?: PrepaymentEntry[];
+  // Phase 2: 売却
+  saleAge?: number;           // 売却年齢
+  salePriceMan?: number;      // 売却価格（万円）。未設定時は購入価格×上昇率で計算
+  appreciationRate?: number;  // 年間価値変動率（%）
+  // Phase 4: 借換
+  refinance?: {
+    age: number;
+    newRate: number;
+    newLoanYears: number;
+    costMan: number; // 借換手数料（万円）
+  };
 }
 
 export interface InsuranceParams {
@@ -92,6 +113,24 @@ export interface NISAConfig {
 export interface BalancePolicy {
   cashReserveMonths: number;    // 生活防衛資金（月数）
   nisaPriority: boolean;        // 余剰はNISA優先
+  // Phase 8: 引出戦略のカスタマイズ
+  withdrawalOrder?: ("taxable" | "spouseNisa" | "selfNisa")[];
+}
+
+// Phase 5: 住み替え（リロケーション）
+export interface RelocationParams {
+  movingCostMan: number;               // 引越費用（万円）
+  newHousingType: "purchase" | "rent";
+  newPropertyParams?: PropertyParams;   // 新居購入時
+  newRentAnnualMan?: number;           // 賃貸時の年間家賃（万円）
+  newRentDurationYears?: number;       // 賃貸期間（年）
+}
+
+// Phase 6: 贈与税
+export interface GiftParams {
+  giftType: "calendar" | "settlement"; // 暦年課税 | 相続時精算課税
+  amountMan: number;
+  recipientRelation: "lineal" | "other"; // 直系尊属 | その他
 }
 
 export interface DeathParams {
@@ -134,6 +173,8 @@ export interface LifeEvent {
   carParams?: CarParams;
   deathParams?: DeathParams;
   insuranceParams?: InsuranceParams;
+  relocationParams?: RelocationParams;  // Phase 5: 住み替え
+  giftParams?: GiftParams;              // Phase 6: 贈与税
   disabled?: boolean;  // true=計算から除外（UIではグレーアウト表示）
 }
 
@@ -146,6 +187,8 @@ export interface EventYearCost {
   detail?: string;        // e.g. "残高2800万 × 0.7%"
   isPhaseChange?: boolean; // true if this is a phase transition (e.g. rate change, deduction end)
   phaseLabel?: string;     // e.g. "金利上昇 0.5%→1.5%"
+  selfAmount?: number;    // ペアローン等: 本人分（未設定=amount全額が本人）
+  spouseAmount?: number;  // ペアローン等: 配偶者分（未設定=0）
 }
 
 // Timeline sub-markers derived from structured events (for display)
@@ -218,6 +261,11 @@ export interface Scenario {
   // NISA / Balance policy
   nisa?: NISAConfig;
   balancePolicy?: BalancePolicy;
+  // Phase 3: 個別資産クラス利回り
+  dcReturnRate?: number;       // DC利回り（%）。未設定=グローバルrr
+  nisaReturnRate?: number;     // NISA利回り（%）。未設定=グローバルrr
+  taxableReturnRate?: number;  // 特定口座利回り（%）。未設定=グローバルrr
+  cashInterestRate?: number;   // 現金利率（%）。デフォルト0
   // UI state: section open/close (persisted in JSON)
   sectionOpen?: Record<string, boolean>;
 }
@@ -255,7 +303,18 @@ export interface MemberResult {
   furusatoDonation: number;
   takeHome: number;
   pensionIncome: number;
+  // 年金課税内訳（統合課税）
+  pensionDeduction: number;        // 公的年金等控除額
+  pensionTaxableIncome: number;    // 年金雑所得
+  pensionIncomeTax: number;        // 年金にかかる所得税（按分）
+  pensionResidentTax: number;      // 年金にかかる住民税（按分）
   dcAsset: number;
+  loanBalance: number;             // ローン残高（ペアローン時は個人分）
+  // DC受取（受取年のみ非0）
+  dcReceiveLumpSum: number;        // 一時金受取額
+  dcReceiveAnnuityAnnual: number;  // 年金年額
+  dcRetirementDeduction: number;   // 退職所得控除額
+  dcReceiveTax: number;            // 退職所得税
   nisaAsset: number;
   nisaCostBasis: number;
   nisaContribution: number;
@@ -300,7 +359,7 @@ export interface YearResult {
   survivorEmployeePension: number;
   survivorWidowSupplement: number;
   survivorIncomeProtection: number;
-  // Housing loan balance (for graph)
+  // Housing loan balance (for graph) — 世帯合計。個別は self/spouse.loanBalance
   loanBalance: number;
   // NISA / 特定口座 / Cash split (世帯合計)
   nisaContribution: number;
@@ -318,8 +377,13 @@ export interface YearResult {
   // Inheritance tax (death year)
   inheritanceTax: number;
   inheritanceEstate: number;
-  // DC/iDeCo receive tax (retirement)
+  // DC/iDeCo receive tax (retirement) — 世帯合計。個別は self/spouse.dcReceiveTax 等を参照
   dcReceiveTax: number;
+  // Property sale (Phase 2)
+  propertySaleProceeds: number;    // 売却代金（円）
+  propertyCapitalGainsTax: number; // 不動産譲渡所得税（円）
+  // Gift tax (Phase 6)
+  giftTax: number;
   // Active events & cost breakdown
   activeEvents: LifeEvent[];
   eventCostBreakdown: EventYearCost[];
@@ -410,6 +474,8 @@ export const EVENT_TYPES: Record<string, { label: string; icon: string; color: s
   travel:    { label: "旅行・趣味", icon: "✈️", color: "#14b8a6", defaultAnnual: 30,  defaultOnetime: 0,   defaultDuration: 0 },
   rent:      { label: "家賃",       icon: "🏢", color: "#64748b", defaultAnnual: 120, defaultOnetime: 0,   defaultDuration: 10 },
   nursing:   { label: "介護",       icon: "🏥", color: "#be185d", defaultAnnual: 84,  defaultOnetime: 0,   defaultDuration: 6 },
-  death:     { label: "死亡",       icon: "⚰️", color: "#1e293b", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
-  custom:    { label: "カスタム",   icon: "📌", color: "#78716c", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
+  death:       { label: "死亡",       icon: "⚰️", color: "#1e293b", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
+  relocation:  { label: "住み替え", icon: "🏡", color: "#0891b2", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
+  gift:        { label: "贈与",     icon: "🎁", color: "#a855f7", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
+  custom:      { label: "カスタム",   icon: "📌", color: "#78716c", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
 };

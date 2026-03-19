@@ -3,7 +3,7 @@ import { fmt, fmtMan } from "../lib/format";
 import type { ScenarioResult, BaseResult, YearResult, MemberResult } from "../lib/types";
 import { EVENT_TYPES } from "../lib/types";
 import { EXPENSE_CATS } from "./IncomeExpenseChart";
-import { BRACKETS } from "../lib/tax";
+import { BRACKETS, empDed } from "../lib/tax";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
 
@@ -364,103 +364,105 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
             <tbody>
               {/* ===== 収入 ===== */}
               <S bg="bg-emerald-50">■ 収入</S>
-              {yrs.some(yr => yr && (yr.self.gross > 0 || yr.spouse.gross > 0)) && (<>
-                <R l="給与収入" bold hint="キーフレーム×昇給率" graphFn={yr => yr.self.gross + yr.spouse.gross} fn={(yr, s) => s === "本人" ? `${Math.round(yr.grossMan)}万` : s === "配偶者" ? (yr.spouse.gross > 0 ? `${Math.round(yr.spouse.gross / 10000)}万` : "-") : `${Math.round(yr.grossMan + yr.spouse.gross / 10000)}万`} />
-                <CG id="inc_deductions" label="所得控除" color="#6b7280"
-                  graphFn={yr => yr.self.employeeDeduction + yr.self.socialInsuranceDeduction + yr.basicDeduction + yr.self.dependentDeduction + yr.spouseDeductionAmount + yr.self.dcIdecoDeduction + yr.self.lifeInsuranceDeductionAmount + yr.self.furusatoDeduction}
-                  fn={field(m => m.employeeDeduction + m.socialInsuranceDeduction + 480000 + m.dependentDeduction + m.dcIdecoDeduction + m.lifeInsuranceDeductionAmount + m.furusatoDeduction)} />
-                {openGroups.has("inc_deductions") && <>
-                  <R l="    給与所得控除" sub graphFn={yr => yr.self.employeeDeduction}
-                    hint={s0 ? `${m(s0.gross)}−DC${m(s0.dcIdecoDeduction)}=${m(s0.gross - s0.dcIdecoDeduction)} → 控除${m(s0.employeeDeduction)}` : "DC控除後の年収に応じた控除(55万〜195万)"}
-                    fn={field(m => m.employeeDeduction)} />
-                  <R l="    社会保険料控除" sub graphFn={yr => yr.self.socialInsuranceDeduction}
-                    hint={s0 ? (s0.siPension > 0
-                      ? `厚年${m(s0.siPension)}+健保${m(s0.siHealth)}${s0.siNursing > 0 ? `+介護${m(s0.siNursing)}` : ""}+雇用${m(s0.siEmployment)}=${m(s0.socialInsuranceDeduction)}`
-                      : `(${m(s0.gross)}−DC${m(s0.selfDCContribution)})×${sirPct}%=${m(s0.socialInsuranceDeduction)}`)
-                      : `社保料合計（所得控除）`}
-                    fn={field(m => m.socialInsuranceDeduction)} />
-                  <R l="    基礎控除" sub hint="一律48万円" fn={(yr, s) => s === "配偶者" ? yr.basicDeduction : s === "本人" ? yr.basicDeduction : yr.basicDeduction * 2} />
-                  {yrs.some(yr => yr && yr.self.dependentDeduction > 0) &&
-                    <R l="    扶養控除" sub hint="16-18歳:38万 19-22歳:63万(特定) ※世帯主集約" graphFn={yr => yr.self.dependentDeduction} fn={(yr, s) => {
-                      if (!hasSpouse) return yr.self.dependentDeduction || "-";
-                      if (s === "本人") return yr.self.dependentDeduction || "-";
-                      if (s === "配偶者") return "-";
-                      return yr.self.dependentDeduction || "-";
-                    }} />}
-                  {yrs.some(yr => yr && yr.spouseDeductionAmount > 0) &&
-                    <R l="    配偶者控除" sub graphFn={yr => yr.spouseDeductionAmount} hint={s0 && y0 && y0.spouseDeductionAmount > 0 ? `本人所得${m(s0.gross - s0.employeeDeduction)} 配偶者所得${m(y0.spouse.gross - y0.spouse.employeeDeduction)} → ${m(y0.spouseDeductionAmount)}` : "配偶者の所得に応じた控除(最大38万)"} fn={(yr, s) => {
-                      if (s === "配偶者") return "-";
-                      return yr.spouseDeductionAmount > 0 ? yr.spouseDeductionAmount : "-";
-                    }} />}
-                  {yrs.some(yr => yr && yr.self.dcIdecoDeduction > 0) &&
-                    <R l="    DC/iDeCo控除" sub hint="小規模企業共済等掛金控除(全額所得控除)" graphFn={yr => yr.self.dcIdecoDeduction} fn={field(m => m.dcIdecoDeduction)} />}
-                  {yrs.some(yr => yr && yr.self.lifeInsuranceDeductionAmount > 0) &&
-                    <R l="    生命保険料控除" sub hint={s0 && y0 && s0.lifeInsuranceDeductionAmount > 0 ? `保険料${m(y0.insurancePremiumTotal)}→控除${m(s0.lifeInsuranceDeductionAmount)}(上限4万)` : "年間保険料に応じた控除(新制度・上限4万円)"}
-                    fn={field(m => m.lifeInsuranceDeductionAmount)} />}
-                  {yrs.some(yr => yr && yr.self.furusatoDeduction > 0) &&
-                    <R l="    ふるさと納税控除" sub graphFn={yr => yr.self.furusatoDeduction} hint={s0 && s0.furusatoDeduction > 0 ? `寄付${m(s0.furusatoDeduction + 2000)}−自己負担2000=${m(s0.furusatoDeduction)}` : "寄付額−2000円"}
-                    fn={field(m => m.furusatoDeduction)} />}
-                </>}
-                <R l="  課税所得" sub bold graphFn={yr => yr.self.taxableIncome}
-                  hint={s0 ? `${m(s0.gross)}−${m(s0.employeeDeduction)}(給与)−${m(s0.socialInsuranceDeduction)}(社保)−48万(基礎)${s0.dependentDeduction > 0 ? `−${m(s0.dependentDeduction)}(扶養)` : ""}${y0 && y0.spouseDeductionAmount > 0 ? `−${m(y0.spouseDeductionAmount)}(配偶者)` : ""}−${m(s0.dcIdecoDeduction)}(DC)${s0.lifeInsuranceDeductionAmount > 0 ? `−${m(s0.lifeInsuranceDeductionAmount)}(生保)` : ""}${s0.furusatoDeduction > 0 ? `−${m(s0.furusatoDeduction)}(ふるさと)` : ""}=${m(s0.taxableIncome)}` : "収入−全所得控除"}
-                  fn={field(m => m.taxableIncome)} />
-                <R l="  最高税率" sub hint="累進税率5-45%+住民税10%" fn={(yr, s) => {
-                  const r = s === "配偶者" ? yr.spouse.marginalRate : s === "世帯" ? Math.max(yr.self.marginalRate, yr.spouse.marginalRate) : yr.self.marginalRate;
-                  return r > 0 ? `${r}%+住10%` : "-";
+              {yrs.some(yr => yr && (yr.self.gross > 0 || yr.spouse.gross > 0)) &&
+                <R l="給与収入" hint="キーフレーム×昇給率" graphFn={yr => yr.self.gross + yr.spouse.gross} fn={(yr, s) => s === "本人" ? `${Math.round(yr.grossMan)}万` : s === "配偶者" ? (yr.spouse.gross > 0 ? `${Math.round(yr.spouse.gross / 10000)}万` : "-") : `${Math.round(yr.grossMan + yr.spouse.gross / 10000)}万`} />}
+              {yrs.some(yr => yr && (yr.self.pensionIncome > 0 || yr.spouse.pensionIncome > 0)) &&
+                <R l="老齢年金" hint="基礎年金+厚生年金（繰上げ/繰下げ調整後）" graphFn={yr => yr.self.pensionIncome + yr.spouse.pensionIncome} fn={field(m => m.pensionIncome)} />}
+              {yrs.some(yr => yr && yr.pensionReduction > 0) &&
+                <R l="  在職老齢年金減額" sub neg hint="基本月額+総報酬月額>50万/月→超過額の1/2を厚生年金から支給停止" graphFn={yr => yr.pensionReduction} fn={household(yr => yr.pensionReduction)} />}
+
+              {/* ===== 課税・控除 ===== */}
+              <R l=" 課税所得" bold graphFn={yr => yr.self.taxableIncome + yr.spouse.taxableIncome}
+                hint="(給与所得+年金雑所得)−所得控除"
+                fn={field(m => m.taxableIncome)} />
+              <R l="  最高税率" sub hint="累進税率5-45%+住民税10%" fn={(yr, s) => {
+                const r = s === "配偶者" ? yr.spouse.marginalRate : s === "世帯" ? Math.max(yr.self.marginalRate, yr.spouse.marginalRate) : yr.self.marginalRate;
+                return r > 0 ? `${r}%+住10%` : "-";
+              }} />
+
+              {/* 所得控除の内訳（折りたたみ） */}
+              <CG id="inc_deductions" label="所得控除" color="#6b7280"
+                graphFn={yr => {
+                  const c = (mem: typeof yr.self) => (mem.gross > 0 ? mem.employeeDeduction + mem.socialInsuranceDeduction : 0) + mem.pensionDeduction + 480000 + mem.dependentDeduction + mem.dcIdecoDeduction + mem.lifeInsuranceDeductionAmount + mem.furusatoDeduction;
+                  return c(yr.self) + c(yr.spouse) + yr.spouseDeductionAmount;
+                }}
+                fn={(yr, s) => {
+                  const c = (mem: typeof yr.self, addSp: boolean) => {
+                    let t = 480000 + mem.dependentDeduction + mem.dcIdecoDeduction + mem.lifeInsuranceDeductionAmount + mem.furusatoDeduction;
+                    if (mem.gross > 0) t += mem.employeeDeduction + mem.socialInsuranceDeduction;
+                    if (mem.pensionDeduction > 0) t += mem.pensionDeduction;
+                    if (addSp) t += yr.spouseDeductionAmount;
+                    return t;
+                  };
+                  if (s === "本人") return c(yr.self, true) || "-";
+                  if (s === "配偶者") return c(yr.spouse, false) || "-";
+                  return (c(yr.self, true) + c(yr.spouse, false)) || "-";
                 }} />
-                <CG id="inc_tax" label="税金" color="#ef4444"
-                  graphFn={yr => yr.self.incomeTax + yr.self.residentTax + yr.spouse.incomeTax + yr.spouse.residentTax}
-                  fn={field(m => m.incomeTax + m.residentTax)} neg />
-                {openGroups.has("inc_tax") && <>
-                  <R l="    所得税" sub neg graphFn={yr => yr.self.incomeTax}
-                    hint={s0 ? `iTx(${m(s0.taxableIncome)})${s0.housingLoanDeductionIT > 0 ? `−HL控除${m(s0.housingLoanDeductionIT)}` : ""}=${m(s0.incomeTax)}` : "iTx(課税所得)"}
-                    fn={field(m => m.incomeTax)} />
-                  <R l="    住民税" sub neg graphFn={yr => yr.self.residentTax}
-                    hint={s0 ? `${m(s0.taxableIncome)}×10%${s0.housingLoanDeductionRT > 0 ? `−HL控除${m(s0.housingLoanDeductionRT)}` : ""}=${m(s0.residentTax)}` : "課税所得×10%"}
-                    fn={field(m => m.residentTax)} />
-                  {yrs.some(yr => yr && (yr.self.housingLoanDeductionAvail > 0 || yr.spouse.housingLoanDeductionAvail > 0)) && (<>
-                    <R l="      住宅ローン控除額" sub graphFn={yr => yr.self.housingLoanDeductionAvail + yr.spouse.housingLoanDeductionAvail}
-                      hint={s0 ? `残高×0.7% 上限35万/年(13年間)` : "残高×0.7% 上限35万"}
-                      fn={(yr, s) => {
-                        if (s === "本人") return yr.self.housingLoanDeductionAvail > 0 ? yr.self.housingLoanDeductionAvail : "-";
-                        if (s === "配偶者") return yr.spouse.housingLoanDeductionAvail > 0 ? yr.spouse.housingLoanDeductionAvail : "-";
-                        const total = yr.self.housingLoanDeductionAvail + yr.spouse.housingLoanDeductionAvail;
-                        return total > 0 ? total : "-";
-                      }} />
-                    <R l="      うち所得税から" sub hint="所得税額を上限に控除" graphFn={yr => yr.self.housingLoanDeductionIT}
-                      fn={field(m => m.housingLoanDeductionIT)} />
-                    <R l="      うち住民税から" sub hint="残額を住民税から(上限: 課税所得×5% 最大97,500円)" graphFn={yr => yr.self.housingLoanDeductionRT}
-                      fn={field(m => m.housingLoanDeductionRT)} />
-                  </>)}
-                </>}
-                <CG id="inc_si" label="社会保険料" color="#f59e0b"
-                  graphFn={yr => yr.self.socialInsurance + yr.spouse.socialInsurance}
-                  fn={field(m => m.socialInsurance)} neg />
-                {openGroups.has("inc_si") && <>
-                  {yrs.some(yr => yr && yr.self.siPension > 0) && (<>
-                    <R l="    厚生年金" sub hint="9.15%(被保険者負担) 月額報酬65万上限" graphFn={yr => yr.self.siPension} fn={field(m => m.siPension)} />
-                    <R l="    健康保険" sub hint="組合により異なる(協会けんぽ全国平均~5%)" graphFn={yr => yr.self.siHealth} fn={field(m => m.siHealth)} />
-                    {yrs.some(yr => yr && yr.self.siNursing > 0) &&
-                      <R l="    介護保険" sub hint="40歳以上65歳未満のみ" graphFn={yr => yr.self.siNursing} fn={field(m => m.siNursing)} />}
-                    <R l="    雇用+子育支援" sub hint="雇用0.6%+子ども子育て支援金" graphFn={yr => yr.self.siEmployment + yr.self.siChildSupport} fn={(yr, s) => {
-                      const mem = s === "配偶者" ? yr.spouse : yr.self;
-                      const v = mem.siEmployment + mem.siChildSupport;
-                      if (s === "世帯") { const t = yr.self.siEmployment + yr.self.siChildSupport + yr.spouse.siEmployment + yr.spouse.siChildSupport; return t || "-"; }
-                      return v || "-";
+              {openGroups.has("inc_deductions") && <>
+                {yrs.some(yr => yr && (yr.self.employeeDeduction > 0 || yr.spouse.employeeDeduction > 0)) &&
+                  <R l="    給与所得控除" sub graphFn={yr => yr.self.employeeDeduction + yr.spouse.employeeDeduction} fn={field(m => m.employeeDeduction)} />}
+                {yrs.some(yr => yr && (yr.self.socialInsuranceDeduction > 0 || yr.spouse.socialInsuranceDeduction > 0)) &&
+                  <R l="    社会保険料控除" sub graphFn={yr => yr.self.socialInsuranceDeduction + yr.spouse.socialInsuranceDeduction} fn={field(m => m.socialInsuranceDeduction)} />}
+                {yrs.some(yr => yr && (yr.self.pensionDeduction > 0 || yr.spouse.pensionDeduction > 0)) &&
+                  <R l="    公的年金等控除" sub hint="65歳以上:110万〜 / 65歳未満:60万〜" graphFn={yr => yr.self.pensionDeduction + yr.spouse.pensionDeduction} fn={field(m => m.pensionDeduction)} />}
+                <R l="    基礎控除" sub fn={(yr, s) => s === "世帯" && hasSpouse ? 480000 * 2 : 480000} />
+                {yrs.some(yr => yr && yr.spouseDeductionAmount > 0) &&
+                  <R l="    配偶者控除" sub
+                    hint={(() => { const yr = yrs[0]; if (!yr) return ""; const spSalInc = yr.spouse.gross > 0 ? yr.spouse.gross - empDed(yr.spouse.gross) : 0; return `配偶者合計所得${m(spSalInc + yr.spouse.pensionTaxableIncome)}`; })()}
+                    graphFn={yr => yr.spouseDeductionAmount} fn={(yr, s) => s === "配偶者" ? "-" : yr.spouseDeductionAmount || "-"} />}
+                {yrs.some(yr => yr && (yr.self.dependentDeduction > 0 || yr.spouse.dependentDeduction > 0)) &&
+                  <R l="    扶養控除" sub graphFn={yr => yr.self.dependentDeduction + yr.spouse.dependentDeduction} fn={field(m => m.dependentDeduction)} />}
+                {yrs.some(yr => yr && (yr.self.dcIdecoDeduction > 0 || yr.spouse.dcIdecoDeduction > 0)) &&
+                  <R l="    DC/iDeCo控除" sub graphFn={yr => yr.self.dcIdecoDeduction + yr.spouse.dcIdecoDeduction} fn={field(m => m.dcIdecoDeduction)} />}
+                {yrs.some(yr => yr && (yr.self.lifeInsuranceDeductionAmount > 0 || yr.spouse.lifeInsuranceDeductionAmount > 0)) &&
+                  <R l="    生命保険料控除" sub graphFn={yr => yr.self.lifeInsuranceDeductionAmount + yr.spouse.lifeInsuranceDeductionAmount} fn={field(m => m.lifeInsuranceDeductionAmount)} />}
+                {yrs.some(yr => yr && (yr.self.furusatoDeduction > 0 || yr.spouse.furusatoDeduction > 0)) &&
+                  <R l="    ふるさと納税控除" sub graphFn={yr => yr.self.furusatoDeduction + yr.spouse.furusatoDeduction} fn={field(m => m.furusatoDeduction)} />}
+              </>}
+
+              {/* 税金（所得税+住民税） */}
+              <CG id="inc_tax" label="税金" color="#ef4444"
+                graphFn={yr => yr.self.incomeTax + yr.self.residentTax + yr.spouse.incomeTax + yr.spouse.residentTax}
+                fn={field(m => m.incomeTax + m.residentTax)} neg />
+              {openGroups.has("inc_tax") && <>
+                <R l="    所得税" sub neg graphFn={yr => yr.self.incomeTax + yr.spouse.incomeTax}
+                  hint="給与+年金の合算所得に累進課税"
+                  fn={field(m => m.incomeTax)} />
+                <R l="    住民税" sub neg graphFn={yr => yr.self.residentTax + yr.spouse.residentTax}
+                  hint="課税所得×10%"
+                  fn={field(m => m.residentTax)} />
+                {yrs.some(yr => yr && (yr.self.housingLoanDeductionAvail > 0 || yr.spouse.housingLoanDeductionAvail > 0)) && (<>
+                  <R l="      住宅ローン控除" sub graphFn={yr => yr.self.housingLoanDeductionAvail + yr.spouse.housingLoanDeductionAvail}
+                    hint="残高×0.7% 上限35万/年(13年間) 税額控除"
+                    fn={(yr, s) => {
+                      if (s === "本人") return yr.self.housingLoanDeductionAvail > 0 ? yr.self.housingLoanDeductionAvail : "-";
+                      if (s === "配偶者") return yr.spouse.housingLoanDeductionAvail > 0 ? yr.spouse.housingLoanDeductionAvail : "-";
+                      const total = yr.self.housingLoanDeductionAvail + yr.spouse.housingLoanDeductionAvail;
+                      return total > 0 ? total : "-";
                     }} />
-                  </>)}
-                </>}
-              </>)}
-              {yrs.some(yr => yr && (yr.self.pensionIncome > 0 || yr.spouse.pensionIncome > 0)) && (<>
-                <CG id="inc_pension" label="老齢年金" color="#16a34a"
-                  graphFn={yr => yr.self.pensionIncome + yr.spouse.pensionIncome}
-                  fn={field(m => m.pensionIncome)} />
-                {openGroups.has("inc_pension") && <>
-                  {yrs.some(yr => yr && yr.pensionReduction > 0) &&
-                    <R l="    在職老齢年金減額" sub neg hint="基本月額+総報酬月額>50万/月→超過額の1/2を厚生年金から支給停止" graphFn={yr => yr.pensionReduction} fn={household(yr => yr.pensionReduction)} />}
-                  <R l="    年金課税" sub neg hint="公的年金等控除後の所得税+住民税" graphFn={yr => yr.pensionTax} fn={household(yr => yr.pensionTax)} />
-                </>}
-              </>)}
+                </>)}
+              </>}
+
+              {/* 社会保険料 */}
+              <CG id="inc_si" label="社会保険料" color="#f59e0b"
+                graphFn={yr => yr.self.socialInsurance + yr.spouse.socialInsurance}
+                fn={field(m => m.socialInsurance)} neg />
+              {openGroups.has("inc_si") && <>
+                {yrs.some(yr => yr && (yr.self.siPension > 0 || yr.spouse.siPension > 0)) &&
+                  <R l="    厚生年金" sub hint="9.15%(被保険者負担) 月額報酬65万上限" graphFn={yr => yr.self.siPension + yr.spouse.siPension} fn={field(m => m.siPension)} />}
+                {yrs.some(yr => yr && (yr.self.siHealth > 0 || yr.spouse.siHealth > 0)) &&
+                  <R l="    健保/国保" sub hint="在職中:協会けんぽ等 退職後:国民健康保険 75歳〜:後期高齢者医療" graphFn={yr => yr.self.siHealth + yr.spouse.siHealth} fn={field(m => m.siHealth)} />}
+                {yrs.some(yr => yr && (yr.self.siNursing > 0 || yr.spouse.siNursing > 0)) &&
+                  <R l="    介護保険" sub hint="40-64歳:第2号(給与ベース) 65歳〜:第1号(年金天引き)" graphFn={yr => yr.self.siNursing + yr.spouse.siNursing} fn={field(m => m.siNursing)} />}
+                {yrs.some(yr => yr && (yr.self.siEmployment > 0 || yr.spouse.siEmployment > 0)) &&
+                  <R l="    雇用+子育支援" sub graphFn={yr => yr.self.siEmployment + yr.self.siChildSupport + yr.spouse.siEmployment + yr.spouse.siChildSupport}
+                    fn={(yr, s) => {
+                      const v = (mem: typeof yr.self) => mem.siEmployment + mem.siChildSupport;
+                      if (s === "本人") return v(yr.self) || "-";
+                      if (s === "配偶者") return v(yr.spouse) || "-";
+                      return (v(yr.self) + v(yr.spouse)) || "-";
+                    }} />}
+              </>}
               {/* 遺族年金・保険金（死亡後） */}
               {yrs.some(yr => yr && yr.survivorIncome > 0) && <>
                 <CG id="inc_survivor" label="遺族年金・保険" color="#8b5cf6"
@@ -535,10 +537,18 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
               </>)}
 
               {/* ===== 退職金・相続 ===== */}
-              {yrs.some(yr => yr && (yr.dcReceiveTax > 0 || yr.inheritanceTax > 0 || yr.inheritanceEstate > 0)) && <>
-                <S bg="bg-orange-50">■ 退職金・相続</S>
-                {yrs.some(yr => yr && yr.dcReceiveTax > 0) &&
-                  <R l="DC受取時税金" neg bold hint="退職所得税: (DC−退職所得控除)×1/2に課税" fn={(yr, s) => (s === "世帯" || !hasSpouse) ? (yr.dcReceiveTax > 0 ? yr.dcReceiveTax : "-") : "-"} />}
+              {yrs.some(yr => yr && (yr.dcReceiveTax > 0 || yr.dcReceiveLumpSum > 0 || yr.dcReceiveAnnuityAnnual > 0 || yr.inheritanceTax > 0 || yr.inheritanceEstate > 0)) && <>
+                <S bg="bg-orange-50">■ 退職金・相続（分離課税）</S>
+                {yrs.some(yr => yr && (yr.self.dcReceiveLumpSum > 0 || yr.spouse.dcReceiveLumpSum > 0 || yr.self.dcReceiveAnnuityAnnual > 0 || yr.spouse.dcReceiveAnnuityAnnual > 0)) && <>
+                  {yrs.some(yr => yr && (yr.self.dcReceiveLumpSum > 0 || yr.spouse.dcReceiveLumpSum > 0)) &&
+                    <R l="DC一時金受取" bold hint="DC/iDeCo資産→現金化" fn={field(m => m.dcReceiveLumpSum)} />}
+                  {yrs.some(yr => yr && (yr.self.dcReceiveAnnuityAnnual > 0 || yr.spouse.dcReceiveAnnuityAnnual > 0)) &&
+                    <R l="DC年金（年額）" bold hint="DC/iDeCo資産を年金形式で分割受取" fn={field(m => m.dcReceiveAnnuityAnnual)} />}
+                  {yrs.some(yr => yr && (yr.self.dcRetirementDeduction > 0 || yr.spouse.dcRetirementDeduction > 0)) &&
+                    <R l="  退職所得控除" sub hint="20年以下:40万×年数 20年超:800万+70万×(年数−20)" fn={field(m => m.dcRetirementDeduction)} />}
+                  {yrs.some(yr => yr && yr.dcReceiveTax > 0) &&
+                    <R l="  退職所得税" sub neg hint="(一時金−控除)×1/2に累進課税（分離課税）" fn={field(m => m.dcReceiveTax)} />}
+                </>}
                 {yrs.some(yr => yr && yr.inheritanceEstate > 0) &&
                   <R l="  課税遺産総額" sub hint="遺産−基礎控除(3000万+600万×法定相続人)" fn={(yr, s) => (s === "世帯" || !hasSpouse) ? (yr.inheritanceEstate > 0 ? yr.inheritanceEstate : "-") : "-"} />}
                 {yrs.some(yr => yr && yr.inheritanceTax > 0) &&
@@ -559,15 +569,34 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
                 return <React.Fragment key={cat.key}>
                   <CG id={`exp_${cat.key}`} label={cat.label} color={cat.color} count={cat.items.length}
                     graphFn={catTotal} neg
-                    fn={(yr, s) => { if (s === "配偶者") return "-"; const v = catTotal(yr); return v !== 0 ? v : "-"; }} />
+                    fn={(yr, s) => {
+                      if (s === "本人") {
+                        let total = 0;
+                        for (const l of cat.items) { const c = yr.eventCostBreakdown.find(x => x.label === l); if (c) total += c.selfAmount ?? c.amount; }
+                        return total !== 0 ? total : "-";
+                      }
+                      if (s === "配偶者") {
+                        let total = 0;
+                        for (const l of cat.items) { const c = yr.eventCostBreakdown.find(x => x.label === l); if (c) total += c.spouseAmount ?? 0; }
+                        return total !== 0 ? total : "-";
+                      }
+                      const v = catTotal(yr); return v !== 0 ? v : "-";
+                    }} />
                   {openGroups.has(`exp_${cat.key}`) && cat.items.map(label => {
                     const detail = (() => { for (const yr of yrs) { if (!yr) continue; const it = yr.eventCostBreakdown.find(c => c.label === label); if (it?.detail) return it.detail; } return undefined; })();
                     return <R key={label} l={`    ${label}`} sub hint={detail}
                       graphFn={yr => yr.eventCostBreakdown.find(c => c.label === label)?.amount ?? 0}
                       fn={(yr, s) => {
-                        if (s === "配偶者") return "-";
                         const item = yr.eventCostBreakdown.find(c => c.label === label);
-                        return item ? item.amount : 0;
+                        if (!item) return "-";
+                        // selfAmount/spouseAmount がある場合（ペアローン等）: カラム振り分け
+                        if (item.selfAmount != null || item.spouseAmount != null) {
+                          if (s === "本人") return item.selfAmount ?? item.amount;
+                          if (s === "配偶者") return item.spouseAmount ?? 0;
+                          return item.amount; // 世帯=合計
+                        }
+                        if (s === "配偶者") return "-";
+                        return item.amount !== 0 ? item.amount : "-";
                       }} />;
                   })}
                 </React.Fragment>;
@@ -628,7 +657,13 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
               </>) : (
                 <R l="貯蓄" hint="前年残高×(1+利回り)+年間CF" graphFn={yr => yr.cumulativeSavings} fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(Math.max(yr.cumulativeSavings, 0)) : "-"} />
               )}
-              {yrs.some(yr => yr && yr.loanBalance > 0) && <R l="ローン残高" neg hint="元利/元金均等の残高計算" graphFn={yr => -yr.loanBalance} fn={(yr, s) => (s === "世帯" || !hasSpouse) && yr.loanBalance > 0 ? -yr.loanBalance : "-"} />}
+              {yrs.some(yr => yr && yr.loanBalance > 0) &&
+                <R l="ローン残高" neg hint="繰上返済・借換反映済み" graphFn={yr => -yr.loanBalance}
+                  fn={(yr, s) => {
+                    if (s === "本人") return yr.self.loanBalance > 0 ? -yr.self.loanBalance : "-";
+                    if (s === "配偶者") return yr.spouse.loanBalance > 0 ? -yr.spouse.loanBalance : "-";
+                    return yr.loanBalance > 0 ? -yr.loanBalance : "-";
+                  }} />}
               <R l="総資産" bold bg="bg-teal-50" hint="DC+NISA+特定(税引後)+現金" graphFn={yr => yr.totalWealth} fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.totalWealth) : "-"} />
             </tbody>
           </table>

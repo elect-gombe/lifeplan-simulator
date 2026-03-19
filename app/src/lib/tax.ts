@@ -240,3 +240,103 @@ export function annuityTax(annualAmount: number, age: number): number {
   const rt = Math.floor(afterBasic * 0.1);
   return it + rt;
 }
+
+// ===== Phase 2: 不動産譲渡所得税 =====
+// 参考: 国税庁 No.3302, No.3208
+// 短期（5年以下）: 39.63%（所得税30.63% + 住民税9%）
+// 長期（5年超）: 20.315%（所得税15.315% + 住民税5%）
+// 居住用3000万円特別控除
+export interface PropertyCapitalGainsTaxResult {
+  gain: number;             // 譲渡所得（売却価格−取得費−譲渡費用）
+  specialDeduction: number; // 特別控除（3000万円）
+  taxableGain: number;      // 課税譲渡所得
+  tax: number;              // 譲渡所得税
+  isLongTerm: boolean;
+}
+
+export function calcPropertyCapitalGainsTax(
+  purchasePrice: number,    // 取得費（円）
+  salePrice: number,        // 売却価格（円）
+  yearsSince: number,       // 所有期間（年）
+  isResidence: boolean = true, // 居住用
+): PropertyCapitalGainsTaxResult {
+  // 取得費不明の場合は売却価格の5%を概算取得費とする（ここでは実購入価格を使用）
+  // 譲渡費用: 仲介手数料3%+6万円+印紙税（概算で売却価格の4%）
+  const transferCost = Math.round(salePrice * 0.04);
+  const gain = salePrice - purchasePrice - transferCost;
+  if (gain <= 0) return { gain, specialDeduction: 0, taxableGain: 0, tax: 0, isLongTerm: yearsSince > 5 };
+
+  const isLongTerm = yearsSince > 5;
+  const specialDeduction = isResidence ? Math.min(gain, 30000000) : 0;
+  const taxableGain = Math.max(gain - specialDeduction, 0);
+
+  // 税率
+  const taxRate = isLongTerm ? 0.20315 : 0.3963;
+  const tax = Math.round(taxableGain * taxRate);
+
+  return { gain, specialDeduction, taxableGain, tax, isLongTerm };
+}
+
+// ===== Phase 6: 贈与税 =====
+// 参考: 国税庁 No.4408, No.4103
+export interface GiftTaxResult {
+  taxableAmount: number;    // 課税価格
+  deduction: number;        // 控除額
+  tax: number;              // 贈与税
+  detail: string;
+}
+
+// 暦年課税の税率テーブル（一般贈与）
+const GIFT_TAX_GENERAL: [number, number, number][] = [
+  // [上限, 税率%, 控除額]
+  [2000000, 10, 0],
+  [3000000, 15, 100000],
+  [4000000, 20, 250000],
+  [6000000, 30, 650000],
+  [10000000, 40, 1250000],
+  [15000000, 45, 1750000],
+  [30000000, 50, 2500000],
+  [9e15, 55, 4000000],
+];
+
+// 暦年課税の税率テーブル（直系尊属からの特例贈与）
+const GIFT_TAX_LINEAL: [number, number, number][] = [
+  [2000000, 10, 0],
+  [4000000, 15, 100000],
+  [6000000, 20, 300000],
+  [10000000, 30, 900000],
+  [15000000, 40, 1900000],
+  [30000000, 45, 2650000],
+  [45000000, 50, 4150000],
+  [9e15, 55, 6400000],
+];
+
+export function calcGiftTax(
+  amountYen: number,
+  giftType: "calendar" | "settlement",
+  recipientRelation: "lineal" | "other",
+): GiftTaxResult {
+  if (giftType === "settlement") {
+    // 相続時精算課税: 累積2500万円控除、超過分20%
+    const deduction = Math.min(amountYen, 25000000);
+    const taxableAmount = Math.max(amountYen - deduction, 0);
+    const tax = Math.round(taxableAmount * 0.20);
+    return { taxableAmount, deduction, tax, detail: `精算課税: 控除${Math.round(deduction / 10000)}万 超過${Math.round(taxableAmount / 10000)}万×20%` };
+  }
+
+  // 暦年課税: 年110万円控除
+  const basicDeduction = 1100000;
+  const taxableAmount = Math.max(amountYen - basicDeduction, 0);
+  if (taxableAmount <= 0) return { taxableAmount: 0, deduction: basicDeduction, tax: 0, detail: "暦年課税: 基礎控除内(非課税)" };
+
+  const table = recipientRelation === "lineal" ? GIFT_TAX_LINEAL : GIFT_TAX_GENERAL;
+  let tax = 0;
+  for (const [limit, rate, ded] of table) {
+    if (taxableAmount <= limit) {
+      tax = Math.round(taxableAmount * rate / 100 - ded);
+      break;
+    }
+  }
+  const relLabel = recipientRelation === "lineal" ? "直系尊属" : "一般";
+  return { taxableAmount, deduction: basicDeduction, tax, detail: `暦年課税(${relLabel}): ${Math.round(taxableAmount / 10000)}万×税率 = ${Math.round(tax / 10000)}万` };
+}

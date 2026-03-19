@@ -17,19 +17,19 @@ const LAYERS = [
 type Rates = { it: number; rt: number; pension: number; health: number; nursing: number; employ: number; dc: number; total: number; take: number };
 
 function ratesOf(m: MemberResult): Rates {
-  const g = m.gross;
-  if (g <= 0) return { it: 0, rt: 0, pension: 0, health: 0, nursing: 0, employ: 0, dc: 0, total: 0, take: 0 };
-  const it = m.incomeTax / g * 100;
-  const rt = m.residentTax / g * 100;
-  // 社保内訳がある場合（siPension > 0）はそれを使う、なければフラット
+  // 総収入 = 給与 + 年金（分母として使用）
+  const totalIncome = m.gross + m.pensionIncome;
+  if (totalIncome <= 0) return { it: 0, rt: 0, pension: 0, health: 0, nursing: 0, employ: 0, dc: 0, total: 0, take: 0 };
+  const it = m.incomeTax / totalIncome * 100;
+  const rt = m.residentTax / totalIncome * 100;
   const hasSIBreakdown = m.siPension > 0;
-  const pension = hasSIBreakdown ? m.siPension / g * 100 : m.socialInsurance / g * 100;
-  const health = hasSIBreakdown ? m.siHealth / g * 100 : 0;
-  const nursing = hasSIBreakdown ? m.siNursing / g * 100 : 0;
-  const employ = hasSIBreakdown ? (m.siEmployment + m.siChildSupport) / g * 100 : 0;
-  const dc = (m.selfDCContribution + m.idecoContribution) / g * 100;
+  const pension = hasSIBreakdown ? m.siPension / totalIncome * 100 : m.socialInsurance / totalIncome * 100;
+  const health = hasSIBreakdown ? m.siHealth / totalIncome * 100 : 0;
+  const nursing = hasSIBreakdown ? m.siNursing / totalIncome * 100 : 0;
+  const employ = hasSIBreakdown ? (m.siEmployment + m.siChildSupport) / totalIncome * 100 : 0;
+  const dc = (m.selfDCContribution + m.idecoContribution) / totalIncome * 100;
   const total = it + rt + pension + health + nursing + employ + dc;
-  return { it, rt, pension, health, nursing, employ, dc, total, take: m.takeHome / g * 100 };
+  return { it, rt, pension, health, nursing, employ, dc, total, take: m.takeHome / totalIncome * 100 };
 }
 
 function maxTotalRate(m: MemberResult): number {
@@ -49,7 +49,6 @@ function SingleChart({ result, color, label, yMax, member, hoverAge, onHoverAge 
   if (!n) return null;
 
   const rates = yrs.map(yr => ratesOf(getMember(yr, member)));
-  // 収入がある年が1つもなければ表示しない
   if (rates.every(r => r.total === 0)) return null;
 
   const W = 500, H = 150, pL = 38, pR = 10, pT = 8, pB = 22;
@@ -76,6 +75,7 @@ function SingleChart({ result, color, label, yMax, member, hoverAge, onHoverAge 
 
   const takeLine = rates.map((r, i) => `${i === 0 ? "M" : "L"}${xAt(i)},${yAt(r.take)}`).join(" ");
   const h = hoverIdx != null ? { yr: yrs[hoverIdx], m: getMember(yrs[hoverIdx], member), r: rates[hoverIdx] } : null;
+  const hTotalIncome = h ? h.m.gross + h.m.pensionIncome : 0;
 
   return (
     <div>
@@ -103,16 +103,15 @@ function SingleChart({ result, color, label, yMax, member, hoverAge, onHoverAge 
           <line x1={xAt(hoverIdx)} y1={pT} x2={xAt(hoverIdx)} y2={pT + cH} stroke="#475569" strokeWidth={1} strokeDasharray="2,2" />
         )}
       </svg>
-      {h && h.m.gross > 0 && (
+      {h && hTotalIncome > 0 && (
         <div className="rounded bg-gray-50 border p-1 text-[10px] flex flex-wrap gap-x-2 mt-0.5">
-          <span className="font-bold">{h.yr.age}歳 {fmtMan(h.m.gross)}</span>
+          <span className="font-bold">{h.yr.age}歳 {fmtMan(hTotalIncome)}{h.m.pensionIncome > 0 && h.m.gross > 0 ? `(給与${fmtMan(h.m.gross)}+年金${fmtMan(h.m.pensionIncome)})` : h.m.pensionIncome > 0 ? "(年金)" : ""}</span>
           <span className="text-red-500">所得税{h.r.it.toFixed(1)}%</span>
           <span className="text-orange-500">住民税{h.r.rt.toFixed(1)}%</span>
           {h.r.pension > 0 && <span style={{ color: "#eab308" }}>厚年{h.r.pension.toFixed(1)}%</span>}
-          {h.r.health > 0 && <span style={{ color: "#f59e0b" }}>健保{h.r.health.toFixed(1)}%</span>}
+          {h.r.health > 0 && <span style={{ color: "#f59e0b" }}>{h.m.gross > 0 ? "健保" : h.yr.age >= 75 ? "後期高齢" : "国保"}{h.r.health.toFixed(1)}%</span>}
           {h.r.nursing > 0 && <span style={{ color: "#d97706" }}>介護{h.r.nursing.toFixed(1)}%</span>}
           {h.r.employ > 0 && <span style={{ color: "#b45309" }}>雇用{h.r.employ.toFixed(1)}%</span>}
-          {h.r.pension === 0 && <span className="text-yellow-600">社保{(h.m.socialInsurance / h.m.gross * 100).toFixed(1)}%</span>}
           {h.r.dc > 0 && <span className="text-blue-500">DC{h.r.dc.toFixed(1)}%</span>}
           <span className="font-bold text-red-700">負担{h.r.total.toFixed(1)}%</span>
           <span className="font-bold text-green-600">手取{h.r.take.toFixed(1)}%</span>
@@ -127,7 +126,6 @@ export function TaxRateCharts({ results, hoverAge, onHoverAge }: { results: Scen
 
   const hasSpouse = results.some(r => r.scenario.spouse?.enabled);
 
-  // 全シナリオ・全メンバー共通のY軸スケール
   const yMax = Math.ceil(Math.max(
     ...results.flatMap(r => r.yearResults.flatMap(yr => [maxTotalRate(yr.self), maxTotalRate(yr.spouse)])),
     30,
