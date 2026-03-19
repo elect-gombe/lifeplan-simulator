@@ -820,9 +820,16 @@ function calcSocialInsurance(gross: number, age: number, siParams?: SocialInsura
   // 在職中: 給与ベースで社保計算
   if (gross > 0) {
     if (!siParams) {
+      // レガシーモード: フラット率だが内訳も概算で算出
       const rate = (fallbackSirPct ?? 15.75) / 100;
       const total = Math.round(gross * rate);
-      return { total, pension: 0, health: 0, nursing: 0, employment: 0, childSupport: 0, ratePct: rate * 100 };
+      const monthlyGross = gross / 12;
+      const pensionBase = Math.min(monthlyGross, PENSION_MONTHLY_CAP);
+      const estPension = Math.round(pensionBase * (PENSION_INSURANCE_RATE / 100) * 12);
+      const estHealth = Math.round(gross * 0.05); // 協会けんぽ概算5%
+      const estNursing = (age >= NURSING_INSURANCE_MIN_AGE && age < NURSING_INSURANCE_MAX_AGE) ? Math.round(gross * 0.008) : 0;
+      const estEmploy = Math.round(gross * EMPLOYMENT_INSURANCE_RATE / 100);
+      return { total, pension: estPension, health: estHealth, nursing: estNursing, employment: estEmploy, childSupport: 0, ratePct: rate * 100 };
     }
 
     const monthlyGross = gross / 12;

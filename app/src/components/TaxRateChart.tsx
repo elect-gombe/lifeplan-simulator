@@ -22,7 +22,7 @@ function ratesOf(m: MemberResult): Rates {
   if (totalIncome <= 0) return { it: 0, rt: 0, pension: 0, health: 0, nursing: 0, employ: 0, dc: 0, total: 0, take: 0 };
   const it = m.incomeTax / totalIncome * 100;
   const rt = m.residentTax / totalIncome * 100;
-  const hasSIBreakdown = m.siPension > 0;
+  const hasSIBreakdown = m.siPension > 0 || m.siHealth > 0 || m.siNursing > 0;
   const pension = hasSIBreakdown ? m.siPension / totalIncome * 100 : m.socialInsurance / totalIncome * 100;
   const health = hasSIBreakdown ? m.siHealth / totalIncome * 100 : 0;
   const nursing = hasSIBreakdown ? m.siNursing / totalIncome * 100 : 0;
