@@ -94,73 +94,9 @@ function exportJSON(state: SavedState) {
   a.click(); URL.revokeObjectURL(url);
 }
 
-// デフォルト値除去（URL圧縮前に適用。読み込み時にmigrateScenarioで復元）
-function stripDefaults(state: SavedState): any {
-  const d: any = { ...state };
-  if (d.rr === 4) delete d.rr;
-  if (d.hasRet === false) delete d.hasRet;
-  if (d.retAmt === 10000000) delete d.retAmt;
-  if (d.PY === 30) delete d.PY;
-  if (d.sirPct === 15.75) delete d.sirPct;
-  if (d.inflationRate === 1) delete d.inflationRate;
-  d.scenarios = state.scenarios.map(sc => {
-    const s: any = { ...sc };
-    // Empty arrays
-    for (const k of ["excludedBaseEventIds", "disabledBaseEventIds", "overrideTracks", "spouseOverrideTracks", "overrideSettings"] as const) {
-      if (s[k] && Array.isArray(s[k]) && s[k].length === 0) delete s[k];
-    }
-    // Scalar defaults
-    if (s.salaryGrowthRate === 2) delete s.salaryGrowthRate;
-    if (s.hasFurusato === true) delete s.hasFurusato;
-    if (s.dependentDeductionHolder === "self") delete s.dependentDeductionHolder;
-    if (s.pensionStartAge === 65) delete s.pensionStartAge;
-    if (s.pensionWorkStartAge === 22) delete s.pensionWorkStartAge;
-    if (s.years === 35) delete s.years;
-    if (s.selfGender === "male") delete s.selfGender;
-    // DC receive method default
-    const drm = s.dcReceiveMethod;
-    if (drm && drm.type === "lump_sum" && drm.annuityYears === 20 && drm.annuityStartAge === 65 && drm.combinedLumpSumRatio === 50) delete s.dcReceiveMethod;
-    // NISA disabled default
-    if (s.nisa && !s.nisa.enabled) delete s.nisa;
-    // Balance policy default
-    const bp = s.balancePolicy;
-    if (bp && bp.cashReserveMonths === 6 && bp.nisaPriority === true) delete s.balancePolicy;
-    // Spouse defaults
-    const sp = s.spouse;
-    if (sp) {
-      if (!sp.enabled && (!sp.incomeKF || sp.incomeKF.length === 0)) {
-        delete s.spouse;
-      } else {
-        s.spouse = { ...sp };
-        if (s.spouse.salaryGrowthRate === 2) delete s.spouse.salaryGrowthRate;
-        if (s.spouse.sirPct === 15.75) delete s.spouse.sirPct;
-        if (s.spouse.hasFurusato === true) delete s.spouse.hasFurusato;
-        if (s.spouse.pensionStartAge === 65) delete s.spouse.pensionStartAge;
-        if (s.spouse.pensionWorkStartAge === 22) delete s.spouse.pensionWorkStartAge;
-        if (s.spouse.retirementAge === 65) delete s.spouse.retirementAge;
-        for (const k of ["expenseKF", "dcTotalKF", "companyDCKF", "idecoKF"] as const) {
-          if (s.spouse[k] && s.spouse[k].length === 0) delete s.spouse[k];
-        }
-      }
-    }
-    // Events: strip zero fields
-    if (s.events) {
-      s.events = s.events.map((e: any) => {
-        const ev = { ...e };
-        if (ev.oneTimeCostMan === 0) delete ev.oneTimeCostMan;
-        if (ev.annualCostMan === 0) delete ev.annualCostMan;
-        if (ev.durationYears === 0) delete ev.durationYears;
-        return ev;
-      });
-    }
-    return s;
-  });
-  return d;
-}
-
 // gzip + base64 encode/decode for URL sharing
 async function encodeStateToURL(state: SavedState): Promise<string> {
-  const json = JSON.stringify(stripDefaults(state));
+  const json = JSON.stringify(state);
   const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
   const compressed = await new Response(stream).arrayBuffer();
   const base64 = btoa(String.fromCharCode(...new Uint8Array(compressed)));
@@ -297,13 +233,14 @@ export default function App() {
   useEffect(() => {
     const hash = window.location.hash.slice(1);
     if (!hash) return;
+    skipPushRef.current = true; // 初回ロードでpushしない
     decodeStateFromURL(hash).then(data => {
       if (!data) return;
       setRR(data.rr); setHasRet(data.hasRet); setRetAmt(data.retAmt);
       setPY(data.PY); setSirPct(data.sirPct); setInflationRate(data.inflationRate);
       if (data.scenarios.length) setScenarios(data.scenarios);
     });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentState: SavedState = useMemo(() => ({
     rr, hasRet, retAmt, PY, sirPct, inflationRate, scenarios,
@@ -311,14 +248,62 @@ export default function App() {
 
   useEffect(() => { saveToStorage(currentState); }, [currentState]);
 
-  // 設定変更時にURLハッシュも更新（共有リンクが常に最新を反映）
+  // URL履歴管理:
+  // 変更開始時にpushState(変更前)で戻り先を確保 → 以降はreplaceStateで現在を更新
+  // Back → pushされた変更前のエントリに戻る
   const [urlLength, setUrlLength] = useState(0);
+  const committedHashRef = useRef<string>(window.location.hash.slice(1));
+  const dirtyRef = useRef(false); // 変更中フラグ（pushState済みか）
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipPushRef = useRef(true);
+
   useEffect(() => {
+    const shouldPush = !skipPushRef.current;
+    skipPushRef.current = false;
     encodeStateToURL(currentState).then(hash => {
+      if (!shouldPush) {
+        // 初回/popstate: replaceのみ、履歴追加しない
+        window.history.replaceState(null, "", `#${hash}`);
+        setUrlLength(window.location.href.length);
+        committedHashRef.current = hash;
+        dirtyRef.current = false;
+        return;
+      }
+      if (hash === committedHashRef.current) return; // 変化なし
+      // 変更開始: まだpushしていなければ、変更前の状態をpushして戻り先を確保
+      if (!dirtyRef.current) {
+        window.history.pushState(null, "", `#${committedHashRef.current}`);
+        dirtyRef.current = true;
+      }
+      // 現在のエントリ（=push直後に移動した先）をreplaceで最新に
       window.history.replaceState(null, "", `#${hash}`);
       setUrlLength(window.location.href.length);
+      // 400ms操作が落ち着いたら確定（次の変更でまたpushできるように）
+      if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = setTimeout(() => {
+        committedHashRef.current = hash;
+        dirtyRef.current = false;
+      }, 400);
     });
   }, [currentState]);
+
+  // Back/Forward（popstate）で状態復元
+  useEffect(() => {
+    const onPopState = () => {
+      const hash = window.location.hash.slice(1);
+      if (!hash) return;
+      skipPushRef.current = true;
+      committedHashRef.current = hash;
+      decodeStateFromURL(hash).then(data => {
+        if (!data) return;
+        setRR(data.rr); setHasRet(data.hasRet); setRetAmt(data.retAmt);
+        setPY(data.PY); setSirPct(data.sirPct); setInflationRate(data.inflationRate);
+        if (data.scenarios.length) setScenarios(data.scenarios);
+      });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const handleImport = async (file: File) => {
     const data = await importJSON(file);
@@ -368,7 +353,7 @@ export default function App() {
     <div className="flex p-3 text-gray-900">
       <div className="flex flex-col gap-3 max-w-6xl w-full shrink-0">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-bold">資産シミュレーター</h1>
+          <h1 className="text-lg font-bold">FP計算</h1>
           <div className="flex items-center gap-2">
             <span className={`text-[10px] tabular-nums ${urlLength > 4096 ? "text-red-600 font-bold" : urlLength > 3072 ? "text-amber-600" : "text-gray-400"}`}>
               URL {urlLength.toLocaleString()}/4,096 ({Math.round(urlLength / 4096 * 100)}%){urlLength > 4096 ? " ⚠️超過" : ""}

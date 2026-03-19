@@ -44,7 +44,7 @@ function SingleChart({ result, color, label, yMax, member, hoverAge, onHoverAge 
   hoverAge: number | null; onHoverAge: (age: number | null) => void;
 }) {
   const yrs = result.yearResults;
-  const hoverIdx = hoverAge != null ? yrs.findIndex(yr => yr.age === hoverAge) : null;
+  const hoverIdx = hoverAge != null ? (() => { const i = yrs.findIndex(yr => yr.age === hoverAge); return i >= 0 ? i : null; })() : null;
   const n = yrs.length;
   if (!n) return null;
 

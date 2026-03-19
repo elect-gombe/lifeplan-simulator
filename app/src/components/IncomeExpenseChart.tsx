@@ -64,7 +64,7 @@ function StackedAreaChart<K extends string>({ title, results, categories, getDat
   const n = yrs.length;
   if (!n) return null;
 
-  const hoverIdx = hoverAge != null ? yrs.findIndex(yr => yr.age === hoverAge) : null;
+  const hoverIdx = hoverAge != null ? (() => { const i = yrs.findIndex(yr => yr.age === hoverAge); return i >= 0 ? i : null; })() : null;
 
   const data = yrs.map(getData);
   const activeCats = categories.filter(c => data.some(d => d[c.key] > 0));
@@ -115,8 +115,8 @@ function StackedAreaChart<K extends string>({ title, results, categories, getDat
       )}
       <svg viewBox={`0 0 ${W} ${H}`} className="block w-full cursor-crosshair" onMouseLeave={() => onHoverAge(null)}>
         {/* Y grid */}
-        {Array.from({ length: 5 }, (_, i) => Math.round(yMax / 4 * i)).map(v => (
-          <g key={v}>
+        {Array.from({ length: 5 }, (_, i) => Math.round(yMax / 4 * i)).map((v, i) => (
+          <g key={i}>
             <line x1={pL} y1={y(v)} x2={pL + cW} y2={y(v)} stroke="#e2e8f0" strokeWidth={0.5} />
             <text x={pL - 4} y={y(v) + 3} textAnchor="end" fontSize={7} fill="#94a3b8">{fmtMan(v)}</text>
           </g>

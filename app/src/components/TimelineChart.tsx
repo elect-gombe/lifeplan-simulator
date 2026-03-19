@@ -75,7 +75,7 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
   const [selectedScenario, setSelectedScenario] = useState(0);
   if (!results.length || !results[0].yearResults.length) return null;
 
-  const totalYears = retirementAge - currentAge;
+  const totalYears = Math.max(retirementAge - currentAge, 1);
   // Clamp selectedScenario to valid range
   const selIdx = Math.min(selectedScenario, results.length - 1);
   const s0 = results[selIdx]?.scenario;
@@ -164,10 +164,10 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
   const xForAge = (age: number) => pL + (age - currentAge) * xStep;
 
   // Y scale: account for both positive (wealth) and negative (loan balance, negative savings)
-  const allValues = results.flatMap(r => r.yearResults.flatMap(yr => [yr.totalWealth, yr.cumulativeDCAsset, yr.cumulativeSavings, yr.nisaAsset, yr.taxableAsset, yr.cashSavings, -yr.loanBalance]));
+  const allValues = results.flatMap(r => r.yearResults.flatMap(yr => [yr.totalWealth, yr.cumulativeDCAsset, yr.cumulativeSavings, yr.nisaAsset, yr.taxableAsset, yr.cashSavings, -yr.loanBalance])).filter(v => isFinite(v));
   const yMax = Math.max(...allValues, 1);
   const yMin = Math.min(...allValues, 0);
-  const yRange = yMax - yMin;
+  const yRange = Math.max(yMax - yMin, 1);
   const yScale = chartH / yRange;
   const yForVal = (v: number) => chartTop + (yMax - v) * yScale;
 
