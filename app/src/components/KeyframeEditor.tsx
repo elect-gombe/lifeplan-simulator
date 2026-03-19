@@ -559,7 +559,15 @@ function HousingSection({ s, onChange, currentAge, retirementAge, open, onToggle
 
   const setPhases = (p: HousingPhase[]) => onChange({ ...s, housingTimeline: p });
   const updatePhase = (i: number, patch: Partial<HousingPhase>) => { const np = [...phases]; np[i] = { ...np[i], ...patch }; setPhases(np); };
-  const removePhase = (i: number) => { const np = phases.filter((_, j) => j !== i); setPhases(np.length ? np : [{ startAge: currentAge, type: "rent", rentMonthlyMan: 10 }]); };
+  const removePhase = (i: number) => {
+    const np = [...phases];
+    // 前フェーズが持家で売却年齢が削除するフェーズに連動していたらクリア
+    if (i > 0 && np[i - 1].type === "own" && np[i - 1].propertyParams?.saleAge === np[i].startAge) {
+      np[i - 1] = { ...np[i - 1], propertyParams: { ...np[i - 1].propertyParams!, saleAge: undefined, salePriceMan: undefined, appreciationRate: undefined } };
+    }
+    const result = np.filter((_, j) => j !== i);
+    setPhases(result.length ? result : [{ startAge: currentAge, type: "rent", rentMonthlyMan: 10 }]);
+  };
 
   const simEnd = s.simEndAge ?? 85;
   const phaseEnd = (i: number) => i < phases.length - 1 ? phases[i + 1].startAge : simEnd;
