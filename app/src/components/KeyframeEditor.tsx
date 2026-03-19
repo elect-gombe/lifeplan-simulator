@@ -681,12 +681,29 @@ function HousingSection({ s, onChange, currentAge, retirementAge, open, onToggle
           </Modal>
         )}
         {/* 購入モーダル（編集） */}
-        {editingIdx != null && editPhase?.type === "own" && editPhase.propertyParams && (
-          <PropertyModal isOpen={true} onClose={() => setEditingIdx(null)}
-            onSave={(evt) => { if (evt.propertyParams) updatePhase(editingIdx, { propertyParams: evt.propertyParams, startAge: evt.age }); setEditingIdx(null); }}
+        {editingIdx != null && editPhase?.type === "own" && editPhase.propertyParams && (() => {
+          // 次フェーズがあれば売却年齢を自動設定
+          const nextPhaseStartAge = editingIdx < phases.length - 1 ? phases[editingIdx + 1].startAge : undefined;
+          const ppWithSale = nextPhaseStartAge
+            ? { ...editPhase.propertyParams, saleAge: editPhase.propertyParams.saleAge ?? nextPhaseStartAge }
+            : editPhase.propertyParams;
+          return <PropertyModal isOpen={true} onClose={() => setEditingIdx(null)}
+            onSave={(evt) => {
+              if (evt.propertyParams) {
+                updatePhase(editingIdx, { propertyParams: evt.propertyParams, startAge: evt.age });
+                // 売却年齢が変更されたら次フェーズのstartAgeも連動
+                if (evt.propertyParams.saleAge && editingIdx < phases.length - 1) {
+                  const np = [...phases];
+                  np[editingIdx + 1] = { ...np[editingIdx + 1], startAge: evt.propertyParams.saleAge };
+                  np[editingIdx] = { ...np[editingIdx], propertyParams: evt.propertyParams, startAge: evt.age };
+                  setPhases(np);
+                }
+              }
+              setEditingIdx(null);
+            }}
             currentAge={editPhase.startAge} retirementAge={simEnd}
-            existingEvent={{ id: -1, age: editPhase.startAge, type: "property", label: "", oneTimeCostMan: 0, annualCostMan: 0, durationYears: 0, propertyParams: editPhase.propertyParams }} />
-        )}
+            existingEvent={{ id: -1, age: editPhase.startAge, type: "property", label: "", oneTimeCostMan: 0, annualCostMan: 0, durationYears: 0, propertyParams: ppWithSale }} />;
+        })()}
         {/* 購入モーダル（新規） */}
         {addingType === "own" && tempPhase?.propertyParams && (
           <PropertyModal isOpen={true} onClose={() => { setAddingType(null); setTempPhase(null); }}

@@ -172,8 +172,8 @@ function PropertyFormInputs({ pp, u, purchaseAge, onPurchaseAgeChange }: {
           <button onClick={() => u({ repaymentType: "equal_principal" })} className={`rounded px-2 py-0.5 text-[10px] ${pp.repaymentType === "equal_principal" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>元金均等</button>
         </div></div>
         <div className="rounded border p-2 space-y-1"><label className="block font-semibold text-gray-600 text-[11px]">ローン構造</label><div className="flex gap-1">
-          <button onClick={() => u({ loanStructure: "single" })} className={`rounded px-2 py-0.5 text-[10px] ${(pp.loanStructure || "single") === "single" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>単独</button>
-          <button onClick={() => u({ loanStructure: "pair" })} className={`rounded px-2 py-0.5 text-[10px] ${pp.loanStructure === "pair" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>ペア</button>
+          <button onClick={() => u({ loanStructure: "single", danshinTarget: "self", deductionTarget: "self" })} className={`rounded px-2 py-0.5 text-[10px] ${(pp.loanStructure || "single") === "single" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>単独</button>
+          <button onClick={() => u({ loanStructure: "pair", danshinTarget: "both", deductionTarget: "both" })} className={`rounded px-2 py-0.5 text-[10px] ${pp.loanStructure === "pair" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>ペア</button>
         </div>{pp.loanStructure === "pair" && <div className="flex items-center gap-1 text-[10px]"><span className="text-gray-400">本人</span><input type="number" value={pp.pairRatio ?? 50} min={1} max={99} step={5} onChange={e => u({ pairRatio: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-[10px]" /><span className="text-gray-400">%</span></div>}</div>
       </div>
 
@@ -197,10 +197,34 @@ function PropertyFormInputs({ pp, u, purchaseAge, onPurchaseAgeChange }: {
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <div className="rounded border p-2 space-y-1"><label className="font-semibold text-gray-600 text-[11px]">団信</label><div className="flex gap-1">{(["self","spouse","both"] as const).map(v=><button key={v} onClick={()=>u({danshinTarget:v})} className={`rounded px-1.5 py-0.5 text-[10px] ${(pp.danshinTarget||"self")===v?"bg-blue-600 text-white":"bg-gray-100"}`}>{v==="self"?"本人":v==="spouse"?"配偶者":"両方"}</button>)}</div></div>
-        <div className="rounded border p-2 space-y-1"><label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={pp.hasLoanDeduction} onChange={e=>u({hasLoanDeduction:e.target.checked})} className="accent-green-600" /><span className="font-semibold text-gray-600 text-[11px]">ローン控除</span></label>
-          {pp.hasLoanDeduction && <div className="flex gap-1">{(["self","spouse","both"] as const).map(v=><button key={v} onClick={()=>u({deductionTarget:v})} className={`rounded px-1.5 py-0.5 text-[10px] ${(pp.deductionTarget||"self")===v?"bg-green-600 text-white":"bg-gray-100"}`}>{v==="self"?"本人":v==="spouse"?"配偶者":"両方"}</button>)}</div>}
-        </div>
+        {(() => {
+          const isPair = pp.loanStructure === "pair";
+          const danshinOpts: ("self" | "spouse" | "both")[] = isPair ? ["self", "spouse", "both"] : ["self"];
+          const dedOpts: ("self" | "spouse" | "both")[] = isPair ? ["self", "spouse", "both"] : ["self"];
+          return <>
+            <div className="rounded border p-2 space-y-1">
+              <label className="font-semibold text-gray-600 text-[11px]">団信</label>
+              <div className="flex gap-1">
+                {danshinOpts.map(v => <button key={v} onClick={() => u({ danshinTarget: v })}
+                  className={`rounded px-1.5 py-0.5 text-[10px] ${(pp.danshinTarget || "self") === v ? "bg-blue-600 text-white" : "bg-gray-100"}`}>
+                  {v === "self" ? "本人" : v === "spouse" ? "配偶者" : "両方"}</button>)}
+              </div>
+              {!isPair && <div className="text-[9px] text-gray-400">単独ローンは本人のみ</div>}
+            </div>
+            <div className="rounded border p-2 space-y-1">
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={pp.hasLoanDeduction} onChange={e => u({ hasLoanDeduction: e.target.checked })} className="accent-green-600" />
+                <span className="font-semibold text-gray-600 text-[11px]">ローン控除</span>
+              </label>
+              {pp.hasLoanDeduction && <div className="flex gap-1">
+                {dedOpts.map(v => <button key={v} onClick={() => u({ deductionTarget: v })}
+                  className={`rounded px-1.5 py-0.5 text-[10px] ${(pp.deductionTarget || "self") === v ? "bg-green-600 text-white" : "bg-gray-100"}`}>
+                  {v === "self" ? "本人" : v === "spouse" ? "配偶者" : "両方"}</button>)}
+              </div>}
+              {!isPair && pp.hasLoanDeduction && <div className="text-[9px] text-gray-400">単独ローンは名義人のみ</div>}
+            </div>
+          </>;
+        })()}
       </div>
 
       <div className="rounded border p-2 space-y-1.5">
