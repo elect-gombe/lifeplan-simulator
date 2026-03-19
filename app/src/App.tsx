@@ -29,6 +29,33 @@ function saveToStorage(state: SavedState) {
 }
 
 function migrateScenario(s: any, oldFields?: any): Scenario {
+  const events = (s.events || []).map((e: any) => ({
+    ...e,
+    propertyParams: e.propertyParams ? {
+      loanStructure: "single", pairRatio: 50, deductionTarget: "self", danshinTarget: "self",
+      ...e.propertyParams,
+    } : undefined,
+  }));
+
+  // housingTimeline自動構築: 既存イベントから住居フェーズをマイグレーション
+  let housingTimeline = s.housingTimeline;
+  if (!housingTimeline && !s.linkedToBase) {
+    const currentAge = s.currentAge ?? oldFields?.currentAge ?? 30;
+    const ht: any[] = [];
+    for (const e of events) {
+      if (e.disabled) continue;
+      if (e.type === "rent" && !e.parentId) ht.push({ startAge: e.age, type: "rent", rentAnnualMan: e.annualCostMan || 10 });
+      else if (e.type === "property" && e.propertyParams) ht.push({ startAge: e.age, type: "own", propertyParams: e.propertyParams });
+      else if (e.type === "relocation" && e.relocationParams) {
+        const rp = e.relocationParams;
+        if (rp.newHousingType === "rent") ht.push({ startAge: e.age, type: "rent", rentAnnualMan: rp.newRentAnnualMan || 120 });
+        else if (rp.newPropertyParams) ht.push({ startAge: e.age, type: "own", propertyParams: rp.newPropertyParams });
+      }
+    }
+    if (ht.length > 0) housingTimeline = ht;
+    else housingTimeline = [{ startAge: currentAge, type: "rent", rentAnnualMan: 10 }];
+  }
+
   return {
     ...s,
     currentAge: s.currentAge ?? oldFields?.currentAge ?? 30,
@@ -41,7 +68,8 @@ function migrateScenario(s: any, oldFields?: any): Scenario {
     dependentDeductionHolder: s.dependentDeductionHolder ?? "self",
     pensionStartAge: s.pensionStartAge ?? 65,
     pensionWorkStartAge: s.pensionWorkStartAge ?? 22,
-    dcReceiveMethod: s.dcReceiveMethod, // undefined=Aにリンク（リンクシナリオの場合）
+    dcReceiveMethod: s.dcReceiveMethod,
+    housingTimeline,
     spouse: s.spouse ? {
       retirementAge: 65,
       ...s.spouse,
@@ -50,13 +78,7 @@ function migrateScenario(s: any, oldFields?: any): Scenario {
     balancePolicy: s.balancePolicy ?? { cashReserveMonths: 6, nisaPriority: true },
     overrideTracks: s.overrideTracks ?? [],
     excludedBaseEventIds: s.excludedBaseEventIds ?? [],
-    events: (s.events || []).map((e: any) => ({
-      ...e,
-      propertyParams: e.propertyParams ? {
-        loanStructure: "single", pairRatio: 50, deductionTarget: "self", danshinTarget: "self",
-        ...e.propertyParams,
-      } : undefined,
-    })),
+    events,
   };
 }
 
@@ -151,6 +173,7 @@ function mkScenario(id: number): Scenario {
     idecoKF: [{ age: 30, value: isB ? 20000 : 0 }],
     salaryGrowthRate: 2,
     events: [], excludedBaseEventIds: [],
+    housingTimeline: isBase ? [{ startAge: 30, type: "rent", rentAnnualMan: 10 }] : undefined, // Bはundefined=Aにリンク
     linkedToBase: !isBase,
     overrideTracks: isBase ? [] : [...DEFAULT_OVERRIDE_TRACKS],
     years: 35, hasFurusato: true,

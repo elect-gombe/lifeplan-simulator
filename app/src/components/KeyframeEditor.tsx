@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from "react";
-import type { Keyframe, LifeEvent, Scenario, TrackKey, SettingKey, SpouseConfig, NISAConfig, BalancePolicy, DCReceiveMethod, SocialInsuranceParams } from "../lib/types";
+import React, { useState, useCallback, useMemo } from "react";
+import type { Keyframe, LifeEvent, Scenario, TrackKey, SettingKey, SpouseConfig, NISAConfig, BalancePolicy, DCReceiveMethod, SocialInsuranceParams, PropertyParams, HousingPhase } from "../lib/types";
 import { DEFAULT_DC_RECEIVE_METHOD, DEFAULT_SI_PARAMS } from "../lib/types";
 import { sortKF, EVENT_TYPES, resolveEventAge } from "../lib/types";
 import { ChildEventModal } from "./ChildEventModal";
@@ -9,6 +9,8 @@ import { DeathModal } from "./DeathModal";
 import { InsuranceModal } from "./InsuranceModal";
 import { GiftModal } from "./GiftModal";
 import { RelocationModal } from "./RelocationModal";
+import { buildLoanSchedule } from "../lib/calc";
+import { calcPropertyCapitalGainsTax } from "../lib/tax";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
 
@@ -479,7 +481,7 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
       linked={isLinked}
       badge={<span className="font-normal text-gray-400 text-[10px]">({allCount}件{summaryText ? ` ${summaryText}` : ""})</span>}>
       <div className="mb-1.5 flex flex-wrap gap-1">
-        {Object.entries(EVENT_TYPES).filter(([k]) => k !== "education" && k !== "marriage").map(([k, v]) => (
+        {Object.entries(EVENT_TYPES).filter(([k]) => k !== "education" && k !== "marriage" && k !== "rent" && k !== "property" && k !== "relocation").map(([k, v]) => (
           <button key={k} onClick={() => {
             if (["child", "property", "car", "death", "insurance", "gift", "relocation"].includes(k)) { openModalFor(k as ModalType); }
             else addSimpleEvent(k);
@@ -542,67 +544,75 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
 }
 
 // ===== Housing Timeline Section =====
-import type { HousingPhase } from "../lib/types";
-import { buildLoanSchedule } from "../lib/calc";
-import { calcPropertyCapitalGainsTax } from "../lib/tax";
 
-function HousingSection({ s, onChange, currentAge, retirementAge, open, onToggle, allEvents }: {
+function HousingSection({ s, onChange, currentAge, retirementAge, open, onToggle, allEvents, isLinked, baseScenario }: {
   s: Scenario; onChange: (s: Scenario) => void;
   currentAge: number; retirementAge: number;
   open: boolean; onToggle: () => void;
   allEvents: LifeEvent[];
+  isLinked?: boolean; baseScenario?: Scenario | null;
 }) {
-  // 既存イベントから住居フェーズを自動構築
-  const phases = useMemo((): HousingPhase[] => {
+  const [editingPhaseIdx, setEditingPhaseIdx] = useState<number | null>(null);
+  const linked = !!(isLinked && baseScenario);
+  // リンク状態: 自分のhousingTimelineがなく、ベースにある場合はリンク
+  const inheritedFromBase = !s.housingTimeline && linked && !!baseScenario?.housingTimeline;
+  const DEFAULT_PP: PropertyParams = {
+    priceMan: 5000, downPaymentMan: 500, loanYears: 35, repaymentType: "equal_payment",
+    rateType: "variable", fixedRate: 1.8, variableInitRate: 0.5, variableRiskRate: 1.5, variableRiseAfter: 10,
+    maintenanceMonthlyMan: 2, taxAnnualMan: 15, hasLoanDeduction: true,
+    loanStructure: "single", pairRatio: 50, deductionTarget: "self", danshinTarget: "self",
+  };
+
+  // 住居フェーズ取得: 自分 > ベース > イベントからの自動構築
+  const phases: HousingPhase[] = useMemo(() => {
     if (s.housingTimeline && s.housingTimeline.length > 0) return s.housingTimeline;
-
+    if (inheritedFromBase && baseScenario?.housingTimeline) return baseScenario.housingTimeline;
     const result: HousingPhase[] = [];
-    // 家賃イベント
     const rentEvts = allEvents.filter(e => e.type === "rent" && !e.disabled && !e.parentId);
-    // 住宅購入イベント
     const propEvts = allEvents.filter(e => e.type === "property" && e.propertyParams && !e.disabled);
-    // リロケーションイベント
     const relocEvts = allEvents.filter(e => e.type === "relocation" && e.relocationParams && !e.disabled);
-
-    // 時系列でソート
     const all = [
       ...rentEvts.map(e => ({ age: resolveEventAge(e, allEvents), type: "rent" as const, evt: e })),
       ...propEvts.map(e => ({ age: resolveEventAge(e, allEvents), type: "own" as const, evt: e })),
       ...relocEvts.map(e => ({ age: e.age, type: "reloc" as const, evt: e })),
     ].sort((a, b) => a.age - b.age);
-
     for (const item of all) {
-      if (item.type === "rent") {
-        result.push({ startAge: item.age, type: "rent", rentAnnualMan: item.evt.annualCostMan });
-      } else if (item.type === "own") {
-        result.push({ startAge: item.age, type: "own", propertyParams: item.evt.propertyParams });
-      } else if (item.type === "reloc" && item.evt.relocationParams) {
+      if (item.type === "rent") result.push({ startAge: item.age, type: "rent", rentAnnualMan: item.evt.annualCostMan });
+      else if (item.type === "own") result.push({ startAge: item.age, type: "own", propertyParams: item.evt.propertyParams });
+      else if (item.type === "reloc" && item.evt.relocationParams) {
         const rp = item.evt.relocationParams;
-        if (rp.newHousingType === "rent") {
-          result.push({ startAge: item.age, type: "rent", rentAnnualMan: rp.newRentAnnualMan });
-        } else if (rp.newPropertyParams) {
-          result.push({ startAge: item.age, type: "own", propertyParams: rp.newPropertyParams });
-        }
+        if (rp.newHousingType === "rent") result.push({ startAge: item.age, type: "rent", rentAnnualMan: rp.newRentAnnualMan });
+        else if (rp.newPropertyParams) result.push({ startAge: item.age, type: "own", propertyParams: rp.newPropertyParams });
       }
     }
     if (result.length === 0) result.push({ startAge: currentAge, type: "rent", rentAnnualMan: 10 });
     return result;
   }, [s.housingTimeline, allEvents, currentAge]);
 
-  const simEnd = s.simEndAge ?? 85;
+  const setPhases = (newPhases: HousingPhase[]) => onChange({ ...s, housingTimeline: newPhases });
+  const updatePhase = (i: number, patch: Partial<HousingPhase>) => {
+    const np = [...phases]; np[i] = { ...np[i], ...patch }; setPhases(np);
+  };
+  const removePhase = (i: number) => { const np = phases.filter((_, j) => j !== i); setPhases(np.length > 0 ? np : [{ startAge: currentAge, type: "rent", rentAnnualMan: 10 }]); };
+  const addPhase = (type: "rent" | "own") => {
+    const lastEnd = phases.length > 0 ? phases[phases.length - 1].startAge + 10 : currentAge;
+    const np = [...phases, type === "rent" ? { startAge: lastEnd, type: "rent" as const, rentAnnualMan: 120 } : { startAge: lastEnd, type: "own" as const, propertyParams: { ...DEFAULT_PP, priceMan: 3000, downPaymentMan: 500 } }];
+    setPhases(np);
+  };
+  // 初回: イベントからマイグレーション
+  // housingTimelineが未設定なら自動的に設定（常にmanaged）
+  if (!s.housingTimeline && !isReadOnly) { setTimeout(() => setPhases(phases), 0); }
 
-  // フェーズの終了年齢
+  const simEnd = s.simEndAge ?? 85;
   const phaseEnd = (i: number) => i < phases.length - 1 ? phases[i + 1].startAge : simEnd;
 
-  // 売却見積もり
   const saleEstimate = (phase: HousingPhase, nextAge: number) => {
     if (phase.type !== "own" || !phase.propertyParams) return null;
     const pp = phase.propertyParams;
     const ys = nextAge - phase.startAge;
     if (ys <= 0) return null;
     const purchasePrice = pp.priceMan * 10000;
-    const appRate = (pp.appreciationRate ?? -1) / 100;
-    const salePrice = pp.salePriceMan != null ? pp.salePriceMan * 10000 : Math.round(purchasePrice * Math.pow(1 + appRate, ys));
+    const salePrice = pp.salePriceMan != null ? pp.salePriceMan * 10000 : Math.round(purchasePrice * Math.pow(1 + (pp.appreciationRate ?? -1) / 100, ys));
     const schedule = buildLoanSchedule(pp, phase.startAge);
     const remaining = ys < schedule.length ? schedule[ys]?.balance ?? 0 : 0;
     const cgt = calcPropertyCapitalGainsTax(purchasePrice, salePrice, ys, pp.saleIsResidence ?? true, pp.saleCostRate ?? 4);
@@ -612,69 +622,111 @@ function HousingSection({ s, onChange, currentAge, retirementAge, open, onToggle
 
   const summary = phases.map((p, i) => {
     const end = phaseEnd(i);
-    return p.type === "rent" ? `家賃${p.startAge}-${end}歳` : `持家${p.startAge}-${end}歳`;
-  }).join(" → ");
+    return p.type === "rent" ? `賃貸${p.startAge}-${end}` : `持家${p.startAge}-${end}`;
+  }).join("→");
+  const isManaged = !!s.housingTimeline;
+  const isReadOnly = inheritedFromBase && !isManaged; // ベースから継承中は読み取り専用
+  const canEdit = isManaged && !isReadOnly;
+
+  // PropertyModal for editing a phase
+  const editingPhase = editingPhaseIdx != null ? phases[editingPhaseIdx] : null;
 
   return (
     <Section title="住居プラン" icon="🏠" borderColor="#3b82f6" bgOpen="bg-blue-50/30" open={open} onToggle={onToggle}
-      badge={<span className="font-normal text-gray-400 text-[10px]">({summary})</span>}>
-      <div className="space-y-1">
+      linked={isReadOnly}
+      badge={<span className="font-normal text-gray-400 text-[10px]">({summary})</span>}
+      right={
+        linked && baseScenario?.housingTimeline ? (
+          <button onClick={() => {
+            if (isReadOnly) { setPhases([...phases]); }
+            else { onChange({ ...s, housingTimeline: undefined }); }
+          }} className={`text-[10px] px-1.5 py-0.5 rounded ${isReadOnly ? "bg-gray-200 text-gray-500" : "bg-blue-100 text-blue-600"}`}
+            title={isReadOnly ? "Aにリンク中（クリックで独自設定）" : "独自設定中（クリックでAにリンク）"}
+          >{isReadOnly ? "🔗A" : "✏️独自"}</button>
+        ) : undefined
+      }>
+      <div className="space-y-1.5">
         {/* フェーズ可視化バー */}
         <div className="flex rounded overflow-hidden h-6 border border-gray-200">
           {phases.map((p, i) => {
-            const start = p.startAge;
             const end = phaseEnd(i);
-            const totalRange = simEnd - currentAge;
-            const wPct = Math.max((end - start) / totalRange * 100, 3);
-            const bg = p.type === "own" ? "bg-blue-400" : "bg-gray-300";
+            const wPct = Math.max((end - p.startAge) / (simEnd - currentAge) * 100, 3);
             return (
-              <div key={i} className={`${bg} relative group flex items-center justify-center text-[8px] text-white font-bold`}
-                style={{ width: `${wPct}%` }}>
+              <div key={i} className={`${p.type === "own" ? "bg-blue-400" : "bg-gray-300"} relative group flex items-center justify-center text-[8px] text-white font-bold cursor-pointer hover:opacity-80`}
+                style={{ width: `${wPct}%` }} onClick={() => canEdit && p.type === "own" && setEditingPhaseIdx(i)}>
                 {p.type === "own" ? `🏠${p.propertyParams?.priceMan ?? "?"}万` : `🏢${p.rentAnnualMan ?? "?"}万/年`}
                 <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 bg-gray-800 text-white rounded px-2 py-1 text-[9px] whitespace-nowrap z-10 mb-1">
-                  {start}歳〜{end}歳 ({end - start}年間) {p.type === "own" ? "持家" : "賃貸"}
+                  {p.startAge}歳〜{end}歳 ({end - p.startAge}年) {p.type === "own" ? "持家" : "賃貸"}{canEdit && p.type === "own" ? " (クリックで編集)" : ""}
                 </div>
               </div>
             );
           })}
         </div>
-        <div className="flex justify-between text-[8px] text-gray-400">
-          <span>{currentAge}歳</span><span>{simEnd}歳</span>
-        </div>
+        <div className="flex justify-between text-[8px] text-gray-400"><span>{currentAge}歳</span><span>{simEnd}歳</span></div>
 
-        {/* フェーズ一覧 */}
+        {/* フェーズ一覧（編集可能） */}
         {phases.map((p, i) => {
           const end = phaseEnd(i);
           const nextPhase = i < phases.length - 1 ? phases[i + 1] : null;
           const sale = nextPhase ? saleEstimate(p, end) : null;
           return (
             <div key={i} className={`rounded border p-2 text-[10px] space-y-1 ${p.type === "own" ? "border-blue-200 bg-blue-50/30" : "border-gray-200"}`}>
-              <div className="flex items-center gap-2">
-                <span className="font-bold">{p.type === "own" ? "🏠 持家" : "🏢 賃貸"}</span>
-                <span className="text-gray-500">{p.startAge}歳〜{end}歳（{end - p.startAge}年）</span>
-                {p.type === "own" && p.propertyParams && <span className="text-blue-600">{p.propertyParams.priceMan}万</span>}
-                {p.type === "rent" && <span className="text-gray-600">{p.rentAnnualMan}万/年</span>}
+              <div className="flex items-center gap-1.5">
+                {canEdit && (
+                  <select value={p.type} onChange={e => updatePhase(i, e.target.value === "own" ? { type: "own", propertyParams: DEFAULT_PP } : { type: "rent", rentAnnualMan: 120, propertyParams: undefined })}
+                    className="rounded border px-1 py-0.5 text-[10px] font-bold">
+                    <option value="rent">🏢 賃貸</option><option value="own">🏠 持家</option>
+                  </select>
+                )}
+                {!canEdit && <span className="font-bold">{p.type === "own" ? "🏠 持家" : "🏢 賃貸"}</span>}
+                {canEdit ? (
+                  <input type="number" value={p.startAge} min={i === 0 ? currentAge : phases[i-1].startAge + 1} max={simEnd - 1}
+                    onChange={e => updatePhase(i, { startAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 font-mono" />
+                ) : <span className="text-gray-500">{p.startAge}</span>}
+                <span className="text-gray-400">〜{end}歳({end - p.startAge}年)</span>
+                {p.type === "rent" && canEdit && (
+                  <><input type="number" value={p.rentAnnualMan ?? 120} step={10} min={0}
+                    onChange={e => updatePhase(i, { rentAnnualMan: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5" /><span className="text-gray-400">万/年</span></>
+                )}
+                {p.type === "rent" && !canEdit && <span className="text-gray-600">{p.rentAnnualMan}万/年</span>}
+                {p.type === "own" && p.propertyParams && (
+                  <><span className="text-blue-600">{p.propertyParams.priceMan}万</span>
+                  {canEdit && <button onClick={() => setEditingPhaseIdx(i)} className="text-blue-500 hover:underline">✏️詳細</button>}</>
+                )}
+                {canEdit && phases.length > 1 && <button onClick={() => removePhase(i)} className="text-gray-300 hover:text-red-500 ml-auto">×</button>}
               </div>
-              {/* 所有フェーズの売却見積もり */}
               {sale && p.type === "own" && (
-                <div className="flex items-center gap-2 text-[9px] text-amber-700 bg-amber-50 rounded px-1.5 py-0.5">
-                  <span>→ 売却:</span>
-                  <span>価格{Math.round(sale.salePrice / 10000)}万</span>
+                <div className="flex flex-wrap items-center gap-1.5 text-[9px] text-amber-700 bg-amber-50 rounded px-1.5 py-0.5">
+                  <span>→売却</span>
+                  <span>{Math.round(sale.salePrice / 10000)}万</span>
                   <span>残債{Math.round(sale.remaining / 10000)}万</span>
                   <span>税{Math.round(sale.tax / 10000)}万</span>
                   <span className="font-bold text-green-700">手取{Math.round(sale.net / 10000)}万</span>
-                  {nextPhase?.type === "own" && nextPhase.propertyParams && (
-                    <span className="text-blue-600">→ 頭金{nextPhase.propertyParams.downPaymentMan}万</span>
-                  )}
+                  {nextPhase?.type === "own" && nextPhase.propertyParams && <span className="text-blue-600">→頭金{nextPhase.propertyParams.downPaymentMan}万</span>}
                 </div>
               )}
             </div>
           );
         })}
 
-        <div className="text-[9px] text-gray-400 mt-1">
-          住居の変更はライフイベントの「住宅購入」「家賃」「住み替え」で設定できます
-        </div>
+        {/* フェーズ追加 */}
+        {canEdit && (
+          <div className="flex gap-1.5">
+            <button onClick={() => addPhase("rent")} className="rounded border px-2 py-0.5 text-[10px] hover:bg-gray-50">+ 🏢 賃貸</button>
+            <button onClick={() => addPhase("own")} className="rounded border px-2 py-0.5 text-[10px] hover:bg-blue-50">+ 🏠 購入</button>
+          </div>
+        )}
+
+        {/* PropertyModal for detailed editing */}
+        {editingPhase?.type === "own" && editingPhase.propertyParams && editingPhaseIdx != null && (
+          <PropertyModal isOpen={true} onClose={() => setEditingPhaseIdx(null)}
+            onSave={(evt) => {
+              if (evt.propertyParams) updatePhase(editingPhaseIdx, { propertyParams: evt.propertyParams });
+              setEditingPhaseIdx(null);
+            }}
+            currentAge={editingPhase.startAge} retirementAge={simEnd}
+            existingEvent={{ id: -1, age: editingPhase.startAge, type: "property", label: "", oneTimeCostMan: 0, annualCostMan: 0, durationYears: 0, propertyParams: editingPhase.propertyParams }} />
+        )}
       </div>
     </Section>
   );
@@ -1077,6 +1129,7 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
 
       <HousingSection s={s} onChange={onChange} currentAge={currentAge} retirementAge={s.simEndAge ?? 85}
         open={secOpen("housing")} onToggle={() => toggleSec("housing")}
+        isLinked={isLinked} baseScenario={baseScenario}
         allEvents={[
           ...(isLinked && baseScenario ? baseScenario.events.filter(e => !(s.excludedBaseEventIds || []).includes(e.id)) : []),
           ...(s.events || []),

@@ -1091,7 +1091,49 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   const baseEvents = (linked) ? (baseScenario!.events || []).filter(e => !(s.excludedBaseEventIds || []).includes(e.id))
     .map(e => disabledBaseIds.includes(e.id) ? { ...e, disabled: true } : e) : [];
   const ownEvents = s.events || [];
-  const events = [...baseEvents, ...ownEvents].sort((a, b) => a.age - b.age);
+  let events = [...baseEvents, ...ownEvents].sort((a, b) => a.age - b.age);
+
+  // 住居タイムライン: housingTimelineが有効なら既存の住居系イベントを除外し、合成イベントに置換
+  const housingTimeline = s.housingTimeline || (linked ? base_.housingTimeline : undefined);
+  if (housingTimeline && housingTimeline.length > 0) {
+    // 既存の rent/property/relocation イベントを除外
+    events = events.filter(e => e.type !== "rent" && e.type !== "property" && e.type !== "relocation");
+    // フェーズから合成イベントを生成
+    const simEnd = (settingLinked("simEndAge") ? base_.simEndAge : s.simEndAge) ?? 85;
+    for (let pi = 0; pi < housingTimeline.length; pi++) {
+      const phase = housingTimeline[pi];
+      const nextPhase = pi < housingTimeline.length - 1 ? housingTimeline[pi + 1] : null;
+      const endAge = nextPhase ? nextPhase.startAge : simEnd;
+      const syntheticId = -(pi + 1) * 1000; // 負のIDで合成イベントを識別
+
+      if (phase.type === "rent") {
+        events.push({
+          id: syntheticId, age: phase.startAge, type: "rent",
+          label: `家賃(${phase.rentAnnualMan ?? 0}万/年)`,
+          oneTimeCostMan: 0, annualCostMan: phase.rentAnnualMan ?? 0,
+          durationYears: endAge - phase.startAge,
+        });
+      } else if (phase.type === "own" && phase.propertyParams) {
+        const pp = { ...phase.propertyParams };
+        // 次フェーズがあれば売却年齢を設定
+        if (nextPhase) pp.saleAge = endAge;
+        events.push({
+          id: syntheticId, age: phase.startAge, type: "property",
+          label: `住宅(${pp.priceMan}万)`,
+          oneTimeCostMan: 0, annualCostMan: 0, durationYears: 0,
+          propertyParams: pp,
+        });
+      }
+      // フェーズ遷移時の引越費用（2フェーズ目以降）
+      if (pi > 0) {
+        events.push({
+          id: syntheticId - 500, age: phase.startAge, type: "custom",
+          label: "引越費用", oneTimeCostMan: 50, annualCostMan: 0, durationYears: 0,
+        });
+      }
+    }
+    events.sort((a, b) => a.age - b.age);
+  }
 
   // Spouse: use own if enabled, else inherit from base (with per-track overrides)
   const rawSpouse: SpouseConfig | undefined =

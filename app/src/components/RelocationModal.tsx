@@ -148,7 +148,7 @@ export function RelocationModal({ isOpen, onClose, onSave, currentAge, retiremen
       {salePP && saleEstimate && (
         <details className="rounded border border-amber-200 bg-amber-50/50 mb-3" open>
           <summary className="cursor-pointer px-3 py-2 font-bold text-amber-800 text-sm">
-            Step 1: 現住居の売却 — {existingProp!.label}（{existingPurchaseAge}歳購入 → {relocAge}歳売却）
+            Step 1: 現住居の売却 — {existingProp?.label ?? "物件"}（{existingPurchaseAge}歳購入 → {relocAge}歳売却）
             <span className="font-normal text-amber-600 ml-2">手取り: {Math.round(saleEstimate.netProceeds / 10000).toLocaleString()}万</span>
           </summary>
           <div className="px-3 pb-3 space-y-2">
