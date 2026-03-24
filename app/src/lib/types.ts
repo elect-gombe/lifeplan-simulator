@@ -167,6 +167,11 @@ export const DEFAULT_DC_RECEIVE_METHOD: DCReceiveMethod = {
 
 export type EventTarget = "self" | "spouse";
 
+export interface MarketCrashParams {
+  dropRate: number;        // 下落率(%) 例: 50
+  target: "nisa" | "taxable" | "all";  // 対象口座
+}
+
 export interface LifeEvent {
   id: number;
   age: number;
@@ -185,6 +190,7 @@ export interface LifeEvent {
   insuranceParams?: InsuranceParams;
   relocationParams?: RelocationParams;  // Phase 5: 住み替え
   giftParams?: GiftParams;              // Phase 6: 贈与税
+  marketCrashParams?: MarketCrashParams; // 暴落イベント
   disabled?: boolean;  // true=計算から除外（UIではグレーアウト表示）
 }
 
@@ -489,5 +495,6 @@ export const EVENT_TYPES: Record<string, { label: string; icon: string; color: s
   death:       { label: "死亡",       icon: "⚰️", color: "#1e293b", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
   relocation:  { label: "住み替え", icon: "🏡", color: "#0891b2", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
   gift:        { label: "贈与",     icon: "🎁", color: "#a855f7", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
+  crash:       { label: "暴落",     icon: "📉", color: "#dc2626", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
   custom:      { label: "カスタム",   icon: "📌", color: "#78716c", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
 };

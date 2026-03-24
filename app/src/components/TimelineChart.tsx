@@ -1,10 +1,38 @@
 import React, { useState, useCallback } from "react";
 import { fmtMan } from "../lib/format";
 import { EVENT_TYPES, resolveEventAge } from "../lib/types";
-import type { ScenarioResult, LifeEvent, EventYearCost } from "../lib/types";
+import type { ScenarioResult, LifeEvent, EventYearCost, HousingPhase, YearResult } from "../lib/types";
+import { EXPENSE_CATS, type ExpenseCategory } from "./IncomeExpenseChart";
 import { buildLoanSchedule } from "../lib/calc";
+import { HousingPhaseBar } from "./HousingPhaseBar";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
+
+function yearExpensePcts(yr: YearResult): { label: string; pct: number; color: string }[] {
+  const data: Record<ExpenseCategory, number> = { living: yr.baseLivingExpense, housing: 0, child: 0, car: 0, insurance: 0, other: 0 };
+  for (const c of yr.eventCostBreakdown) {
+    if (c.amount <= 0) continue;
+    const cat = EXPENSE_CATS.find(cat => cat.key !== "living" && cat.key !== "other" && cat.match(c.label));
+    data[cat ? cat.key : "other"] += c.amount;
+  }
+  const total = Object.values(data).reduce((s, v) => s + v, 0);
+  if (total <= 0) return [];
+  return EXPENSE_CATS.filter(c => data[c.key] > 0).map(c => ({ label: c.label, pct: Math.round(data[c.key] / total * 100), color: c.color }));
+}
+
+function yearIncomePcts(yr: YearResult): { label: string; pct: number; color: string }[] {
+  const items: { label: string; value: number; color: string }[] = [
+    { label: "本人給与", value: yr.self.gross, color: "#2563eb" },
+    { label: "配偶者給与", value: yr.spouse.gross, color: "#ec4899" },
+    { label: "年金", value: yr.self.pensionIncome + yr.spouse.pensionIncome, color: "#f59e0b" },
+    { label: "遺族年金", value: yr.survivorIncome, color: "#8b5cf6" },
+    { label: "児童手当", value: yr.childAllowance, color: "#10b981" },
+    { label: "保険金", value: yr.insurancePayoutTotal, color: "#06b6d4" },
+  ];
+  const total = items.reduce((s, i) => s + i.value, 0);
+  if (total <= 0) return [];
+  return items.filter(i => i.value > 0).map(i => ({ label: i.label, pct: Math.round(i.value / total * 100), color: i.color }));
+}
 
 function usePersistedSet(key: string): [Set<number>, (fn: (prev: Set<number>) => Set<number>) => void] {
   const [set, setSet] = useState<Set<number>>(() => {
@@ -36,11 +64,12 @@ export function EventBars({ events, allEvents, currentAge, endAge, xForAge, pT, 
     const barY = pT + ei * barGap;
     const hasRealChildren = allEvents.some(c => c.parentId === evt.id);
     const hasStructured = !!(evt as any).propertyParams || !!(evt as any).carParams;
-    const isParent = !evt.parentId && (hasRealChildren || hasStructured);
+    const hintChildCount = (evt as any)._childCount as number | undefined;
+    const isParent = !evt.parentId && (hasRealChildren || hasStructured || hintChildCount != null);
     const isChild = !!evt.parentId || !!(evt as any)._virtual;
     const isCollapsed = collapsedParents?.has(evt.id);
     const realChildCount = allEvents.filter(c => c.parentId === evt.id).length;
-    const childCount = hasStructured ? (() => {
+    const childCount = hintChildCount != null ? hintChildCount : hasStructured ? (() => {
       if (evt.propertyParams) {
         const pp = evt.propertyParams;
         let c = 3; // ローン + 控除or管理費 + 管理費
@@ -75,13 +104,14 @@ export function EventBars({ events, allEvents, currentAge, endAge, xForAge, pT, 
   })}</>;
 }
 
-export function TimelineChart({ results, currentAge, retirementAge, onYearClick, hoverAge, onHoverAge }: {
+export function TimelineChart({ results, currentAge, retirementAge, onYearClick, hoverAge, onHoverAge, onHousingClick }: {
   results: ScenarioResult[];
   currentAge: number;
   retirementAge: number;
   onYearClick?: (age: number) => void;
   hoverAge?: number | null;
   onHoverAge?: (age: number | null) => void;
+  onHousingClick?: (phaseIndex: number) => void;
 }) {
   const handleHover = (age: number | null) => { onHoverAge?.(age); };
   const [collapsedParents, setCollapsedParents] = usePersistedSet("sim-tl-collapsed");
@@ -106,8 +136,18 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
   })();
   const allEvents: LifeEvent[] = mergedEvents;
 
+  // Resolve housingTimeline (own or inherited from base)
+  const housingTimeline: HousingPhase[] | undefined = (() => {
+    if (s0.housingTimeline?.length) return s0.housingTimeline;
+    if (selIdx > 0 && s0.linkedToBase && baseScenario?.housingTimeline?.length) return baseScenario.housingTimeline;
+    return undefined;
+  })();
+  const simEndAge = s0.simEndAge ?? 85;
+
   // Build visible events: grouped by type (子供→住宅→車→保険→その他), then by age within group
-  const parentEvents = allEvents.filter(e => !e.parentId);
+  // If housingTimeline is active, filter out rent/property/relocation (replaced by housing phases)
+  const eventsForDisplay = housingTimeline ? allEvents.filter(e => e.type !== "rent" && e.type !== "property" && e.type !== "relocation") : allEvents;
+  const parentEvents = eventsForDisplay.filter(e => !e.parentId);
   const typeOrder: Record<string, number> = { child: 0, education: 0, property: 1, car: 2, insurance: 3, death: 4, marriage: 5, rent: 6, travel: 7, custom: 8 };
   const sortedParents = [...parentEvents].sort((a, b) => {
     const ta = typeOrder[a.type] ?? 8, tb = typeOrder[b.type] ?? 8;
@@ -115,6 +155,76 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
     return resolveEventAge(a, allEvents) - resolveEventAge(b, allEvents);
   });
   const visibleEvents: (LifeEvent & { _virtual?: boolean })[] = [];
+
+  // === Housing timeline phases (built for SVG sub-bars when expanded) ===
+  const housingExpanded = housingTimeline && housingTimeline.length > 0 && !collapsedParents.has(-9000);
+  if (housingExpanded && housingTimeline) {
+    for (let pi = 0; pi < housingTimeline.length; pi++) {
+      const phase = housingTimeline[pi];
+      const nextPhase = pi < housingTimeline.length - 1 ? housingTimeline[pi + 1] : null;
+      const phaseEndAge = nextPhase ? nextPhase.startAge : simEndAge;
+      const bid = -9100 - pi * 100;
+      const phaseCollapsed = collapsedParents.has(bid);
+
+      if (phase.type === "rent") {
+        visibleEvents.push({ id: bid, age: phase.startAge, type: "rent",
+          label: `家賃(${phase.rentMonthlyMan ?? 0}万/月)`,
+          oneTimeCostMan: 0, annualCostMan: (phase.rentMonthlyMan ?? 0) * 12,
+          durationYears: phaseEndAge - phase.startAge,
+        } as any);
+      } else if (phase.type === "own" && phase.propertyParams) {
+        const pp = phase.propertyParams;
+        const hasLoan = (pp.priceMan - pp.downPaymentMan) > 0;
+        const schedule = hasLoan ? buildLoanSchedule(pp, phase.startAge) : [];
+        const effectiveLoanYears = schedule.length > 0 ? schedule.length : (hasLoan ? pp.loanYears : 0);
+        const saleAge = nextPhase ? phaseEndAge : pp.saleAge;
+        const ownershipEndAge = saleAge ?? simEndAge;
+
+        // Count sub-bars for collapsed hint
+        let subCount = 0;
+        if (hasLoan) { subCount++; if (pp.rateType === "variable" && pp.variableRiseAfter < effectiveLoanYears) subCount++; if (pp.hasLoanDeduction) subCount++; subCount += (pp.prepayments || []).filter(p => p.amountMan > 0).length; if (pp.refinance) subCount++; }
+        subCount++; // 管理費
+        if (saleAge) subCount++;
+
+        // Phase parent bar (collapsible)
+        visibleEvents.push({ id: bid, age: phase.startAge, type: "property",
+          label: `住宅(${pp.priceMan}万)`,
+          oneTimeCostMan: pp.downPaymentMan, annualCostMan: 0,
+          durationYears: ownershipEndAge - phase.startAge,
+          _childCount: subCount,
+        } as any);
+
+        if (!phaseCollapsed) {
+          if (hasLoan) {
+            const loanDur = Math.min(effectiveLoanYears, (saleAge ?? 999) - phase.startAge);
+            if (loanDur > 0) visibleEvents.push({ id: bid + 1, age: phase.startAge, type: "custom", _virtual: true,
+              label: `ローン返済(${pp.rateType === "fixed" ? `固定${pp.fixedRate}%` : `変動${pp.variableInitRate}%`}${effectiveLoanYears !== pp.loanYears ? ` ${effectiveLoanYears}年` : ""})`,
+              oneTimeCostMan: 0, annualCostMan: 0, durationYears: loanDur } as any);
+            if (pp.rateType === "variable" && pp.variableRiseAfter < effectiveLoanYears) {
+              const riseEnd = Math.min(effectiveLoanYears - pp.variableRiseAfter, (saleAge ?? 999) - phase.startAge - pp.variableRiseAfter);
+              if (riseEnd > 0) visibleEvents.push({ id: bid + 2, age: phase.startAge + pp.variableRiseAfter, type: "custom", _virtual: true,
+                label: `金利上昇→${pp.variableRiskRate}%`, oneTimeCostMan: 0, annualCostMan: 0, durationYears: riseEnd } as any);
+            }
+            if (pp.hasLoanDeduction) visibleEvents.push({ id: bid + 3, age: phase.startAge, type: "custom", _virtual: true,
+              label: `住宅ローン控除(13年)`, oneTimeCostMan: 0, annualCostMan: 0, durationYears: Math.min(13, (saleAge ?? 999) - phase.startAge) } as any);
+            for (const prep of pp.prepayments || []) {
+              if (prep.amountMan > 0 && (!saleAge || prep.age < saleAge))
+                visibleEvents.push({ id: bid + 50 + prep.age, age: prep.age, type: "custom", _virtual: true,
+                  label: `繰上${prep.amountMan}万(${prep.type === "reduce" ? "軽減" : "短縮"})`, oneTimeCostMan: prep.amountMan, annualCostMan: 0, durationYears: 1 } as any);
+            }
+            if (pp.refinance && (!saleAge || pp.refinance.age < saleAge))
+              visibleEvents.push({ id: bid + 80, age: pp.refinance.age, type: "custom", _virtual: true,
+                label: `借換→${pp.refinance.newRate}%/${pp.refinance.newLoanYears}年`, oneTimeCostMan: pp.refinance.costMan, annualCostMan: 0, durationYears: 1 } as any);
+          }
+          visibleEvents.push({ id: bid + 4, age: phase.startAge, type: "custom", _virtual: true,
+            label: `管理費・固定資産税`, oneTimeCostMan: 0, annualCostMan: pp.maintenanceMonthlyMan * 12 + pp.taxAnnualMan,
+            durationYears: ownershipEndAge - phase.startAge } as any);
+          if (saleAge) visibleEvents.push({ id: bid + 90, age: saleAge, type: "custom", _virtual: true,
+            label: `売却${pp.salePriceMan ? pp.salePriceMan + "万" : "(自動)"}`, oneTimeCostMan: 0, annualCostMan: 0, durationYears: 1 } as any);
+        }
+      }
+    }
+  }
 
   for (const p of sortedParents) {
     visibleEvents.push(p);
@@ -194,6 +304,9 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
   const cH = pT + eventBarH + gap + chartH + pB;
   const w = cW - pL - pR;
   const chartTop = pT + eventBarH + gap;
+  // Percentage padding to match SVG pL/pR for the HTML housing bar
+  const htPadL = `${(pL / cW) * 100}%`;
+  const htPadR = `${(pR / cW) * 100}%`;
 
   const xStep = w / Math.max(totalYears - 1, 1);
   const xForAge = (age: number) => pL + (age - currentAge) * xStep;
@@ -228,6 +341,18 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
           ))}
         </div>
       )}
+      {/* === Housing colored bar (HTML, aligned with SVG) === */}
+      {housingTimeline && housingTimeline.length > 0 && (
+        <div className="mb-1" style={{ paddingLeft: htPadL, paddingRight: htPadR }}>
+          <div className="flex items-center gap-1 mb-0.5 cursor-pointer select-none" onClick={() => toggleParent(-9000)}>
+            <span className="text-[10px] font-bold text-gray-500">{collapsedParents.has(-9000) ? "▶" : "▼"} 🏠 住居プラン</span>
+          </div>
+          <HousingPhaseBar phases={housingTimeline} currentAge={currentAge} endAge={simEndAge}
+            showAgeLabels={!collapsedParents.has(-9000)}
+            onPhaseClick={onHousingClick} />
+        </div>
+      )}
+
       <svg viewBox={`0 0 ${cW} ${cH}`} className="block w-full cursor-crosshair" onMouseLeave={() => handleHover(null)}>
 
         {/* === Event bars === */}
@@ -344,7 +469,15 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
                 <div>年収 {Math.round(yr.grossMan)}万{yr.spouse.gross > 0 ? ` + 配偶者${Math.round(yr.spouse.gross / 10000)}万` : ""}
                   {(yr.self.pensionIncome > 0 || yr.spouse.pensionIncome > 0) && ` 年金${fmtMan(yr.self.pensionIncome + yr.spouse.pensionIncome)}`}
                   {" / "}手取り {fmtMan(yr.takeHomePay)}</div>
+                <div className="flex items-center gap-0.5 flex-wrap">
+                  <span className="text-gray-400">収入</span>
+                  {yearIncomePcts(yr).map(p => <span key={p.label} style={{ color: p.color }}>{p.label}{p.pct}%</span>)}
+                </div>
                 <div>支出 {fmtMan(yr.totalExpense)}（基本{fmtMan(yr.baseLivingExpense)} + イベント{fmtMan(yr.eventOngoing + yr.eventOnetime)}）</div>
+                <div className="flex items-center gap-0.5 flex-wrap">
+                  <span className="text-gray-400">支出</span>
+                  {yearExpensePcts(yr).map(p => <span key={p.label} style={{ color: p.color }}>{p.label}{p.pct}%</span>)}
+                </div>
                 <div className="font-bold">総資産 {fmtMan(yr.totalWealth)}</div>
                 {yr.cumulativeDCAsset > 0 && (
                   <div className="text-gray-500">DC {fmtMan(yr.cumulativeDCAsset)}{yr.spouse.dcAsset > 0 ? ` (本人${fmtMan(yr.self.dcAsset)} 配偶者${fmtMan(yr.spouse.dcAsset)})` : ""}</div>

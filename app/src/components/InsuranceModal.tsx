@@ -272,7 +272,7 @@ export function InsuranceModal({ isOpen, onClose, onSave, currentAge, retirement
               </div>
             </div>
             <div className="rounded border p-2 space-y-1">
-              <label className="block font-semibold text-gray-600 text-[11px]">保険タイプ</label>
+              <label className="block font-semibold text-gray-600 text-[11px]">保険タイプ<span className="ml-1 cursor-help text-gray-400" title="定期保険=死亡時に一括支給。収入保障=死亡後に毎月支給(掛金が安い)">ⓘ</span></label>
               <div className="flex gap-1">
                 <button onClick={() => u({ insuranceType: "term_life" })}
                   className={`rounded px-2 py-0.5 text-[10px] ${ip.insuranceType === "term_life" ? "bg-indigo-600 text-white" : "bg-gray-100"}`}>定期(一時金)</button>
@@ -310,7 +310,7 @@ export function InsuranceModal({ isOpen, onClose, onSave, currentAge, retirement
           {/* Payout */}
           {ip.insuranceType === "term_life" ? (
             <div className="rounded border p-2 space-y-1">
-              <label className="block font-semibold text-gray-600 text-[11px]">死亡保険金</label>
+              <label className="block font-semibold text-gray-600 text-[11px]">死亡保険金<span className="ml-1 cursor-help text-gray-400" title="目安: 年間生活費×必要年数−遺族年金−貯蓄。子供が小さいほど多めに">ⓘ</span></label>
               <div className="flex items-center gap-1">
                 <input type="number" value={ip.lumpSumPayoutMan} step={100} min={0}
                   onChange={e => u({ lumpSumPayoutMan: Number(e.target.value) })} className="w-24 rounded border px-2 py-1" />
@@ -319,7 +319,7 @@ export function InsuranceModal({ isOpen, onClose, onSave, currentAge, retirement
             </div>
           ) : (
             <div className="rounded border p-2 space-y-1">
-              <label className="block font-semibold text-gray-600 text-[11px]">月額保障</label>
+              <label className="block font-semibold text-gray-600 text-[11px]">月額保障<span className="ml-1 cursor-help text-gray-400" title="目安: 現在の手取月額の6〜7割。遺族年金と合わせて生活費をカバー">ⓘ</span></label>
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex items-center gap-1">
                   <input type="number" value={ip.monthlyPayoutMan} step={1} min={0}

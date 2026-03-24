@@ -501,6 +501,25 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
               <R l="手取り合計" bold bg="bg-emerald-100" hint="給与+年金−税・社保−DC+手当+保険" graphFn={yr => yr.takeHomePay} fn={(yr, s) => {
                 return s === "本人" ? Math.round(yr.takeHomePay - yr.spouse.takeHome) : s === "配偶者" ? Math.round(yr.spouse.takeHome) : Math.round(yr.takeHomePay);
               }} />
+              {/* 収入構成% */}
+              <tr className="bg-emerald-50/50"><td colSpan={totalCols} className="border-y border-gray-200 px-1 py-0.5">
+                <div className="flex flex-wrap gap-x-2 text-[9px]">
+                  <span className="text-gray-400">収入構成:</span>
+                  {yrs.filter(Boolean).slice(0, 1).map(yr => {
+                    if (!yr) return null;
+                    const items = [
+                      { label: "本人", value: yr.self.gross, color: "#2563eb" },
+                      { label: "配偶者", value: yr.spouse.gross, color: "#ec4899" },
+                      { label: "年金", value: yr.self.pensionIncome + yr.spouse.pensionIncome, color: "#f59e0b" },
+                      { label: "遺族", value: yr.survivorIncome, color: "#8b5cf6" },
+                      { label: "手当", value: yr.childAllowance, color: "#10b981" },
+                      { label: "保険金", value: yr.insurancePayoutTotal, color: "#06b6d4" },
+                    ].filter(i => i.value > 0);
+                    const total = items.reduce((s, i) => s + i.value, 0);
+                    return items.map(i => <span key={i.label} style={{ color: i.color }} className="font-semibold">{i.label}{Math.round(i.value / total * 100)}%</span>);
+                  })}
+                </div>
+              </td></tr>
 
               {/* ===== 税優遇 ===== */}
               {(yrs.some(yr => yr && yr.annualBenefit > 0) || (results.some(r => r.hasFuru) && yrs.some(yr => yr && yr.self.furusatoDonation > 0))) && (<>
@@ -618,6 +637,27 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
                 </React.Fragment>;
               })}
               <R l="支出合計" bold hint="基本生活費+イベント(継続+一時)" graphFn={yr => yr.totalExpense} fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.totalExpense : "-"} />
+              {/* 支出構成% */}
+              <tr className="bg-gray-50/50"><td colSpan={totalCols} className="border-y border-gray-200 px-1 py-0.5">
+                <div className="flex flex-wrap gap-x-2 text-[9px]">
+                  <span className="text-gray-400">支出構成:</span>
+                  {yrs.filter(Boolean).slice(0, 1).map(yr => {
+                    if (!yr) return null;
+                    const data: Record<string, number> = { living: yr.baseLivingExpense };
+                    for (const cat of EXPENSE_CATS) if (cat.key !== "living") data[cat.key] = 0;
+                    for (const c of yr.eventCostBreakdown) {
+                      if (c.amount <= 0) continue;
+                      const cat = EXPENSE_CATS.find(ct => ct.key !== "living" && ct.key !== "other" && ct.match(c.label));
+                      data[cat ? cat.key : "other"] += c.amount;
+                    }
+                    const total = Object.values(data).reduce((s, v) => s + v, 0);
+                    if (total <= 0) return null;
+                    return EXPENSE_CATS.filter(c => (data[c.key] || 0) > 0).map(c =>
+                      <span key={c.key} style={{ color: c.color }} className="font-semibold">{c.label}{Math.round((data[c.key] || 0) / total * 100)}%</span>
+                    );
+                  })}
+                </div>
+              </td></tr>
               <R l="年間CF" bold bg="bg-blue-50" hint="手取り−支出合計" graphFn={yr => yr.annualNetCashFlow} fn={(yr, s) => s === "世帯" || !hasSpouse ? yr.annualNetCashFlow : "-"} />
 
               <S bg="bg-teal-100">■ 累積資産</S>

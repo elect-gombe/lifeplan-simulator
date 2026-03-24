@@ -5,6 +5,8 @@ import type { LoanScheduleEntry } from "../lib/calc";
 import { calcPropertyCapitalGainsTax } from "../lib/tax";
 import { BarChart } from "./ui";
 
+const H = ({ t }: { t: string }) => <span className="ml-1 cursor-help text-gray-400" title={t}>ⓘ</span>;
+
 // ===== 返済プランプレビュー =====
 function RepaymentPreview({ schedule, pp, purchaseAge }: {
   schedule: LoanScheduleEntry[]; pp: PropertyParams; purchaseAge: number;
@@ -166,16 +168,16 @@ function PropertyFormInputs({ pp, u, purchaseAge, onPurchaseAgeChange }: {
         </div>}
         <div><label className="block font-semibold text-gray-600 mb-1">物件価格（万円）</label><input type="number" value={pp.priceMan} step={100} onChange={e => u({ priceMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" /></div>
         <div><label className="block font-semibold text-gray-600 mb-1">頭金（万円）</label><input type="number" value={pp.downPaymentMan} step={100} onChange={e => u({ downPaymentMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" /></div>
-        <div><label className="block font-semibold text-gray-600 mb-1">ローン期間（年）</label><input type="number" value={pp.loanYears} min={1} max={50} onChange={e => u({ loanYears: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" /></div>
+        <div><label className="block font-semibold text-gray-600 mb-1">ローン期間（年）<H t="最長50年。定年後も返済が続く場合は退職金・年金で返済計画を" /></label><input type="number" value={pp.loanYears} min={1} max={50} onChange={e => u({ loanYears: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" /></div>
       </div>
       <div className="text-gray-500">借入: <b>{(pp.priceMan - pp.downPaymentMan).toLocaleString()}万</b>　諸費用: 約{Math.round(pp.priceMan * 0.07)}万（7%）</div>
 
       <div className="grid grid-cols-2 gap-2">
-        <div className="rounded border p-2 space-y-1"><label className="block font-semibold text-gray-600 text-[11px]">返済方式</label><div className="flex gap-1">
+        <div className="rounded border p-2 space-y-1"><label className="block font-semibold text-gray-600 text-[11px]">返済方式<H t="元利均等=毎月一定で計画しやすい。元金均等=総利息が少ないが初期負担大" /></label><div className="flex gap-1">
           <button onClick={() => u({ repaymentType: "equal_payment" })} className={`rounded px-2 py-0.5 text-[10px] ${pp.repaymentType !== "equal_principal" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>元利均等</button>
           <button onClick={() => u({ repaymentType: "equal_principal" })} className={`rounded px-2 py-0.5 text-[10px] ${pp.repaymentType === "equal_principal" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>元金均等</button>
         </div></div>
-        <div className="rounded border p-2 space-y-1"><label className="block font-semibold text-gray-600 text-[11px]">ローン構造</label><div className="flex gap-1">
+        <div className="rounded border p-2 space-y-1"><label className="block font-semibold text-gray-600 text-[11px]">ローン構造<H t="ペアローン=夫婦それぞれが借入。控除2人分使えるが諸費用も2倍" /></label><div className="flex gap-1">
           <button onClick={() => u({ loanStructure: "single", danshinTarget: "self", deductionTarget: "self" })} className={`rounded px-2 py-0.5 text-[10px] ${(pp.loanStructure || "single") === "single" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>単独</button>
           <button onClick={() => u({ loanStructure: "pair", danshinTarget: "both", deductionTarget: "both" })} className={`rounded px-2 py-0.5 text-[10px] ${pp.loanStructure === "pair" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>ペア</button>
         </div>{pp.loanStructure === "pair" && <div className="flex items-center gap-1 text-[10px]"><span className="text-gray-400">本人</span><input type="number" value={pp.pairRatio ?? 50} min={1} max={99} step={5} onChange={e => u({ pairRatio: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-[10px]" /><span className="text-gray-400">%</span></div>}</div>
@@ -188,16 +190,16 @@ function PropertyFormInputs({ pp, u, purchaseAge, onPurchaseAgeChange }: {
         </div>
         {pp.rateType === "fixed" ? <div className="flex items-center gap-1"><input type="number" value={pp.fixedRate} step={0.1} min={0} onChange={e => u({ fixedRate: Number(e.target.value) })} className="w-20 rounded border px-2 py-1" /><span className="text-gray-400">%　月額{Math.round(fixedM / 10000)}万</span></div>
         : <div className="grid grid-cols-3 gap-1">
-          <div className="flex items-center gap-0.5"><input type="number" value={pp.variableInitRate} step={0.1} min={0} onChange={e => u({ variableInitRate: Number(e.target.value) })} className="w-full rounded border px-1 py-0.5" /><span className="text-[10px] text-gray-400">%</span></div>
-          <div className="flex items-center gap-0.5"><input type="number" value={pp.variableRiskRate} step={0.1} min={0} onChange={e => u({ variableRiskRate: Number(e.target.value) })} className="w-full rounded border px-1 py-0.5" /><span className="text-[10px] text-gray-400">%</span></div>
-          <div className="flex items-center gap-0.5"><input type="number" value={pp.variableRiseAfter} min={1} max={pp.loanYears} onChange={e => u({ variableRiseAfter: Number(e.target.value) })} className="w-full rounded border px-1 py-0.5" /><span className="text-[10px] text-gray-400">年後</span></div>
+          <div><div className="text-[9px] text-gray-400 mb-0.5">初期金利<H t="優遇適用後の金利" /></div><div className="flex items-center gap-0.5"><input type="number" value={pp.variableInitRate} step={0.1} min={0} onChange={e => u({ variableInitRate: Number(e.target.value) })} className="w-full rounded border px-1 py-0.5" /><span className="text-[10px] text-gray-400">%</span></div></div>
+          <div><div className="text-[9px] text-gray-400 mb-0.5">上昇後<H t="優遇終了or金利上昇時のリスク想定値" /></div><div className="flex items-center gap-0.5"><input type="number" value={pp.variableRiskRate} step={0.1} min={0} onChange={e => u({ variableRiskRate: Number(e.target.value) })} className="w-full rounded border px-1 py-0.5" /><span className="text-[10px] text-gray-400">%</span></div></div>
+          <div><div className="text-[9px] text-gray-400 mb-0.5">上昇時期<H t="通常5〜10年後に金利見直し" /></div><div className="flex items-center gap-0.5"><input type="number" value={pp.variableRiseAfter} min={1} max={pp.loanYears} onChange={e => u({ variableRiseAfter: Number(e.target.value) })} className="w-full rounded border px-1 py-0.5" /><span className="text-[10px] text-gray-400">年後</span></div></div>
           <div className="col-span-3 text-[10px] text-amber-600">当初{Math.round(varInitM/10000)}万/月 → {pp.variableRiseAfter}年後{Math.round(varRiskM/10000)}万/月</div>
         </div>}
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <div className="flex items-center gap-1"><label className="text-gray-500 text-[10px] whitespace-nowrap">管理費</label><input type="number" value={pp.maintenanceMonthlyMan} step={0.5} min={0} onChange={e => u({ maintenanceMonthlyMan: Number(e.target.value) })} className="w-16 rounded border px-1.5 py-1" /><span className="text-[10px] text-gray-400">万/月</span></div>
-        <div className="flex items-center gap-1"><label className="text-gray-500 text-[10px] whitespace-nowrap">固定資産税</label><input type="number" value={pp.taxAnnualMan} step={1} min={0} onChange={e => u({ taxAnnualMan: Number(e.target.value) })} className="w-16 rounded border px-1.5 py-1" /><span className="text-[10px] text-gray-400">万/年</span></div>
+        <div className="flex items-center gap-1"><label className="text-gray-500 text-[10px] whitespace-nowrap">管理費<H t="管理費+修繕積立金の合計。築年数とともに上昇傾向" /></label><input type="number" value={pp.maintenanceMonthlyMan} step={0.5} min={0} onChange={e => u({ maintenanceMonthlyMan: Number(e.target.value) })} className="w-16 rounded border px-1.5 py-1" /><span className="text-[10px] text-gray-400">万/月</span></div>
+        <div className="flex items-center gap-1"><label className="text-gray-500 text-[10px] whitespace-nowrap">固定資産税<H t="新築5年は軽減あり。目安: 物件価格の0.3-0.5%/年" /></label><input type="number" value={pp.taxAnnualMan} step={1} min={0} onChange={e => u({ taxAnnualMan: Number(e.target.value) })} className="w-16 rounded border px-1.5 py-1" /><span className="text-[10px] text-gray-400">万/年</span></div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -232,7 +234,7 @@ function PropertyFormInputs({ pp, u, purchaseAge, onPurchaseAgeChange }: {
       </div>
 
       <div className="rounded border p-2 space-y-1.5">
-        <div className="flex items-center justify-between"><label className="font-semibold text-gray-600 text-[11px]">繰上返済</label>
+        <div className="flex items-center justify-between"><label className="font-semibold text-gray-600 text-[11px]">繰上返済<H t="期間短縮=総利息削減効果大。返済額軽減=月々の負担を減らす" /></label>
           <button onClick={()=>u({prepayments:[...(pp.prepayments||[]),{age:purchaseAge+10,amountMan:500,type:"shorten"}]})} className="text-[10px] text-blue-500 hover:underline">+ 追加</button>
         </div>
         {(pp.prepayments||[]).map((prep,i)=>{const sp=(patch:Partial<typeof prep>)=>{const ps=[...(pp.prepayments||[])];ps[i]={...prep,...patch};u({prepayments:ps})};return(
@@ -268,10 +270,10 @@ function PropertyFormInputs({ pp, u, purchaseAge, onPurchaseAgeChange }: {
             <div className="grid grid-cols-3 gap-2 text-[10px]">
               <div className="flex items-center gap-1"><span className="text-gray-500">売却年齢</span><input type="number" value={pp.saleAge} min={purchaseAge + 1} onChange={e => u({ saleAge: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5" /><span className="text-gray-400">歳</span></div>
               <div className="flex items-center gap-1"><span className="text-gray-500">売却価格</span><input type="number" value={pp.salePriceMan ?? ""} step={100} placeholder={`${Math.round(autoSalePrice / 10000)}`} onChange={e => u({ salePriceMan: e.target.value ? Number(e.target.value) : undefined })} className="w-16 rounded border px-1 py-0.5" /><span className="text-gray-400">万</span></div>
-              <div className="flex items-center gap-1"><span className="text-gray-500">変動率</span><input type="number" value={pp.appreciationRate ?? 0} step={0.5} onChange={e => u({ appreciationRate: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5" /><span className="text-gray-400">%/年</span></div>
+              <div className="flex items-center gap-1"><span className="text-gray-500">変動率<H t="年間の資産価値変動。都心マンション+1〜2%、郊外戸建-1〜-2%が目安" /></span><input type="number" value={pp.appreciationRate ?? 0} step={0.5} onChange={e => u({ appreciationRate: Number(e.target.value) })} className="w-14 rounded border px-1 py-0.5" /><span className="text-gray-400">%/年</span></div>
             </div>
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
-              <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={pp.saleIsResidence ?? true} onChange={e => u({ saleIsResidence: e.target.checked })} className="accent-blue-600" /><span className="text-gray-600">居住用（3000万特別控除）</span></label>
+              <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={pp.saleIsResidence ?? true} onChange={e => u({ saleIsResidence: e.target.checked })} className="accent-blue-600" /><span className="text-gray-600">居住用（3000万特別控除）<H t="自宅売却益から最大3,000万円控除。賃貸に出した場合は適用不可" /></span></label>
               <div className="flex items-center gap-1"><span className="text-gray-500">売却費用</span><input type="number" value={pp.saleCostRate ?? 4} step={0.5} min={0} max={10} onChange={e => u({ saleCostRate: Number(e.target.value) })} className="w-10 rounded border px-1 py-0.5" /><span className="text-gray-400">%</span></div>
             </div>
             {/* 売却試算 */}

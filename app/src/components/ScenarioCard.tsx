@@ -25,8 +25,8 @@ export function ScenarioCard({ s, onChange, onRemove, onDuplicate, idx, canRemov
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <NumIn label="現在の資産" value={s.currentAssetsMan} onChange={(v: number) => u("currentAssetsMan", v)} step={100} unit="万円" small />
-        <Slider label="昇給率" value={s.salaryGrowthRate} onChange={(v: number) => u("salaryGrowthRate", v)} min={-2} max={10} step={0.5} unit="%" />
+        <NumIn label="現在の資産" value={s.currentAssetsMan} onChange={(v: number) => u("currentAssetsMan", v)} step={100} unit="万円" small help="預貯金+投資(DC/NISA除く)の合計。住宅等の実物資産は含めない" />
+        <Slider label="昇給率" value={s.salaryGrowthRate} onChange={(v: number) => u("salaryGrowthRate", v)} min={-2} max={10} step={0.5} unit="%" help="年収KFの値に毎年複利で加算。一般的に1-3%" />
       </div>
       <div className="border-t pt-2">
         <NumIn label="退職所得控除の通算期間" value={s.years} onChange={(v: number) => u("years", v)} unit="年" small help="重複を省いた加入期間" />

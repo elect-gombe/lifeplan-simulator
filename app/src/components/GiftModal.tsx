@@ -59,7 +59,7 @@ export function GiftModal({ isOpen, onClose, onSave, currentAge, retirementAge, 
                 onChange={e => setGiftAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
             </div>
             <div>
-              <label className="block font-semibold text-gray-600 mb-1">贈与額（万円）</label>
+              <label className="block font-semibold text-gray-600 mb-1">贈与額（万円）<span className="ml-1 cursor-help text-gray-400" title="暦年課税: 年110万以下は非課税。住宅資金贈与は最大1,000万非課税枠あり">ⓘ</span></label>
               <input type="number" value={gp.amountMan} step={100}
                 onChange={e => u({ amountMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
             </div>

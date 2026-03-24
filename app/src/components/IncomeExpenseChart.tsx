@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { fmtMan } from "../lib/format";
 import type { ScenarioResult, YearResult } from "../lib/types";
+import { PieForArea } from "./ExpensePieChart";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
 
@@ -47,7 +48,7 @@ function categorizeIncome(yr: YearResult): Record<IncomeCategory, number> {
   };
 }
 
-// 汎用スタックエリアチャート
+// 汎用スタックエリアチャート（エリア/パイ切替付き）
 function StackedAreaChart<K extends string>({ title, results, categories, getData, overlayLine, hoverAge, onHoverAge, selScenario, onSelScenario }: {
   title: string;
   results: ScenarioResult[];
@@ -59,6 +60,7 @@ function StackedAreaChart<K extends string>({ title, results, categories, getDat
   selScenario: number;
   onSelScenario: (i: number) => void;
 }) {
+  const [viewMode, setViewMode] = useState<"area" | "pie">("area");
   const si = Math.min(selScenario, results.length - 1);
   const yrs = results[si]?.yearResults || [];
   const n = yrs.length;
@@ -102,17 +104,27 @@ function StackedAreaChart<K extends string>({ title, results, categories, getDat
 
   return (
     <div>
-      {results.length > 1 && (
-        <div className="flex gap-1 mb-1">
-          {results.map((r, i) => (
-            <button key={i} onClick={() => onSelScenario(i)}
-              className={`rounded px-2 py-0.5 text-[10px] font-semibold ${i === si ? "text-white" : "bg-gray-100 text-gray-500"}`}
-              style={i === si ? { backgroundColor: COLORS[i] } : undefined}>
-              {r.scenario.name}
-            </button>
-          ))}
+      <div className="flex flex-wrap items-center gap-1 mb-1">
+        <span className="text-xs font-bold text-gray-600">{title}の内訳</span>
+        <div className="flex gap-0.5 border rounded overflow-hidden flex-shrink-0">
+          <button onClick={() => setViewMode("area")} className={`px-2 py-0.5 text-[10px] font-semibold ${viewMode === "area" ? "bg-gray-700 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}>📈推移</button>
+          <button onClick={() => setViewMode("pie")} className={`px-2 py-0.5 text-[10px] font-semibold ${viewMode === "pie" ? "bg-gray-700 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}>🥧割合</button>
         </div>
-      )}
+        {results.length > 1 && viewMode === "area" && (
+          <div className="flex gap-1 ml-auto">
+            {results.map((r, i) => (
+              <button key={i} onClick={() => onSelScenario(i)}
+                className={`rounded px-2 py-0.5 text-[10px] font-semibold ${i === si ? "text-white" : "bg-gray-100 text-gray-500"}`}
+                style={i === si ? { backgroundColor: COLORS[i] } : undefined}>
+                {r.scenario.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {viewMode === "pie" ? (
+        <PieForArea results={results} categories={categories} getData={getData} />
+      ) : <>
       <svg viewBox={`0 0 ${W} ${H}`} className="block w-full cursor-crosshair" onMouseLeave={() => onHoverAge(null)}>
         {/* Y grid */}
         {Array.from({ length: 5 }, (_, i) => Math.round(yMax / 4 * i)).map((v, i) => (
@@ -167,11 +179,13 @@ function StackedAreaChart<K extends string>({ title, results, categories, getDat
           <span className="font-bold">{hd.yr.age}歳 合計{fmtMan(hd.total)}</span>
           {activeCats.map(c => {
             const v = hd.d[c.key];
-            return v > 0 ? <span key={c.key} style={{ color: c.color }}>{c.label} {fmtMan(v)}</span> : null;
+            const pct = hd.total > 0 ? Math.round(v / hd.total * 100) : 0;
+            return v > 0 ? <span key={c.key} style={{ color: c.color }}>{c.label} {fmtMan(v)} <span className="text-[9px] opacity-70">{pct}%</span></span> : null;
           })}
           {overlayLine && <span className="font-bold" style={{ color: overlayLine.color }}>{overlayLine.label} {fmtMan(overlayLine.fn(hd.yr))}</span>}
         </div>
       )}
+      </>}
     </div>
   );
 }
@@ -209,19 +223,10 @@ export function IncomeExpenseCharts({ results, hoverAge, onHoverAge }: { results
     <details className="rounded-lg border bg-white" open>
       <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-gray-700">収入・支出・資産の推移</summary>
       <div className="px-3 pb-3 space-y-4">
-        <div>
-          <div className="text-xs font-bold text-gray-600 mb-1">収入の内訳</div>
-          <StackedAreaChart title="収入" results={results} categories={INCOME_CATS} getData={categorizeIncome} {...shared} />
-        </div>
-        <div>
-          <div className="text-xs font-bold text-gray-600 mb-1">支出の内訳</div>
-          <StackedAreaChart title="支出" results={results} categories={EXPENSE_CATS} getData={categorizeExpenses} {...shared} />
-        </div>
-        <div>
-          <div className="text-xs font-bold text-gray-600 mb-1">資産の内訳</div>
-          <StackedAreaChart title="資産" results={results} categories={ASSET_CATS} getData={categorizeAssets}
-            overlayLine={{ label: "純資産", color: "#1e293b", fn: netWorth }} {...shared} />
-        </div>
+        <StackedAreaChart title="収入" results={results} categories={INCOME_CATS} getData={categorizeIncome} {...shared} />
+        <StackedAreaChart title="支出" results={results} categories={EXPENSE_CATS} getData={categorizeExpenses} {...shared} />
+        <StackedAreaChart title="資産" results={results} categories={ASSET_CATS} getData={categorizeAssets}
+          overlayLine={{ label: "純資産", color: "#1e293b", fn: netWorth }} {...shared} />
       </div>
     </details>
   );

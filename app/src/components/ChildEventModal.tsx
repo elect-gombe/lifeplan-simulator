@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from "react";
 import type { LifeEvent } from "../lib/types";
 import { BarChart } from "./ui";
 
+type LivingType = "home" | "rural" | "urban";
+
 interface Stage {
   key: string;
   label: string;
@@ -10,19 +12,26 @@ interface Stage {
   toChildAge: number;
   annualMan: number;
   variant: "public" | "private";
+  livingType?: LivingType;
 }
 
-const STAGE_DEFAULTS: Record<string, { label: string; from: number; to: number; public: number; private: number }> = {
+const LIVING_COSTS: Record<LivingType, { label: string; annualMan: number }> = {
+  home:  { label: "自宅", annualMan: 0 },
+  rural: { label: "地方下宿", annualMan: 60 },
+  urban: { label: "都内下宿", annualMan: 96 },
+};
+
+const STAGE_DEFAULTS: Record<string, { label: string; from: number; to: number; public: number; private: number; hasLiving?: boolean }> = {
   nursery:    { label: "保育園",   from: 0,  to: 3,  public: 30,  private: 40 },
   kinder:     { label: "幼稚園",   from: 3,  to: 6,  public: 25,  private: 50 },
   elementary: { label: "小学校",   from: 6,  to: 12, public: 35,  private: 160 },
   middle:     { label: "中学校",   from: 12, to: 15, public: 50,  private: 140 },
   high:       { label: "高校",     from: 15, to: 18, public: 50,  private: 100 },
-  university: { label: "大学",     from: 18, to: 22, public: 80,  private: 130 },
-  grad:       { label: "大学院",   from: 22, to: 24, public: 80,  private: 120 },
+  university: { label: "大学",     from: 18, to: 22, public: 80,  private: 130, hasLiving: true },
+  grad:       { label: "大学院",   from: 22, to: 24, public: 80,  private: 120, hasLiving: true },
 };
 
-const TEMPLATES: { key: string; label: string; config: Record<string, { enabled: boolean; variant: "public" | "private" }> }[] = [
+const TEMPLATES: { key: string; label: string; config: Record<string, { enabled: boolean; variant: "public" | "private"; livingType?: LivingType }> }[] = [
   {
     key: "public_all", label: "すべて公立",
     config: { nursery: { enabled: true, variant: "public" }, kinder: { enabled: true, variant: "public" }, elementary: { enabled: true, variant: "public" }, middle: { enabled: true, variant: "public" }, high: { enabled: true, variant: "public" }, university: { enabled: true, variant: "public" }, grad: { enabled: false, variant: "public" } },
@@ -36,10 +45,24 @@ const TEMPLATES: { key: string; label: string; config: Record<string, { enabled:
     config: { nursery: { enabled: true, variant: "public" }, kinder: { enabled: true, variant: "public" }, elementary: { enabled: true, variant: "public" }, middle: { enabled: true, variant: "public" }, high: { enabled: true, variant: "public" }, university: { enabled: true, variant: "private" }, grad: { enabled: false, variant: "private" } },
   },
   {
+    key: "rural_pub", label: "国公立+地方下宿",
+    config: { nursery: { enabled: true, variant: "public" }, kinder: { enabled: true, variant: "public" }, elementary: { enabled: true, variant: "public" }, middle: { enabled: true, variant: "public" }, high: { enabled: true, variant: "public" }, university: { enabled: true, variant: "public", livingType: "rural" }, grad: { enabled: false, variant: "public" } },
+  },
+  {
+    key: "urban_priv", label: "私立+都内下宿",
+    config: { nursery: { enabled: true, variant: "public" }, kinder: { enabled: true, variant: "public" }, elementary: { enabled: true, variant: "public" }, middle: { enabled: true, variant: "public" }, high: { enabled: true, variant: "public" }, university: { enabled: true, variant: "private", livingType: "urban" }, grad: { enabled: false, variant: "private" } },
+  },
+  {
     key: "grad_pub", label: "大学院まで（国公立）",
     config: { nursery: { enabled: true, variant: "public" }, kinder: { enabled: true, variant: "public" }, elementary: { enabled: true, variant: "public" }, middle: { enabled: true, variant: "public" }, high: { enabled: true, variant: "public" }, university: { enabled: true, variant: "public" }, grad: { enabled: true, variant: "public" } },
   },
 ];
+
+function calcStageAnnual(def: typeof STAGE_DEFAULTS[string], variant: "public" | "private", livingType?: LivingType): number {
+  const base = variant === "private" ? def.private : def.public;
+  const living = def.hasLiving && livingType ? LIVING_COSTS[livingType].annualMan : 0;
+  return base + living;
+}
 
 function buildStages(template: typeof TEMPLATES[number]): Stage[] {
   return Object.entries(STAGE_DEFAULTS).map(([key, def]) => {
@@ -47,8 +70,9 @@ function buildStages(template: typeof TEMPLATES[number]): Stage[] {
     return {
       key, label: def.label, enabled: cfg.enabled,
       fromChildAge: def.from, toChildAge: def.to,
-      annualMan: cfg.variant === "private" ? def.private : def.public,
+      annualMan: calcStageAnnual(def, cfg.variant, cfg.livingType),
       variant: cfg.variant,
+      livingType: def.hasLiving ? (cfg.livingType || "home") : undefined,
     };
   });
 }
@@ -63,11 +87,18 @@ function reconstructStages(parentEvent: LifeEvent, subEvents: LifeEvent[]): Stag
     );
     if (match) {
       const isPrivate = match.label.includes("私立") || match.annualCostMan >= def.private * 0.8;
+      let livingType: LivingType | undefined;
+      if (def.hasLiving) {
+        if (match.label.includes("都内下宿")) livingType = "urban";
+        else if (match.label.includes("地方下宿")) livingType = "rural";
+        else livingType = "home";
+      }
       return {
         key, label: def.label, enabled: true,
         fromChildAge: def.from, toChildAge: def.to,
         annualMan: match.annualCostMan,
         variant: isPrivate ? "private" as const : "public" as const,
+        livingType,
       };
     }
     return {
@@ -75,6 +106,7 @@ function reconstructStages(parentEvent: LifeEvent, subEvents: LifeEvent[]): Stag
       fromChildAge: def.from, toChildAge: def.to,
       annualMan: def.public,
       variant: "public" as const,
+      livingType: def.hasLiving ? "home" as LivingType : undefined,
     };
   });
 }
@@ -310,9 +342,9 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
     setStages(prev => prev.map((s, i) => {
       if (i !== idx) return s;
       const next = { ...s, ...patch };
-      if (patch.variant && patch.variant !== s.variant) {
+      if (patch.variant !== undefined || patch.livingType !== undefined) {
         const def = STAGE_DEFAULTS[s.key];
-        next.annualMan = patch.variant === "private" ? def.private : def.public;
+        next.annualMan = calcStageAnnual(def, next.variant, next.livingType);
       }
       return next;
     }));
@@ -331,7 +363,7 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
         id: Date.now() + Math.round(Math.random() * 100000),
         age: age + s.fromChildAge,
         type: "education",
-        label: `${name} ${s.label}(${s.variant === "private" ? "私立" : "公立"})`,
+        label: `${name} ${s.label}(${s.variant === "private" ? "私立" : "公立"}${s.livingType && s.livingType !== "home" ? `・${LIVING_COSTS[s.livingType].label}` : ""})`,
         oneTimeCostMan: 0,
         annualCostMan: s.annualMan,
         durationYears: s.toChildAge - s.fromChildAge,
@@ -443,7 +475,7 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
                   <input type="number" value={birthCostMan} step={10} onChange={e => setBirthCostMan(Number(e.target.value))} className="w-full rounded border px-2 py-1.5 text-sm" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">養育費（万円/年）</label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">養育費（万円/年）<span className="ml-1 cursor-help text-gray-400" title="教育費以外の年間養育費(食費・衣服・習い事等)。目安: 20〜50万/年">ⓘ</span></label>
                   <input type="number" value={baseCareMan} step={5} onChange={e => setBaseCareMan(Number(e.target.value))} className="w-full rounded border px-2 py-1.5 text-sm" />
                 </div>
               </div>
@@ -495,6 +527,15 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
                         <option value="public">公立</option>
                         <option value="private">私立</option>
                       </select>
+                      {s.livingType !== undefined && (
+                        <select value={s.livingType} onChange={e => updateStage(i, { livingType: e.target.value as LivingType })}
+                          disabled={!s.enabled}
+                          className="rounded border px-1 py-0.5 text-[10px]">
+                          <option value="home">自宅</option>
+                          <option value="rural">地方下宿(+60万)</option>
+                          <option value="urban">都内下宿(+96万)</option>
+                        </select>
+                      )}
                       <input type="number" value={s.annualMan} step={5} min={0}
                         disabled={!s.enabled}
                         onChange={e => updateStage(i, { annualMan: Number(e.target.value) })}

@@ -1873,6 +1873,24 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     spouseNISAAsset = spouseNISAAsset * (1 + nisaReturnRate);
     cumulativeTaxable = cumulativeTaxable * (1 + taxableReturnRate);
 
+    // === 暴落イベント ===
+    for (const evt of activeEvts) {
+      if (evt.type === "crash" && evt.marketCrashParams && !evt.disabled) {
+        const cp = evt.marketCrashParams;
+        const drop = cp.dropRate / 100;
+        if (cp.target === "nisa" || cp.target === "all") {
+          selfNISAAsset *= (1 - drop);
+          spouseNISAAsset *= (1 - drop);
+        }
+        if (cp.target === "taxable" || cp.target === "all") {
+          cumulativeTaxable *= (1 - drop);
+        }
+        const lostNisa = (cp.target === "nisa" || cp.target === "all") ? Math.round((selfNISAAsset + spouseNISAAsset) * drop / (1 - drop)) : 0;
+        const lostTax = (cp.target === "taxable" || cp.target === "all") ? Math.round(cumulativeTaxable * drop / (1 - drop)) : 0;
+        eventCostBreakdown.push({ label: `暴落 -${cp.dropRate}%`, icon: "📉", color: "#dc2626", amount: lostNisa + lostTax, detail: `${cp.target === "all" ? "全口座" : cp.target === "nisa" ? "NISA" : "特定口座"} -${cp.dropRate}%` });
+      }
+    }
+
     let nisaContribution = 0;
     let selfNISAContribution = 0;
     let spouseNISAContribution = 0;

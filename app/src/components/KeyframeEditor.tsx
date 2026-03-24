@@ -1,12 +1,13 @@
 import React, { useState, useCallback, useMemo } from "react";
 import type { Keyframe, LifeEvent, Scenario, TrackKey, SettingKey, SpouseConfig, NISAConfig, BalancePolicy, DCReceiveMethod, SocialInsuranceParams, PropertyParams, HousingPhase } from "../lib/types";
 import { DEFAULT_DC_RECEIVE_METHOD, DEFAULT_SI_PARAMS } from "../lib/types";
-import { sortKF, EVENT_TYPES, resolveEventAge } from "../lib/types";
+import { sortKF, EVENT_TYPES, resolveEventAge, resolveKF } from "../lib/types";
 import { ChildEventModal } from "./ChildEventModal";
 import { PropertyModal } from "./PropertyModal";
 import { Modal } from "./ui";
 import { CarModal } from "./CarModal";
 import { DeathModal } from "./DeathModal";
+import { HousingPhaseBar } from "./HousingPhaseBar";
 import { InsuranceModal } from "./InsuranceModal";
 import { GiftModal } from "./GiftModal";
 import { RelocationModal } from "./RelocationModal";
@@ -20,13 +21,13 @@ const LinkBadge = ({ linked }: { linked?: boolean }) =>
   linked ? <span className="text-[9px] bg-gray-200 text-gray-500 rounded px-1 py-px">🔗A</span> : null;
 
 // 折りたたみセクション共通ラッパー（grid-rows アニメーション）
-function Section({ title, icon, borderColor, bgOpen, open, onToggle, badge, right, children, linked }: {
-  title: string; icon?: string; borderColor: string; bgOpen?: string;
+function Section({ id, title, icon, borderColor, bgOpen, open, onToggle, badge, right, children, linked }: {
+  id?: string; title: string; icon?: string; borderColor: string; bgOpen?: string;
   open: boolean; onToggle: () => void; badge?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode;
   linked?: boolean;
 }) {
   return (
-    <div className={`rounded-md border-l-[3px] transition-colors duration-150 ${open ? bgOpen || "bg-gray-50/50" : "hover:bg-gray-50/50"}`} style={{ borderLeftColor: borderColor }}>
+    <div id={id} className={`rounded-md border-l-[3px] transition-colors duration-150 ${open ? bgOpen || "bg-gray-50/50" : "hover:bg-gray-50/50"}`} style={{ borderLeftColor: borderColor }}>
       <div className={`flex items-center justify-between px-2 py-1.5 cursor-pointer select-none rounded-r-md ${!open ? "hover:bg-gray-100/60" : ""}`} onClick={onToggle}>
         <div className="flex items-center gap-1.5">
           <span className={`text-[11px] w-4 text-center transition-transform duration-200 ${open ? "rotate-0" : "-rotate-90"}`} style={{ color: borderColor }}>▼</span>
@@ -62,7 +63,7 @@ function usePersistedSet(key: string): [Set<number>, (fn: (prev: Set<number>) =>
 }
 
 // タイプ別ソート: 子供→住宅→車→保険→死亡→結婚→…→カスタム、同タイプ内はage順
-const TYPE_ORDER: Record<string, number> = { child: 0, education: 0, property: 1, car: 2, insurance: 3, nursing: 4, death: 5, marriage: 6, rent: 7, travel: 8, custom: 9 };
+const TYPE_ORDER: Record<string, number> = { child: 0, education: 0, property: 1, car: 2, insurance: 3, nursing: 4, death: 5, crash: 6, marriage: 7, rent: 8, travel: 9, custom: 10 };
 function sortEventsByType(events: LifeEvent[], allEvents?: LifeEvent[]): LifeEvent[] {
   return [...events].sort((a, b) => {
     const ta = TYPE_ORDER[a.type] ?? 8, tb = TYPE_ORDER[b.type] ?? 8;
@@ -73,13 +74,13 @@ function sortEventsByType(events: LifeEvent[], allEvents?: LifeEvent[]): LifeEve
   });
 }
 
-interface TrackDef { key: TrackKey; label: string; unit: string; defaultValue: number; step: number; }
+interface TrackDef { key: TrackKey; label: string; unit: string; defaultValue: number; step: number; help?: string; }
 const TRACKS: TrackDef[] = [
   { key: "incomeKF", label: "年収", unit: "万円", defaultValue: 700, step: 10 },
-  { key: "expenseKF", label: "基本生活費(世帯)", unit: "万円/月", defaultValue: 15, step: 1 },
+  { key: "expenseKF", label: "基本生活費(世帯)", unit: "万円/月", defaultValue: 15, step: 1, help: "世帯全体の月額生活費。住居費・イベント費は別途加算" },
   { key: "dcTotalKF", label: "DC合計", unit: "円/月", defaultValue: 55000, step: 1000 },
   { key: "companyDCKF", label: "会社DC", unit: "円/月", defaultValue: 1000, step: 1000 },
-  { key: "idecoKF", label: "iDeCo", unit: "円/月", defaultValue: 0, step: 1000 },
+  { key: "idecoKF", label: "iDeCo", unit: "円/月", defaultValue: 0, step: 1000, help: "個人型DC拠出額。上限: 会社DC有→月2万, 無→月2.3万" },
 ];
 
 // ===== Track Row (shared by 本人 and 配偶者) =====
@@ -97,7 +98,7 @@ function TrackRow({ track, keyframes, onChange, currentAge, retirementAge, linke
   return (
     <div className="border-b pb-1.5 last:border-b-0">
       <div className="flex items-center justify-between mb-0.5">
-        <span className="text-xs font-semibold text-gray-700">{track.label}（{track.unit}）</span>
+        <span className="text-xs font-semibold text-gray-700">{track.label}（{track.unit}）{track.help && <span className="ml-1 cursor-help text-gray-400" title={track.help}>ⓘ</span>}</span>
         <div className="flex items-center gap-1.5">
           {onToggleLink && (
             <button onClick={onToggleLink} className={`text-[10px] rounded px-1.5 py-0.5 ${linked ? "bg-gray-200 text-gray-500" : "bg-blue-100 text-blue-600"}`}
@@ -233,7 +234,7 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
         <div className="border-t pt-1">
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1">
-              <span className="text-[10px] font-semibold text-gray-600">DC受取</span>
+              <span className="text-[10px] font-semibold text-gray-600">DC受取<span className="ml-1 cursor-help text-gray-400" title="一時金=退職所得控除が使える。年金=雑所得として毎年課税">ⓘ</span></span>
               {(["lump_sum", "annuity", "combined"] as const).map(t => (
               <button key={t} onClick={() => setRM({ type: t })} disabled={dcLinked}
                 className={`rounded px-1.5 py-0.5 text-[10px] ${rm.type === t ? "bg-orange-600 text-white" : "bg-gray-100"}`}>
@@ -322,6 +323,19 @@ function EventList({ events, updateEvent, updateEventMulti, removeEvent, current
           {e.giftParams && onEditGift && <button onClick={() => onEditGift(e)} className="text-[10px] rounded px-1 py-0.5 bg-purple-100 text-purple-600">✏️</button>}
           {e.relocationParams && onEditRelocation && <button onClick={() => onEditRelocation(e)} className="text-[10px] rounded px-1 py-0.5 bg-cyan-100 text-cyan-600">✏️</button>}
           <input value={e.label} onChange={ev => updateEvent(e.id, "label", ev.target.value)} className="w-28 rounded border px-1.5 py-1 text-xs" />
+          {e.marketCrashParams && (
+            <span className="flex items-center gap-1">
+              <input type="number" value={e.marketCrashParams.dropRate} min={1} max={99} step={5}
+                onChange={ev => { const dr = Number(ev.target.value); updateEventMulti(e.id, { marketCrashParams: { ...e.marketCrashParams!, dropRate: dr }, label: `暴落 -${dr}%` }); }}
+                className="w-12 rounded border px-1 py-0.5 text-[10px]" /><span className="text-[10px] text-gray-400">%</span>
+              <select value={e.marketCrashParams.target} onChange={ev => updateEventMulti(e.id, { marketCrashParams: { ...e.marketCrashParams!, target: ev.target.value as any } })}
+                className="rounded border px-1 py-0.5 text-[10px]">
+                <option value="all">全口座</option>
+                <option value="nisa">NISAのみ</option>
+                <option value="taxable">特定のみ</option>
+              </select>
+            </span>
+          )}
           {e.propertyParams && updateEventMulti && (
             <span className="flex items-center gap-0.5">
               <button onClick={() => { const pp = e.propertyParams!; const v = pp.priceMan - 100; updateEventMulti(e.id, { propertyParams: { ...pp, priceMan: v }, label: `住宅(${v}万)` }); }} className="text-[10px] text-gray-400 hover:text-blue-500 px-0.5">-</button>
@@ -434,7 +448,9 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
   const setEvents = (evts: LifeEvent[]) => onChange({ ...scenario, events: evts });
   const addSimpleEvent = (type: string) => {
     const et = EVENT_TYPES[type]; const age = currentAge + 5; const parentId = Date.now();
-    const newEvents: LifeEvent[] = [{ id: parentId, age, type, label: et.label, oneTimeCostMan: et.defaultOnetime, annualCostMan: et.defaultAnnual, durationYears: et.defaultDuration }];
+    const newEvents: LifeEvent[] = [{ id: parentId, age, type, label: et.label, oneTimeCostMan: et.defaultOnetime, annualCostMan: et.defaultAnnual, durationYears: et.defaultDuration,
+      ...(type === "crash" ? { label: "暴落 -50%", marketCrashParams: { dropRate: 50, target: "all" as const } } : {}),
+    }];
     if (type === "marriage") newEvents.push({ id: parentId + 1, age, type: "custom", label: "結婚支援金（親）", oneTimeCostMan: -100, annualCostMan: 0, durationYears: 0, parentId, ageOffset: 0 });
     setEvents([...events, ...newEvents].sort((a, b) => a.age - b.age));
   };
@@ -544,6 +560,17 @@ function HousingSection({ s, onChange, currentAge, retirementAge, open, onToggle
   const [addingType, setAddingType] = useState<"rent" | "own" | null>(null);
   const linked = !!(isLinked && baseScenario);
   const inheritedFromBase = !s.housingTimeline && linked && !!baseScenario?.housingTimeline;
+
+  // External trigger to open edit modal (from timeline click)
+  React.useEffect(() => {
+    const idx = (s as any)._housingEditIdx;
+    if (idx != null && open) {
+      setEditingIdx(idx);
+      // Clear the trigger
+      const { _housingEditIdx, ...clean } = s as any;
+      onChange(clean);
+    }
+  }, [(s as any)._housingEditIdx, open]);
   const DEFAULT_PP: PropertyParams = {
     priceMan: 5000, downPaymentMan: 500, loanYears: 35, repaymentType: "equal_payment",
     rateType: "variable", fixedRate: 1.8, variableInitRate: 0.5, variableRiskRate: 1.5, variableRiseAfter: 10,
@@ -601,7 +628,7 @@ function HousingSection({ s, onChange, currentAge, retirementAge, open, onToggle
   const editPhase = editingIdx != null ? phases[editingIdx] : null;
 
   return (
-    <Section title="住居プラン" icon="🏠" borderColor="#3b82f6" bgOpen="bg-blue-50/30" open={open} onToggle={onToggle}
+    <Section id="housing-section" title="住居プラン" icon="🏠" borderColor="#3b82f6" bgOpen="bg-blue-50/30" open={open} onToggle={onToggle}
       linked={isReadOnly} badge={<span className="font-normal text-gray-400 text-[10px]">({summary})</span>}
       right={linked && baseScenario?.housingTimeline ? (
         <button onClick={() => isReadOnly ? setPhases([...phases]) : onChange({ ...s, housingTimeline: undefined })}
@@ -610,22 +637,8 @@ function HousingSection({ s, onChange, currentAge, retirementAge, open, onToggle
         >{isReadOnly ? "🔗A" : "✏️独自"}</button>
       ) : undefined}>
       <div className="space-y-1.5">
-        <div className="flex rounded overflow-hidden h-6 border border-gray-200">
-          {phases.map((p, i) => {
-            const end = phaseEnd(i);
-            return (
-              <div key={i} className={`${p.type === "own" ? "bg-blue-400" : "bg-gray-300"} relative group flex items-center justify-center text-[8px] text-white font-bold cursor-pointer hover:opacity-80`}
-                style={{ width: `${Math.max((end - p.startAge) / (simEnd - currentAge) * 100, 3)}%` }}
-                onClick={() => canEdit && setEditingIdx(i)}>
-                {p.type === "own" ? `🏠${p.propertyParams?.priceMan ?? "?"}万` : `🏢${p.rentMonthlyMan ?? "?"}万/月`}
-                <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 bg-gray-800 text-white rounded px-2 py-1 text-[9px] whitespace-nowrap z-10 mb-1">
-                  {p.startAge}〜{end}歳({end - p.startAge}年) {p.type === "own" ? "持家" : `賃貸${p.rentMonthlyMan}万/月`}{canEdit ? " クリックで編集" : ""}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="flex justify-between text-[8px] text-gray-400"><span>{currentAge}歳</span><span>{simEnd}歳</span></div>
+        <HousingPhaseBar phases={phases} currentAge={currentAge} endAge={simEnd}
+          onPhaseClick={canEdit ? (i) => setEditingIdx(i) : undefined} />
 
         {phases.map((p, i) => {
           const end = phaseEnd(i);
@@ -725,7 +738,7 @@ function HousingSection({ s, onChange, currentAge, retirementAge, open, onToggle
 // ===== NISA / Balance Policy Section =====
 
 
-function NISASection({ s, onChange, isLinked, baseScenario, open, onToggle }: { s: Scenario; onChange: (s: Scenario) => void; isLinked?: boolean; baseScenario?: Scenario | null; open: boolean; onToggle: () => void }) {
+function NISASection({ s, onChange, currentAge, isLinked, baseScenario, open, onToggle }: { s: Scenario; onChange: (s: Scenario) => void; currentAge: number; isLinked?: boolean; baseScenario?: Scenario | null; open: boolean; onToggle: () => void }) {
   const defaultNi: NISAConfig = { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 };
   const ni = s.nisa || defaultNi;
   const baseS = isLinked && baseScenario ? baseScenario : null;
@@ -753,8 +766,8 @@ function NISASection({ s, onChange, isLinked, baseScenario, open, onToggle }: { 
               <button onClick={() => setNISA({ accounts: 1 })} className={`rounded px-1.5 py-0.5 text-[10px] ${ni.accounts === 1 ? "bg-green-600 text-white" : "bg-gray-100"}`}>本人</button>
               <button onClick={() => setNISA({ accounts: 2 })} className={`rounded px-1.5 py-0.5 text-[10px] ${ni.accounts === 2 ? "bg-green-600 text-white" : "bg-gray-100"}`}>夫婦2</button>
             </div>
-            <div className="flex items-center gap-1"><span className="text-gray-500 text-[10px]">年間枠</span><input type="number" value={ni.annualLimitMan} step={10} onChange={e => setNISA({ annualLimitMan: Number(e.target.value) })} className="w-16 rounded border px-1 py-0.5 text-xs" /><span className="text-[10px] text-gray-400">万/人</span></div>
-            <div className="flex items-center gap-1"><span className="text-gray-500 text-[10px]">生涯枠</span><input type="number" value={ni.lifetimeLimitMan} step={100} onChange={e => setNISA({ lifetimeLimitMan: Number(e.target.value) })} className="w-16 rounded border px-1 py-0.5 text-xs" /><span className="text-[10px] text-gray-400">万/人</span></div>
+            <div className="flex items-center gap-1"><span className="text-gray-500 text-[10px]">年間枠<span className="ml-0.5 cursor-help text-gray-400" title="新NISA: 年360万(成長240+つみたて120)">ⓘ</span></span><input type="number" value={ni.annualLimitMan} step={10} onChange={e => setNISA({ annualLimitMan: Number(e.target.value) })} className="w-16 rounded border px-1 py-0.5 text-xs" /><span className="text-[10px] text-gray-400">万/人</span></div>
+            <div className="flex items-center gap-1"><span className="text-gray-500 text-[10px]">生涯枠<span className="ml-0.5 cursor-help text-gray-400" title="新NISA: 1人1,800万(うち成長枠1,200万)。売却で枠復活">ⓘ</span></span><input type="number" value={ni.lifetimeLimitMan} step={100} onChange={e => setNISA({ lifetimeLimitMan: Number(e.target.value) })} className="w-16 rounded border px-1 py-0.5 text-xs" /><span className="text-[10px] text-gray-400">万/人</span></div>
           </div>
           <div className="text-[10px] text-gray-400">合計: 年{ni.annualLimitMan * (ni.accounts || 1)}万 / 生涯{ni.lifetimeLimitMan * (ni.accounts || 1)}万 ｜ NISA非課税、超過→特定口座(20.315%課税)</div>
           {/* Phase 3: 個別利回り */}
@@ -806,7 +819,12 @@ function NISASection({ s, onChange, isLinked, baseScenario, open, onToggle }: { 
           <div className="border-t border-green-100 pt-1">
             <span className="text-[10px] font-semibold text-gray-600">残高ポリシー</span>
             <div className="flex flex-wrap gap-2 mt-0.5">
-              <div className="flex items-center gap-1"><span className="text-gray-500 text-[10px]">防衛資金</span><input type="number" value={bp.cashReserveMonths} step={1} min={0} onChange={e => setBP({ cashReserveMonths: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" /><span className="text-[10px] text-gray-400">ヶ月分</span></div>
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 text-[10px]">防衛資金</span>
+                <input type="number" value={bp.cashReserveMonths} step={1} min={0} onChange={e => setBP({ cashReserveMonths: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
+                <span className="text-[10px] text-gray-400">ヶ月分</span>
+                <span className="text-[9px] text-gray-400">≒{Math.round(resolveKF(s.expenseKF, currentAge, 20) * bp.cashReserveMonths)}万円</span>
+              </div>
               <label className="flex items-center gap-1 text-[10px] cursor-pointer"><input type="checkbox" checked={bp.nisaPriority} onChange={e => setBP({ nisaPriority: e.target.checked })} className="accent-green-600" /><span className="text-gray-500">余剰→NISA/特定優先</span></label>
             </div>
             {/* Phase 8: 引出戦略 */}
@@ -1125,7 +1143,7 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
           ...(s.events || []),
         ]} />
 
-      <NISASection s={s} onChange={onChange} isLinked={isLinked} baseScenario={baseScenario}
+      <NISASection s={s} onChange={onChange} currentAge={currentAge} isLinked={isLinked} baseScenario={baseScenario}
         open={secOpen("nisa")} onToggle={() => toggleSec("nisa")} />
     </div>
   );
