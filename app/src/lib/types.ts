@@ -179,6 +179,7 @@ export interface MarketCrashParams {
   target: "nisa" | "taxable" | "all";  // 対象口座
   recoveryYears?: number;  // 回復期間（年）。この期間でrrに戻る
   recoveryRates?: number[]; // 各年の利回り(%)オーバーライド。未設定=自動補間
+  targetRR?: number;       // 目標平均利回り(%)。ボーナスレート算出に使用
 }
 
 export interface LifeEvent {

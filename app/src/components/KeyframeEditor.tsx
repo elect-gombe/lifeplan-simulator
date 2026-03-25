@@ -9,7 +9,7 @@ import { CarModal } from "./CarModal";
 import { DeathModal } from "./DeathModal";
 import { HousingPhaseBar } from "./HousingPhaseBar";
 import { InsuranceModal } from "./InsuranceModal";
-import { CrashModal } from "./CrashModal";
+import { CrashModal, generateRecoveryRates } from "./CrashModal";
 import { GiftModal } from "./GiftModal";
 import { RelocationModal } from "./RelocationModal";
 import { buildLoanSchedule } from "../lib/calc";
@@ -327,17 +327,7 @@ function EventList({ events, updateEvent, updateEventMulti, removeEvent, current
           {e.relocationParams && onEditRelocation && <button onClick={() => onEditRelocation(e)} className="text-[10px] rounded px-1 py-0.5 bg-cyan-100 text-cyan-600">✏️</button>}
           <input value={e.label} onChange={ev => updateEvent(e.id, "label", ev.target.value)} className="w-28 rounded border px-1.5 py-1 text-xs" />
           {e.marketCrashParams && (
-            <span className="flex items-center gap-1">
-              <input type="number" value={e.marketCrashParams.dropRate} min={1} max={99} step={5}
-                onChange={ev => { const dr = Number(ev.target.value); updateEventMulti(e.id, { marketCrashParams: { ...e.marketCrashParams!, dropRate: dr }, label: `暴落 -${dr}%` }); }}
-                className="w-12 rounded border px-1 py-0.5 text-[10px]" /><span className="text-[10px] text-gray-400">%</span>
-              <select value={e.marketCrashParams.target} onChange={ev => updateEventMulti(e.id, { marketCrashParams: { ...e.marketCrashParams!, target: ev.target.value as any } })}
-                className="rounded border px-1 py-0.5 text-[10px]">
-                <option value="all">全口座</option>
-                <option value="nisa">NISAのみ</option>
-                <option value="taxable">特定のみ</option>
-              </select>
-            </span>
+            <span className="text-[10px] text-gray-500">-{e.marketCrashParams.dropRate}% {e.marketCrashParams.target === "all" ? "全口座" : e.marketCrashParams.target === "nisa" ? "NISA" : "特定"}</span>
           )}
           {e.propertyParams && updateEventMulti && (
             <span className="flex items-center gap-0.5">
@@ -354,9 +344,12 @@ function EventList({ events, updateEvent, updateEventMulti, removeEvent, current
           ) : (
             <><input type="number" value={e.age} min={currentAge} max={retirementAge} step={1} onChange={ev => updateEvent(e.id, "age", Number(ev.target.value))} className="w-14 rounded border px-1.5 py-1 text-xs" /><span className="text-[10px] text-gray-400">歳</span></>
           )}
-          <input type="number" value={e.annualCostMan} step={5} onChange={ev => updateEvent(e.id, "annualCostMan", Number(ev.target.value))} className="w-16 rounded border px-1.5 py-1 text-xs" />
-          <span className="text-[10px] text-gray-400">万/年</span>
-          {e.durationYears > 0 && (<><input type="number" value={e.durationYears} min={0} step={1} onChange={ev => updateEvent(e.id, "durationYears", Number(ev.target.value))} className="w-12 rounded border px-1.5 py-1 text-xs" /><span className="text-[10px] text-gray-400">年</span></>)}
+          {!e.marketCrashParams && !e.deathParams && !e.insuranceParams && !e.giftParams && (<>
+            <input type="number" value={e.annualCostMan} step={5} onChange={ev => updateEvent(e.id, "annualCostMan", Number(ev.target.value))} className="w-16 rounded border px-1.5 py-1 text-xs" />
+            <span className="text-[10px] text-gray-400">万/年</span>
+          </>)}
+          {e.durationYears > 0 && !e.marketCrashParams && (<><input type="number" value={e.durationYears} min={0} step={1} onChange={ev => updateEvent(e.id, "durationYears", Number(ev.target.value))} className="w-12 rounded border px-1.5 py-1 text-xs" /><span className="text-[10px] text-gray-400">年</span></>)}
+          {e.marketCrashParams && <span className="text-[10px] text-gray-400">({e.durationYears}年)</span>}
           {hasChildren && isCollapsed && <span className="text-[10px] text-gray-400">({children.length}件 計{totalChildCost}万)</span>}
           <div className="flex items-center gap-1 ml-auto">
             <input type="checkbox" checked={!e.disabled} onChange={() => updateEvent(e.id, "disabled", !e.disabled)} className="accent-blue-600 w-3 h-3" title={e.disabled ? "有効にする" : "無効にする"} />

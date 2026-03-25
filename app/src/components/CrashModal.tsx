@@ -25,7 +25,7 @@ function calcBonusRate(dropRate: number, recoveryYears: number, targetRR: number
 }
 
 /** 回復レート配列を生成（全年同一ボーナス or カスタム） */
-function generateRecoveryRates(dropRate: number, recoveryYears: number, targetRR: number): number[] {
+export function generateRecoveryRates(dropRate: number, recoveryYears: number, targetRR: number): number[] {
   const bonus = calcBonusRate(dropRate, recoveryYears, targetRR);
   return Array(recoveryYears).fill(bonus);
 }
@@ -38,12 +38,15 @@ function calcEffectiveCAGR(dropRate: number, rates: number[]): number {
   return (Math.pow(product, 1 / n) - 1) * 100;
 }
 
-/** プレビュー用: 資産推移を計算 */
-function simulateAsset(initial: number, contrib: number, years: number, normalRR: number, crashAt: number, dropRate: number, recoveryRates: number[]): number[] {
-  const result: number[] = [];
+interface SimPoint { value: number; cost: number; gain: number; }
+
+/** プレビュー用: 資産推移を計算（時価・元本・含み益） */
+function simulateAsset(initial: number, contrib: number, years: number, normalRR: number, crashAt: number, dropRate: number, recoveryRates: number[]): SimPoint[] {
+  const result: SimPoint[] = [];
   let asset = initial;
+  let cost = initial; // 投入額累計
   for (let y = 0; y <= years; y++) {
-    result.push(asset);
+    result.push({ value: asset, cost, gain: asset - cost });
     if (y === crashAt) {
       asset *= (1 - dropRate / 100);
     } else if (y > crashAt && y - crashAt - 1 < recoveryRates.length) {
@@ -52,6 +55,7 @@ function simulateAsset(initial: number, contrib: number, years: number, normalRR
       asset *= (1 + normalRR / 100);
     }
     asset += contrib;
+    cost += contrib;
   }
   return result;
 }
@@ -78,6 +82,7 @@ export function CrashModal({ isOpen, onClose, onSave, currentAge, retirementAge,
       setTarget(cp.target);
       setRecoveryYears(cp.recoveryYears ?? 15);
       setCustomRates(cp.recoveryRates ?? null);
+      setTargetRR(cp.targetRR ?? defaultRR ?? 4);
     } else {
       setAge(currentAge + 5);
       setDropRate(DEFAULTS.dropRate);
@@ -105,25 +110,35 @@ export function CrashModal({ isOpen, onClose, onSave, currentAge, retirementAge,
   // プレビュー
   const pvYears = Math.max(recoveryYears + 8, 25);
   const crashAt = 3;
-  const pvCrash = useMemo(() => simulateAsset(10000000, 1000000, pvYears, targetRR, crashAt, dropRate, effectiveRates), [targetRR, dropRate, effectiveRates, pvYears]);
-  const pvNormal = useMemo(() => simulateAsset(10000000, 1000000, pvYears, targetRR, -1, 0, []), [targetRR, pvYears]);
+  const pvCrash = useMemo(() => simulateAsset(10000000, 400000, pvYears, targetRR, crashAt, dropRate, effectiveRates), [targetRR, dropRate, effectiveRates, pvYears]);
+  const pvNormal = useMemo(() => simulateAsset(10000000, 400000, pvYears, targetRR, -1, 0, []), [targetRR, pvYears]);
 
   // Chart
-  const cW = 520, cH = 180, pL = 55, pR = 10, pT = 15, pB = 22;
-  const allVals = [...pvCrash, ...pvNormal];
+  const cW = 520, cH = 220, pL = 55, pR = 10, pT = 15, pB = 22;
+  const allVals = [...pvCrash.map(p => p.value), ...pvNormal.map(p => p.value)];
   const maxV = Math.max(...allVals);
-  const minV = Math.min(...allVals, 0);
+  const minV = 0;
   const x = (i: number) => pL + (i / pvYears) * (cW - pL - pR);
-  const y = (v: number) => pT + (maxV === minV ? 0.5 : (1 - (v - minV) / (maxV - minV))) * (cH - pT - pB);
-  const path = (data: number[]) => data.map((v, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(v)}`).join(" ");
+  const yv = (v: number) => pT + (maxV === minV ? 0.5 : (1 - (v - minV) / (maxV - minV))) * (cH - pT - pB);
+  const linePath = (data: SimPoint[], key: keyof SimPoint) => data.map((p, i) => `${i === 0 ? "M" : "L"}${x(i)},${yv(p[key])}`).join(" ");
+  // 含み益/含み損の塗りつぶしエリア（時価と元本の間）
+  const gainFill = (data: SimPoint[]) => {
+    const top = data.map((p, i) => `${x(i)},${yv(p.value)}`).join(" L");
+    const bot = data.map((p, i) => `${x(data.length - 1 - i)},${yv(data[data.length - 1 - i].cost)}`).join(" L");
+    return `M${top} L${bot} Z`;
+  };
 
   const handleSave = () => {
+    // 保存時に最新の値で再生成（stale useMemo対策）
+    const ratesToSave = customRates && customRates.length === recoveryYears
+      ? customRates
+      : generateRecoveryRates(dropRate, recoveryYears, targetRR);
     onSave({
       id: existingEvent?.id || Date.now(),
       age, type: "crash",
-      label: `暴落 -${dropRate}%`,
-      oneTimeCostMan: 0, annualCostMan: 0, durationYears: 1,
-      marketCrashParams: { dropRate, target, recoveryYears, recoveryRates: effectiveRates },
+      label: `暴落 -${dropRate}%(${recoveryYears}年回復)`,
+      oneTimeCostMan: 0, annualCostMan: 0, durationYears: recoveryYears + 1,
+      marketCrashParams: { dropRate, target, recoveryYears, recoveryRates: ratesToSave, targetRR },
     });
     onClose();
   };
@@ -180,68 +195,118 @@ export function CrashModal({ isOpen, onClose, onSave, currentAge, retirementAge,
 
         {/* 年別利回り */}
         <div className="rounded border p-3">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-bold text-gray-600">年別利回り（編集可）</span>
-            {customRates && <button onClick={() => setCustomRates(null)} className="text-[10px] text-blue-500 hover:underline">自動に戻す</button>}
-          </div>
+          <div className="text-xs font-bold text-gray-600 mb-1">年別利回り</div>
           <div className="flex items-end gap-0.5 overflow-x-auto pb-1">
-            {/* 暴落年 */}
             <div className="flex flex-col items-center shrink-0">
               <span className="text-[9px] text-gray-400">暴落</span>
-              <div className="w-10 h-8 rounded bg-red-100 flex items-center justify-center text-[10px] text-red-700 font-bold">-{dropRate}%</div>
+              <div className="w-10 h-7 rounded bg-red-100 flex items-center justify-center text-[10px] text-red-700 font-bold">-{dropRate}%</div>
             </div>
-            {/* 回復期間 */}
             {effectiveRates.map((rate, i) => (
               <div key={i} className="flex flex-col items-center shrink-0">
                 <span className="text-[8px] text-gray-400">+{i + 1}</span>
-                <input type="number" value={rate} step={0.5} min={-50} max={50}
-                  onChange={e => updateRate(i, Number(e.target.value))}
-                  className={`w-10 h-8 rounded border text-[10px] text-center font-mono ${rate < 0 ? "text-red-600 bg-red-50" : rate > targetRR ? "text-green-700 bg-green-50" : "text-amber-600 bg-amber-50"}`} />
+                <div className={`w-10 h-7 rounded flex items-center justify-center text-[10px] font-mono ${rate < 0 ? "text-red-600 bg-red-50" : rate > targetRR ? "text-green-700 bg-green-50" : "text-amber-600 bg-amber-50"}`}>{rate}%</div>
               </div>
             ))}
-            {/* 通常に戻る */}
             <div className="flex flex-col items-center shrink-0">
               <span className="text-[8px] text-gray-400">以降</span>
-              <div className="w-10 h-8 rounded bg-gray-100 flex items-center justify-center text-[10px] text-gray-500">{targetRR}%</div>
+              <div className="w-10 h-7 rounded bg-gray-100 flex items-center justify-center text-[10px] text-gray-500">{targetRR}%</div>
             </div>
           </div>
         </div>
 
-        {/* プレビューチャート */}
+        {/* グラフ1: 資産推移比較 */}
         <div className="rounded border p-3">
-          <div className="text-xs font-bold text-gray-600 mb-1">資産推移イメージ（初期1,000万 + 毎年100万積立）</div>
-          <svg viewBox={`0 0 ${cW} ${cH}`} className="w-full" style={{ maxHeight: 200 }}>
-            {/* Yグリッド */}
+          <div className="text-xs font-bold text-gray-600 mb-1">資産推移（初期1,000万 + 毎年40万積立）</div>
+          <svg viewBox={`0 0 ${cW} ${cH}`} className="w-full" style={{ maxHeight: 180 }}>
             {[0, 0.25, 0.5, 0.75, 1].map(t => {
               const v = minV + t * (maxV - minV);
-              return <g key={t}><line x1={pL} y1={y(v)} x2={cW - pR} y2={y(v)} stroke="#e5e7eb" strokeWidth={0.5} />
-                <text x={pL - 4} y={y(v) + 3} textAnchor="end" fontSize={8} fill="#9ca3af">{Math.round(v / 10000)}万</text></g>;
+              return <g key={t}><line x1={pL} y1={yv(v)} x2={cW - pR} y2={yv(v)} stroke="#e5e7eb" strokeWidth={0.5} />
+                <text x={pL - 4} y={yv(v) + 3} textAnchor="end" fontSize={8} fill="#9ca3af">{Math.round(v / 10000)}万</text></g>;
             })}
-            {/* 暴落帯 */}
             <rect x={x(crashAt)} y={pT} width={Math.max(x(crashAt + 1) - x(crashAt), 2)} height={cH - pT - pB} fill="#dc2626" opacity={0.15} />
-            {/* 回復帯 */}
-            <rect x={x(crashAt + 1)} y={pT} width={x(crashAt + 1 + recoveryYears) - x(crashAt + 1)} height={cH - pT - pB} fill="#22c55e" opacity={0.08} />
+            <rect x={x(crashAt + 1)} y={pT} width={x(crashAt + 1 + recoveryYears) - x(crashAt + 1)} height={cH - pT - pB} fill="#22c55e" opacity={0.06} />
             <text x={x(crashAt + 1 + recoveryYears / 2)} y={pT + 10} textAnchor="middle" fontSize={7} fill="#16a34a">回復ボーナス期間</text>
-            {/* 暴落なし */}
-            <path d={path(pvNormal)} fill="none" stroke="#94a3b8" strokeWidth={1} strokeDasharray="4,3" />
-            {/* 暴落あり */}
-            <path d={path(pvCrash)} fill="none" stroke="#dc2626" strokeWidth={2} />
-            {/* X軸 */}
+            <path d={linePath(pvNormal, "value")} fill="none" stroke="#94a3b8" strokeWidth={1} strokeDasharray="4,3" />
+            <path d={linePath(pvCrash, "value")} fill="none" stroke="#dc2626" strokeWidth={2} />
             {[0, crashAt, crashAt + recoveryYears, pvYears].map(yr => (
               <text key={yr} x={x(yr)} y={cH - 4} textAnchor="middle" fontSize={8} fill="#9ca3af">{yr}年</text>
             ))}
-            {/* 凡例 */}
-            <line x1={cW - 130} y1={pT + 3} x2={cW - 115} y2={pT + 3} stroke="#94a3b8" strokeWidth={1} strokeDasharray="3,3" />
-            <text x={cW - 110} y={pT + 6} fontSize={7} fill="#94a3b8">暴落なし({targetRR}%)</text>
-            <line x1={cW - 130} y1={pT + 14} x2={cW - 115} y2={pT + 14} stroke="#dc2626" strokeWidth={2} />
-            <text x={cW - 110} y={pT + 17} fontSize={7} fill="#dc2626">暴落+回復</text>
+            <g fontSize={7}>
+              <line x1={cW - 135} y1={pT + 3} x2={cW - 120} y2={pT + 3} stroke="#94a3b8" strokeWidth={1} strokeDasharray="3,3" />
+              <text x={cW - 116} y={pT + 6} fill="#94a3b8">暴落なし({targetRR}%)</text>
+              <line x1={cW - 135} y1={pT + 13} x2={cW - 120} y2={pT + 13} stroke="#dc2626" strokeWidth={2} />
+              <text x={cW - 116} y={pT + 16} fill="#dc2626">暴落+回復</text>
+            </g>
           </svg>
-          <div className="flex gap-4 mt-1 text-[10px] text-gray-500">
-            <span>{pvYears}年後 暴落なし: <b>{Math.round(pvNormal[pvYears] / 10000).toLocaleString()}万</b></span>
-            <span>暴落+回復: <b className="text-red-600">{Math.round(pvCrash[pvYears] / 10000).toLocaleString()}万</b></span>
-            <span>差額: <b className="text-red-600">-{Math.round((pvNormal[pvYears] - pvCrash[pvYears]) / 10000).toLocaleString()}万</b></span>
+          <div className="flex flex-wrap gap-3 mt-1 text-[10px] text-gray-500">
+            <span>{pvYears}年後 暴落なし: <b>{Math.round(pvNormal[pvYears].value / 10000).toLocaleString()}万</b></span>
+            <span>暴落+回復: <b className="text-red-600">{Math.round(pvCrash[pvYears].value / 10000).toLocaleString()}万</b></span>
+            <span>差額: <b className="text-red-600">-{Math.round((pvNormal[pvYears].value - pvCrash[pvYears].value) / 10000).toLocaleString()}万</b></span>
           </div>
         </div>
+
+        {/* グラフ2: 含み益/含み損 */}
+        {(() => {
+          const gH = 140;
+          const gains = pvCrash.map(p => p.gain);
+          const gMax = Math.max(...gains, 0);
+          const gMin = Math.min(...gains, 0);
+          const gy = (v: number) => pT + (gMax === gMin ? 0.5 : (1 - (v - gMin) / (gMax - gMin))) * (gH - pT - pB);
+          const zeroY = gy(0);
+          const gainPath = pvCrash.map((p, i) => `${i === 0 ? "M" : "L"}${x(i)},${gy(p.gain)}`).join(" ");
+          const fillAbove = gainPath + ` L${x(pvYears)},${zeroY} L${x(0)},${zeroY} Z`;
+          // 含み益回復ポイント: 暴落後に初めてgain >= 0になる年
+          let recoveryPoint = -1;
+          for (let i = crashAt + 1; i <= pvYears; i++) {
+            if (pvCrash[i].gain >= 0) { recoveryPoint = i; break; }
+          }
+          const recoveryFromCrash = recoveryPoint >= 0 ? recoveryPoint - crashAt : -1;
+          return (
+            <div className="rounded border p-3">
+              <div className="text-xs font-bold text-gray-600 mb-1">含み益 / 含み損（暴落シナリオ）</div>
+              <svg viewBox={`0 0 ${cW} ${gH}`} className="w-full" style={{ maxHeight: 140 }}>
+                {/* 0ライン */}
+                <line x1={pL} y1={zeroY} x2={cW - pR} y2={zeroY} stroke="#374151" strokeWidth={0.5} />
+                <text x={pL - 4} y={zeroY + 3} textAnchor="end" fontSize={8} fill="#374151">0</text>
+                {/* Yグリッド */}
+                {[gMin, gMax].filter(v => v !== 0).map(v => (
+                  <g key={v}><line x1={pL} y1={gy(v)} x2={cW - pR} y2={gy(v)} stroke="#e5e7eb" strokeWidth={0.5} />
+                    <text x={pL - 4} y={gy(v) + 3} textAnchor="end" fontSize={8} fill="#9ca3af">{Math.round(v / 10000)}万</text></g>
+                ))}
+                {/* 暴落帯 */}
+                <rect x={x(crashAt)} y={pT} width={Math.max(x(crashAt + 1) - x(crashAt), 2)} height={gH - pT - pB} fill="#dc2626" opacity={0.1} />
+                {/* 含み損期間の帯 */}
+                {recoveryPoint > 0 && (
+                  <rect x={x(crashAt)} y={pT} width={x(recoveryPoint) - x(crashAt)} height={gH - pT - pB} fill="#fbbf24" opacity={0.08} />
+                )}
+                {/* 塗りつぶし: 含み益=緑、含み損=赤 */}
+                <clipPath id="aboveZero"><rect x={pL} y={pT} width={cW - pL - pR} height={zeroY - pT} /></clipPath>
+                <clipPath id="belowZero"><rect x={pL} y={zeroY} width={cW - pL - pR} height={gH - pB - zeroY} /></clipPath>
+                <path d={fillAbove} fill="#22c55e" opacity={0.2} clipPath="url(#aboveZero)" />
+                <path d={fillAbove} fill="#dc2626" opacity={0.2} clipPath="url(#belowZero)" />
+                {/* 含み益回復ポイント */}
+                {recoveryPoint > 0 && <>
+                  <line x1={x(recoveryPoint)} y1={pT} x2={x(recoveryPoint)} y2={gH - pB} stroke="#f59e0b" strokeWidth={1} strokeDasharray="3,2" />
+                  <text x={x(recoveryPoint)} y={pT + 10} textAnchor="middle" fontSize={7} fill="#d97706">{recoveryFromCrash}年で回復</text>
+                </>}
+                {/* ライン */}
+                <path d={gainPath} fill="none" stroke="#374151" strokeWidth={1.5} />
+                {/* X軸 */}
+                {[0, crashAt, ...(recoveryPoint > 0 && recoveryPoint !== crashAt + recoveryYears ? [recoveryPoint] : []), crashAt + recoveryYears, pvYears].map(yr => (
+                  <text key={yr} x={x(yr)} y={gH - 4} textAnchor="middle" fontSize={8} fill="#9ca3af">{yr}年</text>
+                ))}
+              </svg>
+              <div className="flex flex-wrap gap-3 mt-1 text-[10px] text-gray-500">
+                <span>元本(累計): <b className="text-indigo-600">{Math.round(pvCrash[pvYears].cost / 10000).toLocaleString()}万</b></span>
+                <span>最終含み益: <b className={pvCrash[pvYears].gain >= 0 ? "text-green-600" : "text-red-600"}>{pvCrash[pvYears].gain >= 0 ? "+" : ""}{Math.round(pvCrash[pvYears].gain / 10000).toLocaleString()}万</b></span>
+                <span>最大含み損: <b className="text-red-600">{Math.round(Math.min(...gains) / 10000).toLocaleString()}万</b></span>
+                {recoveryPoint > 0
+                  ? <span>含み益回復: <b className="text-amber-600">暴落から{recoveryFromCrash}年後({recoveryPoint}年目)</b></span>
+                  : <span>含み益回復: <b className="text-red-600">{pvYears}年以内に回復せず</b></span>}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </Modal>
   );
