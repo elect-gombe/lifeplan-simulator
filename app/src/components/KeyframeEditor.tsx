@@ -9,6 +9,7 @@ import { CarModal } from "./CarModal";
 import { DeathModal } from "./DeathModal";
 import { HousingPhaseBar } from "./HousingPhaseBar";
 import { InsuranceModal } from "./InsuranceModal";
+import { CrashModal } from "./CrashModal";
 import { GiftModal } from "./GiftModal";
 import { RelocationModal } from "./RelocationModal";
 import { buildLoanSchedule } from "../lib/calc";
@@ -280,7 +281,7 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
 }
 
 // ===== Collapsible Event List =====
-function EventList({ events, updateEvent, updateEventMulti, removeEvent, currentAge, retirementAge, label, onEditProperty, onEditCar, onEditDeath, onEditInsurance, onEditGift, onEditRelocation, onEditChild }: {
+function EventList({ events, updateEvent, updateEventMulti, removeEvent, currentAge, retirementAge, label, onEditProperty, onEditCar, onEditDeath, onEditInsurance, onEditGift, onEditRelocation, onEditChild, onEditCrash }: {
   events: LifeEvent[];
   updateEvent: (id: number, f: string, v: any) => void;
   updateEventMulti?: (id: number, patch: Record<string, any>) => void;
@@ -294,6 +295,7 @@ function EventList({ events, updateEvent, updateEventMulti, removeEvent, current
   onEditGift?: (e: LifeEvent) => void;
   onEditRelocation?: (e: LifeEvent) => void;
   onEditChild?: (e: LifeEvent) => void;
+  onEditCrash?: (e: LifeEvent) => void;
 }) {
   const [collapsed, setCollapsed] = usePersistedSet("sim-evt-collapsed");
   if (events.length === 0) return null;
@@ -321,6 +323,7 @@ function EventList({ events, updateEvent, updateEventMulti, removeEvent, current
           {e.deathParams && onEditDeath && <button onClick={() => onEditDeath(e)} className="text-[10px] rounded px-1 py-0.5 bg-gray-200 text-gray-600">✏️</button>}
           {e.insuranceParams && onEditInsurance && <button onClick={() => onEditInsurance(e)} className="text-[10px] rounded px-1 py-0.5 bg-indigo-100 text-indigo-600">✏️</button>}
           {e.giftParams && onEditGift && <button onClick={() => onEditGift(e)} className="text-[10px] rounded px-1 py-0.5 bg-purple-100 text-purple-600">✏️</button>}
+          {e.marketCrashParams && onEditCrash && <button onClick={() => onEditCrash(e)} className="text-[10px] rounded px-1 py-0.5 bg-red-100 text-red-600">✏️</button>}
           {e.relocationParams && onEditRelocation && <button onClick={() => onEditRelocation(e)} className="text-[10px] rounded px-1 py-0.5 bg-cyan-100 text-cyan-600">✏️</button>}
           <input value={e.label} onChange={ev => updateEvent(e.id, "label", ev.target.value)} className="w-28 rounded border px-1.5 py-1 text-xs" />
           {e.marketCrashParams && (
@@ -429,16 +432,17 @@ function BaseEventList({ baseEvents, excludedIds, disabledIds, onUnlink, onRelin
 }
 
 // ===== Event Section =====
-function EventSection({ scenario, onChange, currentAge, retirementAge, baseScenario, isLinked, open, onToggle }: {
+function EventSection({ scenario, onChange, currentAge, retirementAge, baseScenario, isLinked, open, onToggle, defaultRR }: {
   scenario: Scenario; onChange: (s: Scenario) => void;
   currentAge: number; retirementAge: number;
   baseScenario?: Scenario | null; isLinked: boolean;
   open: boolean; onToggle: () => void;
+  defaultRR?: number;
 }) {
   const events = scenario.events || [];
   const baseEvents = (isLinked && baseScenario) ? (baseScenario.events || []) : [];
   const excludedIds = scenario.excludedBaseEventIds || [];
-  type ModalType = "child" | "property" | "car" | "death" | "insurance" | "gift" | "relocation" | null;
+  type ModalType = "child" | "property" | "car" | "death" | "insurance" | "gift" | "relocation" | "crash" | null;
   const [openModal, setOpenModal] = useState<ModalType>(null);
   const [editingEvent, setEditingEvent] = useState<LifeEvent | null>(null);
   const [editingChildEvents, setEditingChildEvents] = useState<LifeEvent[]>([]);
@@ -487,7 +491,7 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
       <div className="mb-1.5 flex flex-wrap gap-1">
         {Object.entries(EVENT_TYPES).filter(([k]) => k !== "education" && k !== "marriage" && k !== "rent" && k !== "property" && k !== "relocation").map(([k, v]) => (
           <button key={k} onClick={() => {
-            if (["child", "property", "car", "death", "insurance", "gift", "relocation"].includes(k)) { openModalFor(k as ModalType); }
+            if (["child", "property", "car", "death", "insurance", "gift", "relocation", "crash"].includes(k)) { openModalFor(k as ModalType); }
             else addSimpleEvent(k);
           }} className="rounded border bg-white px-1.5 py-0.5 text-[10px] hover:bg-blue-50 hover:border-blue-300">{v.icon} {v.label}</button>
         ))}
@@ -499,6 +503,7 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
       <CarModal isOpen={openModal === "car"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <DeathModal isOpen={openModal === "death"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <InsuranceModal isOpen={openModal === "insurance"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+      <CrashModal isOpen={openModal === "crash"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} defaultRR={defaultRR} />
       <GiftModal isOpen={openModal === "gift"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <RelocationModal isOpen={openModal === "relocation"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent}
         allEvents={[...baseEvents.filter(e => !excludedIds.includes(e.id)), ...events]}
@@ -541,6 +546,7 @@ function EventSection({ scenario, onChange, currentAge, retirementAge, baseScena
         onEditProperty={(e) => openModalFor("property", e)} onEditCar={(e) => openModalFor("car", e)}
         onEditDeath={(e) => openModalFor("death", e)} onEditInsurance={(e) => openModalFor("insurance", e)}
         onEditGift={(e) => openModalFor("gift", e)} onEditRelocation={(e) => openModalFor("relocation", e)}
+        onEditCrash={(e) => openModalFor("crash", e)}
         onEditChild={(e) => { const childEvts = [e, ...events.filter(c => c.parentId === e.id)]; setEditingChildEvents(childEvts); setOpenModal("child"); }} />
       {events.length === 0 && baseEvents.length === 0 && <div className="text-[10px] text-gray-400 pl-2">イベントなし</div>}
     </Section>
@@ -744,7 +750,10 @@ function NISASection({ s, onChange, currentAge, isLinked, baseScenario, open, on
   const baseS = isLinked && baseScenario ? baseScenario : null;
   const inheritedFromBase = !ni.enabled && baseS?.nisa?.enabled;
   const effNi = inheritedFromBase ? baseS!.nisa! : ni;
-  const bp = s.balancePolicy || (baseS?.balancePolicy ? baseS.balancePolicy : { cashReserveMonths: 6, nisaPriority: true });
+  const defaultBP: BalancePolicy = { cashReserveMonths: 6, cashReserveMaxMonths: 18, nisaPriority: true };
+  const bpInherited = !s.balancePolicy && !!baseS?.balancePolicy;
+  const bp = s.balancePolicy || baseS?.balancePolicy || defaultBP;
+  const bpReadOnly = bpInherited;
   const setNISA = (patch: Partial<NISAConfig>) => onChange({ ...s, nisa: { ...ni, ...patch } });
   const setBP = (patch: Partial<BalancePolicy>) => onChange({ ...s, balancePolicy: { ...bp, ...patch } });
 
@@ -816,51 +825,86 @@ function NISASection({ s, onChange, currentAge, isLinked, baseScenario, open, on
               </div>
             </details>
           </div>
-          <div className="border-t border-green-100 pt-1">
-            <span className="text-[10px] font-semibold text-gray-600">残高ポリシー</span>
-            <div className="flex flex-wrap gap-2 mt-0.5">
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 text-[10px]">防衛資金</span>
-                <input type="number" value={bp.cashReserveMonths} step={1} min={0} onChange={e => setBP({ cashReserveMonths: Number(e.target.value) })} className="w-12 rounded border px-1 py-0.5 text-xs" />
-                <span className="text-[10px] text-gray-400">ヶ月分</span>
-                <span className="text-[9px] text-gray-400">≒{Math.round(resolveKF(s.expenseKF, currentAge, 20) * bp.cashReserveMonths)}万円</span>
-              </div>
-              <label className="flex items-center gap-1 text-[10px] cursor-pointer"><input type="checkbox" checked={bp.nisaPriority} onChange={e => setBP({ nisaPriority: e.target.checked })} className="accent-green-600" /><span className="text-gray-500">余剰→NISA/特定優先</span></label>
-            </div>
-            {/* Phase 8: 引出戦略 */}
-            <details className="text-[10px] mt-1">
-              <summary className="cursor-pointer text-gray-500">引出順序{bp.withdrawalOrder ? " (カスタム)" : " (デフォルト)"}</summary>
-              <div className="mt-1 space-y-1 bg-gray-50 rounded p-1.5">
-                <div className="text-gray-400">資産取り崩し順序（上から優先）</div>
-                {(() => {
-                  const order = bp.withdrawalOrder || ["taxable", "spouseNisa", "selfNisa"];
-                  const labels: Record<string, string> = { taxable: "特定口座", spouseNisa: "配偶者NISA", selfNisa: "本人NISA" };
-                  const moveUp = (i: number) => { if (i <= 0) return; const o = [...order]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setBP({ withdrawalOrder: o as any }); };
-                  const moveDown = (i: number) => { if (i >= order.length - 1) return; const o = [...order]; [o[i], o[i + 1]] = [o[i + 1], o[i]]; setBP({ withdrawalOrder: o as any }); };
-                  return order.map((src, i) => (
-                    <div key={src} className="flex items-center gap-1">
-                      <span className="w-4 text-center text-gray-400">{i + 1}.</span>
-                      <span className="flex-1">{labels[src]}</span>
-                      <button onClick={() => moveUp(i)} className="text-gray-400 hover:text-blue-500" disabled={i === 0}>▲</button>
-                      <button onClick={() => moveDown(i)} className="text-gray-400 hover:text-blue-500" disabled={i === order.length - 1}>▼</button>
-                    </div>
-                  ));
-                })()}
-                {bp.withdrawalOrder && <button onClick={() => setBP({ withdrawalOrder: undefined })} className="text-blue-500 hover:underline">デフォルトに戻す</button>}
-              </div>
-            </details>
-          </div>
         </div>
       )}
+      {/* 残高ポリシー — NISA有効/無効に関係なく常に表示 */}
+      <div className="border-t border-green-100 pt-1 mt-1">
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] font-semibold text-gray-600">残高ポリシー</span>
+          {baseS && (
+            <button onClick={() => bpReadOnly ? setBP({}) : onChange({ ...s, balancePolicy: undefined })}
+              className={`text-[10px] rounded px-1.5 py-0.5 ${bpReadOnly ? "bg-gray-200 text-gray-500" : "bg-blue-100 text-blue-600"}`}
+              title={bpReadOnly ? "Aにリンク中（クリックで独自設定）" : "独自設定中（クリックでAにリンク）"}>
+              {bpReadOnly ? "🔗A" : "✏️独自"}
+            </button>
+          )}
+        </div>
+        <div className={`flex flex-wrap gap-2 mt-0.5 ${bpReadOnly ? "opacity-50 pointer-events-none" : ""}`}>
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-gray-500 text-[10px]">防衛資金<span className="ml-0.5 cursor-help text-gray-400" title="月間支出ベース。下限を下回ったら取り崩し、上限を超えたらNISA/特定へ投資。その間は何もしない(ヒステリシス)">ⓘ</span></span>
+            <span className="text-[9px] text-gray-400">下限</span>
+            <input type="number" value={bp.cashReserveMonths} step={1} min={0} onChange={e => setBP({ cashReserveMonths: Number(e.target.value) })} className="w-10 rounded border px-1 py-0.5 text-xs" disabled={bpReadOnly} />
+            <span className="text-[9px] text-gray-400">〜上限</span>
+            <input type="number" value={bp.cashReserveMaxMonths ?? bp.cashReserveMonths} step={1} min={bp.cashReserveMonths} onChange={e => setBP({ cashReserveMaxMonths: Number(e.target.value) })} className="w-10 rounded border px-1 py-0.5 text-xs" disabled={bpReadOnly} />
+            <span className="text-[10px] text-gray-400">ヶ月</span>
+          </div>
+          <label className="flex items-center gap-1 text-[10px] cursor-pointer"><input type="checkbox" checked={bp.nisaPriority} onChange={e => setBP({ nisaPriority: e.target.checked })} className="accent-green-600" disabled={bpReadOnly} /><span className="text-gray-500">余剰→NISA/特定優先</span></label>
+        </div>
+        {/* 目標貯金アンカー */}
+        <div className="mt-1 text-[10px]">
+          <div className="flex items-center gap-1 mb-0.5">
+            <span className="text-gray-500 font-semibold">目標貯金<span className="ml-0.5 cursor-help text-gray-400" title="特定年齢までに現金をX万円確保。目標に向けて投資を抑制し現金を多めに持ちます">ⓘ</span></span>
+            <button onClick={() => setBP({ cashAnchors: [...(bp.cashAnchors || []), { age: currentAge + 5, amountMan: 500 }] })}
+              className="text-blue-500 hover:underline">+ 追加</button>
+          </div>
+          {(bp.cashAnchors || []).map((a, i) => (
+            <div key={i} className="flex items-center gap-1 mb-0.5">
+              <input type="number" value={a.age} min={currentAge + 1} step={1}
+                onChange={e => { const anc = [...(bp.cashAnchors || [])]; anc[i] = { ...a, age: Number(e.target.value) }; setBP({ cashAnchors: anc }); }}
+                className="w-12 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-gray-400">歳までに</span>
+              <input type="number" value={a.amountMan} step={100} min={0}
+                onChange={e => { const anc = [...(bp.cashAnchors || [])]; anc[i] = { ...a, amountMan: Number(e.target.value) }; setBP({ cashAnchors: anc }); }}
+                className="w-16 rounded border px-1 py-0.5 text-xs" />
+              <span className="text-gray-400">万円</span>
+              <button onClick={() => { const anc = [...(bp.cashAnchors || [])]; anc.splice(i, 1); setBP({ cashAnchors: anc }); }}
+                className="text-gray-300 hover:text-red-500">×</button>
+            </div>
+          ))}
+        </div>
+        {/* Phase 8: 引出戦略 */}
+        <details className="text-[10px] mt-1">
+          <summary className="cursor-pointer text-gray-500">引出順序{bp.withdrawalOrder ? " (カスタム)" : " (デフォルト)"}</summary>
+          <div className="mt-1 space-y-1 bg-gray-50 rounded p-1.5">
+            <div className="text-gray-400">資産取り崩し順序（上から優先）</div>
+            {(() => {
+              const order = bp.withdrawalOrder || ["taxable", "spouseNisa", "selfNisa"];
+              const labels: Record<string, string> = { taxable: "特定口座", spouseNisa: "配偶者NISA", selfNisa: "本人NISA" };
+              const moveUp = (i: number) => { if (i <= 0) return; const o = [...order]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setBP({ withdrawalOrder: o as any }); };
+              const moveDown = (i: number) => { if (i >= order.length - 1) return; const o = [...order]; [o[i], o[i + 1]] = [o[i + 1], o[i]]; setBP({ withdrawalOrder: o as any }); };
+              return order.map((src, i) => (
+                <div key={src} className="flex items-center gap-1">
+                  <span className="w-4 text-center text-gray-400">{i + 1}.</span>
+                  <span className="flex-1">{labels[src]}</span>
+                  <button onClick={() => moveUp(i)} className="text-gray-400 hover:text-blue-500" disabled={i === 0}>▲</button>
+                  <button onClick={() => moveDown(i)} className="text-gray-400 hover:text-blue-500" disabled={i === order.length - 1}>▼</button>
+                </div>
+              ));
+            })()}
+            {bp.withdrawalOrder && <button onClick={() => setBP({ withdrawalOrder: undefined })} className="text-blue-500 hover:underline">デフォルトに戻す</button>}
+          </div>
+        </details>
+      </div>
     </Section>
   );
 }
 
 // ===== Scenario Settings Section =====
-function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario, open, onToggle }: {
+function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario, open, onToggle, defaultRR, defaultInflation }: {
   s: Scenario; onChange: (s: Scenario) => void;
   isLinked: boolean; baseScenario?: Scenario | null;
   open: boolean; onToggle: () => void;
+  defaultRR?: number; defaultInflation?: number;
 }) {
   const sp = s.spouse;
   // Global settings link: linked when overrideSettings is empty/undefined
@@ -869,7 +913,7 @@ function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario, open, on
     if (!isLinked) return;
     if (settingsLocked) {
       // Unlock: mark all settings as overridden (copy base values)
-      const allKeys: SettingKey[] = ["currentAge", "retirementAge", "simEndAge", "currentAssetsMan", "selfGender", "years", "dependentDeductionHolder", "pensionStartAge", "pensionWorkStartAge"];
+      const allKeys: SettingKey[] = ["currentAge", "retirementAge", "simEndAge", "currentAssetsMan", "selfGender", "years", "dependentDeductionHolder", "pensionStartAge", "pensionWorkStartAge", "rr", "inflationRate"];
       const copied: any = {};
       for (const k of allKeys) copied[k] = baseScenario ? (baseScenario as any)[k] ?? (s as any)[k] : (s as any)[k];
       onChange({ ...s, overrideSettings: allKeys, ...copied });
@@ -918,16 +962,32 @@ function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario, open, on
             <button onClick={() => !ro && onChange({ ...s, dependentDeductionHolder: "spouse" })}
               className={`rounded px-1.5 py-0.5 text-[10px] ${val("dependentDeductionHolder", "self") === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"} ${ro ? "opacity-50 cursor-not-allowed" : ""}`}>配偶者</button>
           </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">利回り</span>
+            <input type="number" value={val("rr", defaultRR ?? 4)} step={0.5} min={0} max={20}
+              disabled={ro}
+              onChange={e => onChange({ ...s, rr: Number(e.target.value) })}
+              className={`w-14 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
+            <span className="text-[10px] text-gray-400">%</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 text-[10px]">インフレ</span>
+            <input type="number" value={val("inflationRate", defaultInflation ?? 1.5)} step={0.25} min={0} max={10}
+              disabled={ro}
+              onChange={e => onChange({ ...s, inflationRate: Number(e.target.value) })}
+              className={`w-14 rounded border px-1 py-0.5 text-xs ${ro ? "bg-gray-100 text-gray-400" : ""}`} />
+            <span className="text-[10px] text-gray-400">%</span>
+          </div>
         </div>
     </Section>
   );
 }
 
 // ===== Main KeyframeEditor =====
-export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, baseScenario, sirPct, onChangeBase }: {
+export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, baseScenario, sirPct, defaultRR, defaultInflation, onChangeBase }: {
   s: Scenario; onChange: (s: Scenario) => void; idx: number;
   currentAge: number; retirementAge: number; baseScenario?: Scenario | null;
-  sirPct?: number;
+  sirPct?: number; defaultRR?: number; defaultInflation?: number;
   onChangeBase?: (s: Scenario) => void; // ベースシナリオのonChange（リンク時のsectionOpen同期用）
 }) {
   const isBase = idx === 0;
@@ -1008,7 +1068,8 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
 
       {/* シナリオ設定 */}
       <ScenarioSettingsSection s={s} onChange={onChange} isLinked={isLinked} baseScenario={baseScenario}
-        open={secOpen("settings")} onToggle={() => toggleSec("settings")} />
+        open={secOpen("settings")} onToggle={() => toggleSec("settings")}
+        defaultRR={defaultRR} defaultInflation={defaultInflation} />
 
       {/* 本人設定 */}
       <MemberEditor
@@ -1133,7 +1194,7 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
       />
 
       <EventSection scenario={s} onChange={onChange} currentAge={currentAge} retirementAge={retirementAge} baseScenario={baseScenario} isLinked={isLinked}
-        open={secOpen("events")} onToggle={() => toggleSec("events")} />
+        open={secOpen("events")} onToggle={() => toggleSec("events")} defaultRR={defaultRR} />
 
       <HousingSection s={s} onChange={onChange} currentAge={currentAge} retirementAge={s.simEndAge ?? 85}
         open={secOpen("housing")} onToggle={() => toggleSec("housing")}

@@ -112,9 +112,16 @@ export interface NISAConfig {
   spouseLifetimeLimitMan?: number; // 配偶者の生涯枠（未設定なら本人と同じ）
 }
 
+export interface CashAnchor {
+  age: number;       // 目標年齢
+  amountMan: number; // 目標現金額（万円）
+}
+
 export interface BalancePolicy {
-  cashReserveMonths: number;    // 生活防衛資金（月数）
+  cashReserveMonths: number;    // 生活防衛資金 下限（月数）— これを下回ったら取り崩し
+  cashReserveMaxMonths?: number; // 生活防衛資金 上限（月数）— これを超えたらNISA/特定へ。未設定=下限と同じ（従来動作）
   nisaPriority: boolean;        // 余剰はNISA優先
+  cashAnchors?: CashAnchor[];   // 目標貯金アンカー
   // Phase 8: 引出戦略のカスタマイズ
   withdrawalOrder?: ("taxable" | "spouseNisa" | "selfNisa")[];
 }
@@ -168,8 +175,10 @@ export const DEFAULT_DC_RECEIVE_METHOD: DCReceiveMethod = {
 export type EventTarget = "self" | "spouse";
 
 export interface MarketCrashParams {
-  dropRate: number;        // 下落率(%) 例: 50
+  dropRate: number;        // 初年度下落率(%) 例: 50
   target: "nisa" | "taxable" | "all";  // 対象口座
+  recoveryYears?: number;  // 回復期間（年）。この期間でrrに戻る
+  recoveryRates?: number[]; // 各年の利回り(%)オーバーライド。未設定=自動補間
 }
 
 export interface LifeEvent {
@@ -236,6 +245,7 @@ export const LINKABLE_SETTINGS = [
   "currentAge", "retirementAge", "simEndAge", "currentAssetsMan", "selfGender",
   "years", "dependentDeductionHolder",
   "pensionStartAge", "pensionWorkStartAge",
+  "rr", "inflationRate",
 ] as const;
 export type SettingKey = typeof LINKABLE_SETTINGS[number];
 
@@ -279,6 +289,9 @@ export interface Scenario {
   balancePolicy?: BalancePolicy;
   // 住居タイムライン（設定されている場合、rent/property/relocationイベントの代わりに使用）
   housingTimeline?: HousingPhase[];
+  // シナリオ別の利回り・インフレ率（未設定=共通設定を使用）
+  rr?: number;                 // 運用利回り（%）。未設定=共通設定
+  inflationRate?: number;      // インフレ率（%）。未設定=共通設定
   // Phase 3: 個別資産クラス利回り
   dcReturnRate?: number;       // DC利回り（%）。未設定=グローバルrr
   nisaReturnRate?: number;     // NISA利回り（%）。未設定=グローバルrr
@@ -402,6 +415,9 @@ export interface YearResult {
   propertyCapitalGainsTax: number; // 不動産譲渡所得税（円）
   // Gift tax (Phase 6)
   giftTax: number;
+  // Market crash (unrealized loss, NOT expense)
+  crashLoss: number;              // 暴落による評価損（円）
+  crashDetail: string;            // 暴落の説明
   // Active events & cost breakdown
   activeEvents: LifeEvent[];
   eventCostBreakdown: EventYearCost[];
@@ -495,6 +511,6 @@ export const EVENT_TYPES: Record<string, { label: string; icon: string; color: s
   death:       { label: "死亡",       icon: "⚰️", color: "#1e293b", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
   relocation:  { label: "住み替え", icon: "🏡", color: "#0891b2", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
   gift:        { label: "贈与",     icon: "🎁", color: "#a855f7", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
-  crash:       { label: "暴落",     icon: "📉", color: "#dc2626", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
+  crash:       { label: "暴落",     icon: "📉", color: "#dc2626", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 1 },
   custom:      { label: "カスタム",   icon: "📌", color: "#78716c", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
 };

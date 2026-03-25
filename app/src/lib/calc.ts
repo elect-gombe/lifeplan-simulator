@@ -611,17 +611,18 @@ function computeCarYearCost(cp: CarParams, yearsSincePurchase: number, inflation
   const costs: EventYearCost[] = [];
   const isReplacementYear = cp.replaceEveryYears > 0 && yearsSincePurchase > 0 && yearsSincePurchase % cp.replaceEveryYears === 0;
 
-  // Purchase (year 0 or replacement years) — car price inflates at replacement
-  if (yearsSincePurchase === 0 || isReplacementYear) {
-    costs.push({ label: "車両購入", icon: "🚗", color: "#10b981", amount: Math.round(cp.priceMan * 10000 * inflationFactor) });
-  }
-
-  // Loan payment (nominal fixed, no inflation)
+  // Purchase or Loan
   if (cp.loanYears > 0) {
+    // ローンあり: 購入費は計上せず、ローン返済のみ
     const yearInCycle = cp.replaceEveryYears > 0 ? yearsSincePurchase % cp.replaceEveryYears : yearsSincePurchase;
     if (yearInCycle < cp.loanYears) {
       const monthly = calcMonthlyPaymentEqual(cp.priceMan * 10000, cp.loanRate, cp.loanYears);
       costs.push({ label: "車ローン", icon: "🚗", color: "#10b981", amount: monthly * 12 });
+    }
+  } else {
+    // 一括購入: 購入年と買い替え年に全額計上
+    if (yearsSincePurchase === 0 || isReplacementYear) {
+      costs.push({ label: "車両購入", icon: "🚗", color: "#10b981", amount: Math.round(cp.priceMan * 10000 * inflationFactor) });
     }
   }
 
@@ -1048,7 +1049,7 @@ function calcDCReceiveTax(
 }
 
 export function computeScenario(s: Scenario, base: BaseResult, params: CalcParams, baseScenario?: Scenario | null): ScenarioResult {
-  const { defaultGrossMan, rr, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed } = params;
+  const { defaultGrossMan, rr: globalRR, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed } = params;
 
   // Linked settings resolution (must be before age resolution)
   const linked = !!(s.linkedToBase && baseScenario);
@@ -1060,7 +1061,9 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   const currentAge = (settingLinked("currentAge") ? base_.currentAge : s.currentAge) ?? params.currentAge;
   const baseCalendarYear = new Date().getFullYear(); // 暦年基準（年齢→暦年変換用）
   const selfRetirementAge = (settingLinked("retirementAge") ? base_.retirementAge : s.retirementAge) ?? 65;
-  const retirementAge = (settingLinked("simEndAge") ? base_.simEndAge : s.simEndAge) ?? params.retirementAge; // シミュレーション終了年齢
+  const retirementAge = (settingLinked("simEndAge") ? base_.simEndAge : s.simEndAge) ?? params.retirementAge;
+  // 利回り・インフレ: シナリオ値 → リンク時はA値 → 共通設定
+  const rr = (settingLinked("rr") ? (base_.rr ?? globalRR) : (s.rr ?? globalRR));
   const r = rr / 100;
   const sir = sirPct / 100;
   const otherRet = hasRet ? retAmt : 0;
@@ -1175,8 +1178,10 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
 
   // Balance policy
   const bp: BalancePolicy | undefined = bpConfig;
-  const cashReserveMonths = bp ? bp.cashReserveMonths : 6;
+  const cashReserveMinMonths = bp ? bp.cashReserveMonths : 6;
+  const cashReserveMaxMonths = bp?.cashReserveMaxMonths ?? cashReserveMinMonths;
   const nisaPriority = bp ? bp.nisaPriority : (nisa ? true : false);
+  const cashAnchors = bp?.cashAnchors?.filter(a => a.amountMan > 0).sort((a, b) => a.age - b.age) || [];
 
   // 配偶者DC受取方法
   const spouseRM = spouse?.dcReceiveMethod || DEFAULT_DC_RECEIVE_METHOD;
@@ -1194,7 +1199,8 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
   let totalC = 0;
   let totalPensionLoss = 0;
 
-  const inflation = params.inflationRate / 100;
+  const effectiveInflation = settingLinked("inflationRate") ? (base_.inflationRate ?? params.inflationRate) : (s.inflationRate ?? params.inflationRate);
+  const inflation = effectiveInflation / 100;
 
   // Track cumulative salary for survivor pension calculation
   let cumulativeSalary = 0;
@@ -1868,16 +1874,38 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       const r = liquidateNISA("配偶者", spouseNISAAsset, spouseNISACostBasis, !!isSpouseDeathYear);
       spouseNISAAsset = r.asset; spouseNISACostBasis = r.cost;
     }
-    // 運用益を反映（元本は変わらない、時価のみ増加）
-    selfNISAAsset = selfNISAAsset * (1 + nisaReturnRate);
-    spouseNISAAsset = spouseNISAAsset * (1 + nisaReturnRate);
-    cumulativeTaxable = cumulativeTaxable * (1 + taxableReturnRate);
+    // === 暴落回復期間の利回りオーバーライド ===
+    // 暴落イベントのrecoveryRatesが設定されている場合、該当年の利回りを上書き
+    let yearNisaRate = nisaReturnRate;
+    let yearTaxRate = taxableReturnRate;
+    for (const evt of events) {
+      if (evt.type === "crash" && evt.marketCrashParams?.recoveryRates && !evt.disabled) {
+        const crashAge = resolveEventAge(evt, events);
+        const yearsSinceCrash = age - crashAge;
+        const rates = evt.marketCrashParams.recoveryRates;
+        if (yearsSinceCrash >= 1 && yearsSinceCrash <= rates.length) {
+          const overrideRate = rates[yearsSinceCrash - 1] / 100;
+          yearNisaRate = overrideRate;
+          yearTaxRate = overrideRate;
+        }
+      }
+    }
 
-    // === 暴落イベント ===
+    // 運用益を反映（元本は変わらない、時価のみ増加）
+    selfNISAAsset = selfNISAAsset * (1 + yearNisaRate);
+    spouseNISAAsset = spouseNISAAsset * (1 + yearNisaRate);
+    cumulativeTaxable = cumulativeTaxable * (1 + yearTaxRate);
+
+    // === 暴落イベント（評価損 — 支出ではない） ===
+    let crashLoss = 0;
+    let crashDetail = "";
     for (const evt of activeEvts) {
-      if (evt.type === "crash" && evt.marketCrashParams && !evt.disabled) {
+      // 暴落は発生年のみ1回適用（durationYears=0で毎年activeになるのを防ぐ）
+      if (evt.type === "crash" && evt.marketCrashParams && !evt.disabled && resolveEventAge(evt, events) === age) {
         const cp = evt.marketCrashParams;
         const drop = cp.dropRate / 100;
+        const preNisa = selfNISAAsset + spouseNISAAsset;
+        const preTax = cumulativeTaxable;
         if (cp.target === "nisa" || cp.target === "all") {
           selfNISAAsset *= (1 - drop);
           spouseNISAAsset *= (1 - drop);
@@ -1885,9 +1913,11 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
         if (cp.target === "taxable" || cp.target === "all") {
           cumulativeTaxable *= (1 - drop);
         }
-        const lostNisa = (cp.target === "nisa" || cp.target === "all") ? Math.round((selfNISAAsset + spouseNISAAsset) * drop / (1 - drop)) : 0;
-        const lostTax = (cp.target === "taxable" || cp.target === "all") ? Math.round(cumulativeTaxable * drop / (1 - drop)) : 0;
-        eventCostBreakdown.push({ label: `暴落 -${cp.dropRate}%`, icon: "📉", color: "#dc2626", amount: lostNisa + lostTax, detail: `${cp.target === "all" ? "全口座" : cp.target === "nisa" ? "NISA" : "特定口座"} -${cp.dropRate}%` });
+        const lostNisa = (cp.target === "nisa" || cp.target === "all") ? Math.round(preNisa * drop) : 0;
+        const lostTax = (cp.target === "taxable" || cp.target === "all") ? Math.round(preTax * drop) : 0;
+        crashLoss += lostNisa + lostTax;
+        const targetLabel = cp.target === "all" ? "全口座" : cp.target === "nisa" ? "NISA" : "特定口座";
+        crashDetail += `📉${targetLabel} -${cp.dropRate}% (評価損${Math.round((lostNisa + lostTax) / 10000)}万) `;
       }
     }
 
@@ -1900,8 +1930,17 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
 
     cumulativeCash += annualNetCashFlow;
 
-    const monthlyExpense = baseLivingExpense / 12;
-    const cashReserveTarget = monthlyExpense * cashReserveMonths;
+    const monthlyExpense = totalExpense / 12;
+    const cashReserveMin = monthlyExpense * cashReserveMinMonths;
+    let cashReserveMax = monthlyExpense * cashReserveMaxMonths;
+    // アンカー: 将来の目標貯金額までは現金を投資に回さない
+    // 最も近い未来のアンカーの目標額をcashReserveMaxに使用
+    for (const anchor of cashAnchors) {
+      if (age <= anchor.age) {
+        cashReserveMax = Math.max(cashReserveMax, anchor.amountMan * 10000);
+        break;
+      }
+    }
 
     // NISA取り崩しヘルパー: 時価を売却し、簿価を比例で減少（翌年に枠復活）
     const sellNISA = (asset: { v: number; c: number }, amount: number) => {
@@ -1913,63 +1952,104 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       return sell;
     };
 
-    // Phase 8: 取り崩しヘルパー（configurable withdrawal order）
-    const withdrawOrder = bp?.withdrawalOrder || ["taxable", "spouseNisa", "selfNisa"];
+    // Phase 8: 取り崩しヘルパー
+    // 順序: 特定口座(課税) → NISA(本人+配偶者を簿価比率で均等取り崩し=枠復活を均等化)
     const withdrawToTarget = (targetCash: number) => {
       let deficit = targetCash - cumulativeCash;
       if (deficit <= 0) return;
 
-      for (const source of withdrawOrder) {
-        if (deficit <= 0) break;
-        if (source === "taxable" && cumulativeTaxable > 0) {
-          const gainRatio = cumulativeTaxableCost > 0
-            ? Math.max(cumulativeTaxable - cumulativeTaxableCost, 0) / cumulativeTaxable : 0;
-          const netRatio = 1 - gainRatio * TAXABLE_TAX_RATE;
-          const sellNeeded = Math.min(Math.ceil(deficit / netRatio), cumulativeTaxable);
-          const tax = Math.round(sellNeeded * gainRatio * TAXABLE_TAX_RATE);
-          taxableWithdrawal += sellNeeded;
-          cumulativeTaxable -= sellNeeded;
-          cumulativeTaxableCost = Math.max(cumulativeTaxableCost * (cumulativeTaxable / (cumulativeTaxable + sellNeeded) || 0), 0);
-          cumulativeCash += sellNeeded - tax;
+      // 1. 特定口座を先に崩す（課税あり）
+      if (cumulativeTaxable > 0 && deficit > 0) {
+        const gainRatio = cumulativeTaxableCost > 0
+          ? Math.max(cumulativeTaxable - cumulativeTaxableCost, 0) / cumulativeTaxable : 0;
+        const netRatio = 1 - gainRatio * TAXABLE_TAX_RATE;
+        const sellNeeded = Math.min(Math.ceil(deficit / netRatio), cumulativeTaxable);
+        const tax = Math.round(sellNeeded * gainRatio * TAXABLE_TAX_RATE);
+        taxableWithdrawal += sellNeeded;
+        cumulativeTaxable -= sellNeeded;
+        cumulativeTaxableCost = Math.max(cumulativeTaxableCost * (cumulativeTaxable / (cumulativeTaxable + sellNeeded) || 0), 0);
+        cumulativeCash += sellNeeded - tax;
+        deficit = Math.max(targetCash - cumulativeCash, 0);
+      }
+
+      // 2. NISA: 簿価ベースで均等取り崩し（枠復活を均等化）
+      if (deficit > 0 && (selfNISAAsset > 0 || spouseNISAAsset > 0)) {
+        const totalNISA = selfNISAAsset + spouseNISAAsset;
+        if (totalNISA > 0) {
+          // 簿価が大きい方を多く崩す（=枠を多く復活させる）→ 簿価比で配分
+          const selfCostShare = selfNISACostBasis / (selfNISACostBasis + spouseNISACostBasis || 1);
+          const spouseCostShare = 1 - selfCostShare;
+          const selfTarget = Math.min(deficit * selfCostShare, selfNISAAsset);
+          const spouseTarget = Math.min(deficit * spouseCostShare, spouseNISAAsset);
+
+          if (selfTarget > 0) {
+            const selfRef = { v: selfNISAAsset, c: selfNISACostBasis };
+            const sold = sellNISA(selfRef, selfTarget);
+            selfNISAAsset = selfRef.v; selfNISACostBasis = selfRef.c;
+            nisaWithdrawal += sold; cumulativeCash += sold;
+          }
+          if (spouseTarget > 0) {
+            const spRef = { v: spouseNISAAsset, c: spouseNISACostBasis };
+            const sold = sellNISA(spRef, spouseTarget);
+            spouseNISAAsset = spRef.v; spouseNISACostBasis = spRef.c;
+            nisaWithdrawal += sold; cumulativeCash += sold;
+          }
           deficit = Math.max(targetCash - cumulativeCash, 0);
-        } else if (source === "spouseNisa" && spouseNISAAsset > 0) {
-          const spRef = { v: spouseNISAAsset, c: spouseNISACostBasis };
-          const sold = sellNISA(spRef, deficit);
-          spouseNISAAsset = spRef.v; spouseNISACostBasis = spRef.c;
-          nisaWithdrawal += sold; cumulativeCash += sold;
-          deficit = Math.max(targetCash - cumulativeCash, 0);
-        } else if (source === "selfNisa" && selfNISAAsset > 0) {
-          const selfRef = { v: selfNISAAsset, c: selfNISACostBasis };
-          const sold = sellNISA(selfRef, deficit);
-          selfNISAAsset = selfRef.v; selfNISACostBasis = selfRef.c;
-          nisaWithdrawal += sold; cumulativeCash += sold;
-          deficit = Math.max(targetCash - cumulativeCash, 0);
+
+          // まだ足りない場合: 残っている方から追加取り崩し
+          if (deficit > 0 && selfNISAAsset > 0) {
+            const selfRef = { v: selfNISAAsset, c: selfNISACostBasis };
+            const sold = sellNISA(selfRef, deficit);
+            selfNISAAsset = selfRef.v; selfNISACostBasis = selfRef.c;
+            nisaWithdrawal += sold; cumulativeCash += sold;
+            deficit = Math.max(targetCash - cumulativeCash, 0);
+          }
+          if (deficit > 0 && spouseNISAAsset > 0) {
+            const spRef = { v: spouseNISAAsset, c: spouseNISACostBasis };
+            const sold = sellNISA(spRef, deficit);
+            spouseNISAAsset = spRef.v; spouseNISACostBasis = spRef.c;
+            nisaWithdrawal += sold; cumulativeCash += sold;
+          }
         }
       }
     };
 
     if (nisa && nisaPriority) {
-      if (cumulativeCash > cashReserveTarget) {
-        const excess = cumulativeCash - cashReserveTarget;
-        // 死亡者のNISA枠は使えない（口座閉鎖済み）
+      if (cumulativeCash > cashReserveMax) {
+        // 上限超過: 超えた分をNISA/特定へ投資
+        const excess = cumulativeCash - cashReserveMax;
+        // NISA枠を本人・配偶者で均等に埋める（少ない方を優先）
         const selfRoom = isSelfDead ? 0 : Math.max(Math.min(selfNISAAnnualLimit, selfNISALifetimeLimit - selfNISACostBasis), 0);
         const spouseRoom = isSpouseDead ? 0 : Math.max(Math.min(spouseNISAAnnualLimit, spouseNISALifetimeLimit - spouseNISACostBasis), 0);
-        const selfContrib = Math.min(excess, selfRoom);
-        const spouseContrib = Math.min(excess - selfContrib, spouseRoom);
+        const totalNISARoom = selfRoom + spouseRoom;
+        const nisaAlloc = Math.min(excess, totalNISARoom);
+        // 均等配分: 少ない方の枠をまず埋め、残りをもう片方へ
+        let selfContrib: number, spouseContrib: number;
+        if (selfRoom <= spouseRoom) {
+          selfContrib = Math.min(nisaAlloc / 2, selfRoom);
+          spouseContrib = Math.min(nisaAlloc - selfContrib, spouseRoom);
+        } else {
+          spouseContrib = Math.min(nisaAlloc / 2, spouseRoom);
+          selfContrib = Math.min(nisaAlloc - spouseContrib, selfRoom);
+        }
         selfNISAContribution = selfContrib;
         spouseNISAContribution = spouseContrib;
         nisaContribution = selfContrib + spouseContrib;
+        // 特定口座はNISA生涯枠が両方とも埋まった場合のみ
+        const selfLifetimeFull = (selfNISACostBasis + selfContrib) >= selfNISALifetimeLimit || isSelfDead;
+        const spouseLifetimeFull = (spouseNISACostBasis + spouseContrib) >= spouseNISALifetimeLimit || isSpouseDead;
         const remaining = excess - nisaContribution;
-        if (remaining > 0) taxableContribution = remaining;
-        // 時価と簿価の両方を増加
+        if (remaining > 0 && selfLifetimeFull && spouseLifetimeFull) taxableContribution = remaining;
         selfNISAAsset += selfContrib; selfNISACostBasis += selfContrib;
         spouseNISAAsset += spouseContrib; spouseNISACostBasis += spouseContrib;
         cumulativeCash -= nisaContribution + taxableContribution;
-      } else if (cumulativeCash < cashReserveTarget) {
-        withdrawToTarget(cashReserveTarget);
+      } else if (cumulativeCash < cashReserveMin) {
+        // 下限割れ: 取り崩して下限まで補充
+        withdrawToTarget(cashReserveMin);
       }
+      // 上限〜下限の間は何もしない（ヒステリシス）
     } else {
-      if (cumulativeCash < cashReserveTarget) withdrawToTarget(cashReserveTarget);
+      if (cumulativeCash < cashReserveMin) withdrawToTarget(cashReserveMin);
     }
 
     cumulativeTaxable += taxableContribution;
@@ -2087,6 +2167,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       inheritanceTax, inheritanceEstate,
       dcReceiveTax,
       propertySaleProceeds, propertyCapitalGainsTax, giftTax,
+      crashLoss, crashDetail,
       activeEvents: [...activeEvts, ...propertyFixedCostEvts], eventCostBreakdown,
       self: {
         gross, employeeDeduction: st.employeeDeduction,

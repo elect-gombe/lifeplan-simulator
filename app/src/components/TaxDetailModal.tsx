@@ -705,9 +705,9 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
                 {openGroups.has("asset_taxable") && <>
                   <R l="    含み益" sub graphLabel="特定口座 含み益" hint="評価額−取得原価" graphFn={yr => yr.taxableGain} fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.taxableGain) : "-"} />
                   <R l="    課税額" sub neg graphLabel="特定口座 課税額" hint="含み益×20.315%(所得税15.315%+住民税5%)" graphFn={yr => Math.round(yr.taxableGain * 0.20315)} fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.taxableGain * 0.20315) : "-"} />
-                  <R l="    積立(年間)" sub graphLabel="NISA 積立" hint="NISA枠超過分を特定口座に自動配分" graphFn={yr => yr.taxableContribution} fn={(yr, s) => (s === "世帯" || !hasSpouse) ? (yr.taxableContribution > 0 ? Math.round(yr.taxableContribution) : "-") : "-"} />
+                  <R l="    積立(年間)" sub graphLabel="特定口座 積立" hint="NISA枠超過分を特定口座に自動配分" graphFn={yr => yr.taxableContribution} fn={(yr, s) => (s === "世帯" || !hasSpouse) ? (yr.taxableContribution > 0 ? Math.round(yr.taxableContribution) : "-") : "-"} />
                   {yrs.some(yr => yr && yr.taxableWithdrawal > 0) &&
-                    <R l="    取崩" sub neg hint="売却時に含み益比率で課税" graphFn={yr => -yr.taxableWithdrawal} fn={(yr, s) => (s === "世帯" || !hasSpouse) && yr.taxableWithdrawal > 0 ? Math.round(-yr.taxableWithdrawal) : "-"} />}
+                    <R l="    取崩" sub neg graphLabel="特定口座 取崩" hint="売却時に含み益比率で課税" graphFn={yr => -yr.taxableWithdrawal} fn={(yr, s) => (s === "世帯" || !hasSpouse) && yr.taxableWithdrawal > 0 ? Math.round(-yr.taxableWithdrawal) : "-"} />}
                 </>}
                 <R l="現金" hint="生活防衛資金(月額×N月)を維持" graphFn={yr => yr.cashSavings} fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.cashSavings) : "-"} />
               </>) : (
@@ -720,6 +720,8 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
                     if (s === "配偶者") return yr.spouse.loanBalance > 0 ? -yr.spouse.loanBalance : "-";
                     return yr.loanBalance > 0 ? -yr.loanBalance : "-";
                   }} />}
+              {yrs.some(yr => yr && yr.crashLoss > 0) &&
+                <R l="📉 暴落評価損" neg hint="市場下落による評価損（支出ではなく含み損）" fn={(yr, s) => (s === "世帯" || !hasSpouse) && yr.crashLoss > 0 ? yr.crashLoss : "-"} />}
               <R l="総資産" bold bg="bg-teal-50" hint="DC+NISA+特定(税引後)+現金" graphFn={yr => yr.totalWealth} fn={(yr, s) => s === "世帯" || !hasSpouse ? Math.round(yr.totalWealth) : "-"} />
             </tbody>
           </table>

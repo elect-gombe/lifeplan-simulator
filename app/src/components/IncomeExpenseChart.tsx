@@ -9,7 +9,7 @@ const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
 export type ExpenseCategory = "living" | "housing" | "child" | "car" | "insurance" | "other";
 export const EXPENSE_CATS: { key: ExpenseCategory; label: string; color: string; match: (label: string) => boolean }[] = [
   { key: "living", label: "生活費", color: "#6366f1", match: () => false }, // baseLivingExpenseで別処理
-  { key: "housing", label: "住居費", color: "#3b82f6", match: l => /ローン|管理費|固定資産税|頭金|家賃|繰上返済|借換|新居|物件売却|譲渡所得税|引越/.test(l) },
+  { key: "housing", label: "住居費", color: "#3b82f6", match: l => /ローン返済|管理費|固定資産税|頭金|家賃|繰上返済|借換|新居|物件売却|譲渡所得税|引越/.test(l) },
   { key: "child", label: "養育費", color: "#f59e0b", match: l => /子|教育|大学|高校|中学|小学|保育|幼稚|大学院/.test(l) },
   { key: "car", label: "車関連", color: "#10b981", match: l => /車|カー/.test(l) },
   { key: "insurance", label: "保険料", color: "#8b5cf6", match: l => /保険料/.test(l) },

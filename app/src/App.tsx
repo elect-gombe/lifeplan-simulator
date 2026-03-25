@@ -11,6 +11,7 @@ import { TaxDetailModal, TaxDetailPanel, MiniLineChart } from "./components/TaxD
 import type { GraphFn } from "./components/TaxDetailModal";
 import { TaxRateCharts } from "./components/TaxRateChart";
 import { IncomeExpenseCharts } from "./components/IncomeExpenseChart";
+import { generateReport } from "./lib/report";
 
 const STORAGE_KEY = "asset-sim-state-v1";
 
@@ -232,6 +233,38 @@ function PanelContainer({ children }: { children: (width: number) => React.React
   );
 }
 
+function ReportTab({ results, rr, inflationRate, hasRet, retAmt, stateJson }: { results: import("./lib/types").ScenarioResult[]; rr: number; inflationRate: number; hasRet: boolean; retAmt: number; stateJson: string }) {
+  const [text, setText] = useState("");
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (results.length) {
+      const parts = results.map((r, i) => generateReport(r, { rr, inflationRate, hasRet, retAmt }, i === 0));
+      const report = parts.join("\n\n" + "=".repeat(60) + "\n\n");
+      const fullText = report + "\n\n【設定JSON（シミュレーター再現用）】\n```json\n" + stateJson + "\n```";
+      setText(fullText);
+    }
+  }, [results, rr, inflationRate, hasRet, retAmt, stateJson]);
+  const download = () => {
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `lifeplan-report-${new Date().toISOString().slice(0, 10)}.txt`; a.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div className="space-y-3">
+      <div className="text-xs text-gray-500">ChatGPT等のLLMに貼り付けて相談できるテキストレポートです。</div>
+      <div className="flex gap-2">
+        <button onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+          className="rounded bg-blue-600 px-4 py-1.5 text-xs text-white font-bold hover:bg-blue-700">{copied ? "コピー済み!" : "📋コピー"}</button>
+        <button onClick={download} className="rounded border px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">💾TXT保存</button>
+        <span className="text-[10px] text-gray-400 self-center">{text.length.toLocaleString()}文字</span>
+      </div>
+      <textarea value={text} readOnly rows={24}
+        className="w-full rounded border bg-gray-50 p-2 font-mono text-[10px] leading-tight text-gray-700 focus:outline-none" onClick={e => (e.target as HTMLTextAreaElement).select()} />
+    </div>
+  );
+}
+
 export default function App() {
   const saved = useRef(loadFromStorage()).current;
   const [rr, setRR] = useState(saved?.rr ?? 4);
@@ -246,7 +279,7 @@ export default function App() {
   const [hoveredGraph, setHoveredGraph] = useState<{ label: string; fn: GraphFn } | null>(null);
   const [pinnedGraphs, setPinnedGraphs] = useState<{ label: string; fn: GraphFn }[]>([]);
   const [inflationRate, setInflationRate] = useState(saved?.inflationRate ?? 1.5);
-  const [jsonModal, setJsonModal] = useState<"export" | "import" | null>(null);
+  const [jsonModal, setJsonModal] = useState<"export" | "import" | "report" | null>(null);
   const [jsonText, setJsonText] = useState("");
   const [copied, setCopied] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
@@ -343,7 +376,20 @@ export default function App() {
   const updS = useCallback((i: number, s: Scenario) => setScenarios(p => p.map((x, j) => j === i ? s : x)), []);
   const rmS = useCallback((i: number) => setScenarios(p => p.filter((_, j) => j !== i)), []);
   const addS = useCallback(() => {
-    setScenarios(p => p.length >= 4 ? p : [...p, { ...mkScenario(p.length), id: Date.now() + p.length }]);
+    setScenarios(p => {
+      if (p.length >= 4) return p;
+      const id = Date.now() + p.length;
+      const linked = p.length > 0; // 2つ目以降はAにリンク
+      return [...p, {
+        ...mkScenario(p.length),
+        id,
+        name: `シナリオ${String.fromCharCode(65 + p.length)}`,
+        linkedToBase: linked,
+        overrideTracks: linked ? [...DEFAULT_OVERRIDE_TRACKS] : [],
+        events: [],
+        excludedBaseEventIds: [],
+      }];
+    });
   }, []);
   const dupS = useCallback((i: number) => {
     setScenarios(p => {
@@ -392,9 +438,13 @@ export default function App() {
   const simEndAge = s0?.simEndAge ?? 85;
   const taxOpts = { dependentsCount: 0, lifeInsuranceDeduction: 0, sirPct };
 
+  // 利回り・インフレ: シナリオAの値を使用（未設定なら旧デフォルト）
+  const effectiveRR = s0?.rr ?? rr;
+  const effectiveInflation = s0?.inflationRate ?? inflationRate;
+
   const calcParams = useMemo(() => ({
-    currentAge, retirementAge: simEndAge, defaultGrossMan: 0, rr, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed: 0, inflationRate,
-  }), [currentAge, simEndAge, rr, sirPct, hasRet, retAmt, PY, inflationRate]);
+    currentAge, retirementAge: simEndAge, defaultGrossMan: 0, rr: effectiveRR, sirPct, hasRet, retAmt, PY, taxOpts, housingLoanDed: 0, inflationRate: effectiveInflation,
+  }), [currentAge, simEndAge, effectiveRR, sirPct, hasRet, retAmt, PY, effectiveInflation]);
 
   const { base, res } = useMemo(() => {
     const base = computeBase(calcParams);
@@ -418,17 +468,15 @@ export default function App() {
               className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">共有・エクスポート</button>
             <button onClick={() => { setJsonText(""); setJsonModal("import"); }}
               className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">インポート</button>
+            <button onClick={() => setJsonModal("report")}
+              className="rounded border px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">📋レポート</button>
           </div>
         </div>
 
         {/* Global settings — 全シナリオ共通 */}
         <details className="rounded bg-blue-50 p-3" open>
           <summary className="cursor-pointer text-xs font-bold text-blue-700 mb-2">共通設定</summary>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Slider label="運用利回り" value={rr} onChange={setRR} min={0} max={10} step={0.5} unit="%" help="DC/NISA/特定口座の年間期待リターン。控えめ3-4%、標準5%、積極7%+" />
-            <Slider label="インフレ率" value={inflationRate} onChange={setInflationRate} min={0} max={5} step={0.25} unit="%" help="生活費・イベント費に年次適用" />
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-4">
+          <div className="mt-1 flex flex-wrap items-center gap-4">
             <Tog label="会社退職金あり" checked={hasRet} onChange={setHasRet} />
             {hasRet && <NumIn label="" value={retAmt} onChange={setRetAmt} step={1000000} unit="円" small />}
           </div>
@@ -446,7 +494,7 @@ export default function App() {
                 onChange={(ns) => updS(i, ns)}
                 currentAge={s.currentAge} retirementAge={s.simEndAge}
                 baseScenario={i === 0 ? null : scenarios[0]}
-                sirPct={sirPct}
+                sirPct={sirPct} defaultRR={rr} defaultInflation={inflationRate}
                 onChangeBase={i > 0 ? (ns) => updS(0, ns) : undefined} />
             ))}
           </div>
@@ -526,7 +574,7 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/40 p-4 pt-8" onClick={() => setJsonModal(null)}>
           <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b px-4 py-3">
-              <p className="text-sm font-bold">{jsonModal === "export" ? "シナリオ共有" : "シナリオ読込"}</p>
+              <p className="text-sm font-bold">{jsonModal === "export" ? "シナリオ共有" : jsonModal === "report" ? "📋 総合レポート" : "シナリオ読込"}</p>
               <button onClick={() => setJsonModal(null)} className="rounded px-3 py-1 text-xs text-gray-500 hover:bg-gray-100">閉じる</button>
             </div>
             <div className="p-4 space-y-3">
@@ -567,6 +615,8 @@ export default function App() {
                     </div>
                   </div>
                 </details>
+              </>) : jsonModal === "report" ? (<>
+                <ReportTab results={res} rr={rr} inflationRate={inflationRate} hasRet={hasRet} retAmt={retAmt} stateJson={JSON.stringify(currentState, null, 2)} />
               </>) : (<>
                 <div className="text-xs text-gray-500">共有されたJSONを貼り付けるか、ファイルを選択してください。</div>
                 <textarea value={jsonText} onChange={e => setJsonText(e.target.value)} rows={15} placeholder="JSONをここに貼り付け..."

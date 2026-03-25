@@ -86,7 +86,7 @@ export function EventBars({ events, allEvents, currentAge, endAge, xForAge, pT, 
     const isDisabled = !!evt.disabled || (evt.parentId != null && !!allEvents.find(p => p.id === evt.parentId)?.disabled);
     const disabledOpacity = isDisabled ? 0.25 : 1;
     return (
-      <g key={`ev${evt.id}`} opacity={disabledOpacity}
+      <g key={`ev${evt.id}_${ei}`} opacity={disabledOpacity}
         style={{ cursor: isParent && onToggle ? "pointer" : undefined }}
         onClick={isParent && onToggle && !(evt as any)._virtual ? (e) => { e.stopPropagation(); onToggle(evt.id); } : undefined}>
         <rect x={isChild ? startX + 8 : startX} y={barY} width={Math.max((isChild ? endX - startX - 8 : endX - startX), 4)} height={barH}
