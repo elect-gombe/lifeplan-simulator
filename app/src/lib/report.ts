@@ -34,6 +34,8 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
     lines.push("  JSON上の spouse.enabled:false 等はUI上の「独自設定なし＝Aを流用」を意味し、「配偶者なし」ではありません。");
     lines.push("※ 利回り設定の優先順位: Scenario.dcReturnRate/nisaReturnRate/taxableReturnRate → Scenario.rr → グローバルrr");
     lines.push("  未設定(undefined)のフィールドはリンク先 → グローバル値にフォールバックします。");
+    lines.push("※ 重要: linkedToBase:true かつ overrideSettings:[] のシナリオでは、JSON上の rr/inflationRate 等の値は");
+    lines.push("  計算に使用されません（Aの値が適用されます）。JSONはUI状態の保存用であり、実効値は上記レポート本文を参照してください。");
     lines.push("");
   }
 
