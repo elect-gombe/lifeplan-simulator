@@ -43,12 +43,30 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
     lines.push(`※ 以下の設定はAから継承されたものを含みます。`);
   }
 
-  lines.push(`期間: ${s.currentAge}歳→${s.simEndAge}歳（${s.simEndAge - s.currentAge}年） / 退職: ${s.retirementAge}歳`);
-  const effectiveRR = s.rr ?? params.rr;
-  const effectiveInflation = s.inflationRate ?? params.inflationRate;
-  lines.push(`運用利回り: ${effectiveRR}%${s.rr != null ? '(シナリオ独自)' : ''} / インフレ率: ${effectiveInflation}%${s.inflationRate != null ? '(シナリオ独自)' : ''}`);
-  if (s.dcReturnRate != null || s.nisaReturnRate != null || s.taxableReturnRate != null || s.cashInterestRate != null) {
-    lines.push(`個別利回り: DC${s.dcReturnRate ?? '共通'}% / NISA${s.nisaReturnRate ?? '共通'}% / 特定${s.taxableReturnRate ?? '共通'}% / 現金${s.cashInterestRate ?? 0}%`);
+  // リンク設定の解決: overrideSettingsが空=全設定リンク、含まれていない設定=Aの値を使用
+  const linked = s.linkedToBase && !!base;
+  const overSet = s.overrideSettings || [];
+  const settingLinked = (key: string) => linked && !overSet.includes(key as any);
+  const resolve = (key: string, fallback: any) => settingLinked(key) ? ((base as any)?.[key] ?? fallback) : ((s as any)[key] ?? fallback);
+
+  const effCurrentAge = resolve("currentAge", s.currentAge);
+  const effRetAge = resolve("retirementAge", s.retirementAge);
+  const effSimEnd = resolve("simEndAge", s.simEndAge);
+  lines.push(`期間: ${effCurrentAge}歳→${effSimEnd}歳（${effSimEnd - effCurrentAge}年） / 退職: ${effRetAge}歳`);
+
+  const effectiveRR = resolve("rr", params.rr);
+  const effectiveInflation = resolve("inflationRate", params.inflationRate);
+  const rrSource = settingLinked("rr") ? '(Aから継承)' : (s.rr != null ? '(シナリオ独自)' : '');
+  const infSource = settingLinked("inflationRate") ? '(Aから継承)' : (s.inflationRate != null ? '(シナリオ独自)' : '');
+  lines.push(`運用利回り: ${effectiveRR}%${rrSource} / インフレ率: ${effectiveInflation}%${infSource}`);
+
+  // 個別利回り: リンク時はAの値にフォールバック
+  const effDCRR = s.dcReturnRate ?? (linked ? base?.dcReturnRate : undefined);
+  const effNisaRR = s.nisaReturnRate ?? (linked ? base?.nisaReturnRate : undefined);
+  const effTaxRR = s.taxableReturnRate ?? (linked ? base?.taxableReturnRate : undefined);
+  const effCashRR = s.cashInterestRate ?? (linked ? base?.cashInterestRate : undefined);
+  if (effDCRR != null || effNisaRR != null || effTaxRR != null || effCashRR != null) {
+    lines.push(`個別利回り: DC${effDCRR ?? '共通'}% / NISA${effNisaRR ?? '共通'}% / 特定${effTaxRR ?? '共通'}% / 現金${effCashRR ?? 0}%`);
   }
   if (params.hasRet) lines.push(`会社退職金: ${Math.round(params.retAmt / 10000).toLocaleString()}万円`);
 
@@ -87,8 +105,8 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
 
   // NISA
   if (effNisa) {
-    const effNisaRR = s.nisaReturnRate ?? s.rr ?? params.rr;
-    lines.push(`NISA: 年${effNisa.annualLimitMan}万×${effNisa.accounts}口座 / 生涯${effNisa.lifetimeLimitMan}万 / 利回り${effNisaRR}%${!s.nisa?.enabled && base ? '（Aから継承）' : ''}`);
+    const nisaRR = effNisaRR ?? effectiveRR;
+    lines.push(`NISA: 年${effNisa.annualLimitMan}万×${effNisa.accounts}口座 / 生涯${effNisa.lifetimeLimitMan}万 / 利回り${nisaRR}%${!s.nisa?.enabled && base ? '（Aから継承）' : ''}`);
   }
 
   // DC
