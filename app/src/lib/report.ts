@@ -25,7 +25,7 @@ function expenseCats(yr: YearResult): Record<ExpenseCategory, number> {
 }
 
 // --- セクション1: 基本設定サマリー ---
-function settingsSummary(s: Scenario, params: { rr: number; inflationRate: number; hasRet: boolean; retAmt: number }, isFirst: boolean): string {
+function settingsSummary(s: Scenario, params: { rr: number; inflationRate: number; hasRet: boolean; retAmt: number }, isFirst: boolean, baseScenario?: Scenario | null): string {
   const lines: string[] = [];
 
   if (isFirst) {
@@ -62,10 +62,18 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
     lines.push(`配偶者: なし`);
   }
 
+  // リンクシナリオの場合、Aから継承した設定を使う
+  const base = s.linkedToBase && baseScenario ? baseScenario : null;
+  const effHousingTimeline = s.housingTimeline ?? base?.housingTimeline;
+  const effNisa = s.nisa?.enabled ? s.nisa : (base?.nisa?.enabled ? base.nisa : null);
+  const effDCMethod = s.dcReceiveMethod ?? base?.dcReceiveMethod;
+  const effEvents = [...(s.events || []), ...(base ? (base.events || []).filter(e => !(s.excludedBaseEventIds || []).includes(e.id)) : [])];
+
   // 住居
-  if (s.housingTimeline?.length) {
-    const phases = s.housingTimeline.map((p, i) => {
-      const end = i < s.housingTimeline!.length - 1 ? s.housingTimeline![i + 1].startAge : s.simEndAge;
+  if (effHousingTimeline?.length) {
+    const ht = effHousingTimeline;
+    const phases = ht.map((p, i) => {
+      const end = i < ht.length - 1 ? ht[i + 1].startAge : s.simEndAge;
       if (p.type === "rent") return `賃貸${p.startAge}-${end}歳(${p.rentMonthlyMan}万/月)`;
       if (p.type === "own" && p.propertyParams) {
         const pp = p.propertyParams;
@@ -74,30 +82,29 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
       }
       return "";
     }).filter(Boolean);
-    lines.push(`住居: ${phases.join(" → ")}`);
+    lines.push(`住居: ${phases.join(" → ")}${base && !s.housingTimeline ? '（Aから継承）' : ''}`);
   }
 
   // NISA
-  if (s.nisa?.enabled) {
+  if (effNisa) {
     const effNisaRR = s.nisaReturnRate ?? s.rr ?? params.rr;
-    lines.push(`NISA: 年${s.nisa.annualLimitMan}万×${s.nisa.accounts}口座 / 生涯${s.nisa.lifetimeLimitMan}万 / 利回り${effNisaRR}%`);
+    lines.push(`NISA: 年${effNisa.annualLimitMan}万×${effNisa.accounts}口座 / 生涯${effNisa.lifetimeLimitMan}万 / 利回り${effNisaRR}%${!s.nisa?.enabled && base ? '（Aから継承）' : ''}`);
   }
 
   // DC
-  const dcMethod = s.dcReceiveMethod;
-  if (dcMethod) {
-    const methodLabel = dcMethod.type === "lump_sum" ? "一時金" : dcMethod.type === "annuity" ? `年金${dcMethod.annuityYears}年` : `併用(一時金${dcMethod.combinedLumpSumRatio}%)`;
-    lines.push(`DC受取: ${methodLabel}`);
+  if (effDCMethod) {
+    const methodLabel = effDCMethod.type === "lump_sum" ? "一時金" : effDCMethod.type === "annuity" ? `年金${effDCMethod.annuityYears}年` : `併用(一時金${effDCMethod.combinedLumpSumRatio}%)`;
+    lines.push(`DC受取: ${methodLabel}${!s.dcReceiveMethod && base ? '（Aから継承）' : ''}`);
   }
 
   // 子供
-  const children = s.events.filter(e => e.type === "child" && !e.parentId);
+  const children = effEvents.filter(e => e.type === "child" && !e.parentId);
   if (children.length > 0) {
     lines.push(`子供: ${children.length}人（${children.map(c => `${c.label}${c.age}歳`).join("、")}）`);
   }
 
   // 保険
-  const insurances = s.events.filter(e => e.type === "insurance" && e.insuranceParams);
+  const insurances = effEvents.filter(e => e.type === "insurance" && e.insuranceParams);
   for (const ins of insurances) {
     const ip = ins.insuranceParams!;
     if (ip.insuranceType === "term_life") {
@@ -374,11 +381,12 @@ export function generateReport(
   result: ScenarioResult,
   params: { rr: number; inflationRate: number; hasRet: boolean; retAmt: number },
   isFirst: boolean = true,
+  baseScenario?: Scenario | null,
 ): string {
   const { scenario: s, yearResults: yrs } = result;
   if (!yrs.length) return "(データなし)";
   return [
-    settingsSummary(s, params, isFirst),
+    settingsSummary(s, params, isFirst, baseScenario),
     "",
     incomeTable(yrs, s),
     "",

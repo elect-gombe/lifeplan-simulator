@@ -238,7 +238,8 @@ function ReportTab({ results, rr, inflationRate, hasRet, retAmt, stateJson }: { 
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (results.length) {
-      const parts = results.map((r, i) => generateReport(r, { rr, inflationRate, hasRet, retAmt }, i === 0));
+      const baseS = results[0]?.scenario ?? null;
+      const parts = results.map((r, i) => generateReport(r, { rr, inflationRate, hasRet, retAmt }, i === 0, i === 0 ? null : baseS));
       const report = parts.join("\n\n" + "=".repeat(60) + "\n\n");
       const fullText = report + "\n\n【設定JSON（シミュレーター再現用）】\n```json\n" + stateJson + "\n```";
       setText(fullText);
