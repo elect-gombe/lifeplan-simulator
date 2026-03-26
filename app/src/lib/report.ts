@@ -44,7 +44,8 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
   }
 
   // リンク設定の解決: overrideSettingsが空=全設定リンク、含まれていない設定=Aの値を使用
-  const linked = s.linkedToBase && !!base;
+  const base = s.linkedToBase && baseScenario ? baseScenario : null;
+  const linked = !!base;
   const overSet = s.overrideSettings || [];
   const settingLinked = (key: string) => linked && !overSet.includes(key as any);
   const resolve = (key: string, fallback: any) => settingLinked(key) ? ((base as any)?.[key] ?? fallback) : ((s as any)[key] ?? fallback);
@@ -81,7 +82,6 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
   }
 
   // リンクシナリオの場合、Aから継承した設定を使う
-  const base = s.linkedToBase && baseScenario ? baseScenario : null;
   const effHousingTimeline = s.housingTimeline ?? base?.housingTimeline;
   const effNisa = s.nisa?.enabled ? s.nisa : (base?.nisa?.enabled ? base.nisa : null);
   const effDCMethod = s.dcReceiveMethod ?? base?.dcReceiveMethod;
