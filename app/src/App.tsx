@@ -11,7 +11,7 @@ import { TaxDetailModal, TaxDetailPanel, MiniLineChart } from "./components/TaxD
 import type { GraphFn } from "./components/TaxDetailModal";
 import { TaxRateCharts } from "./components/TaxRateChart";
 import { IncomeExpenseCharts } from "./components/IncomeExpenseChart";
-import { generateReport } from "./lib/report";
+import { generateReport, generateAnalysisPrompt } from "./lib/report";
 
 const STORAGE_KEY = "asset-sim-state-v1";
 
@@ -236,15 +236,17 @@ function PanelContainer({ children }: { children: (width: number) => React.React
 function ReportTab({ results, rr, inflationRate, hasRet, retAmt, stateJson }: { results: import("./lib/types").ScenarioResult[]; rr: number; inflationRate: number; hasRet: boolean; retAmt: number; stateJson: string }) {
   const [text, setText] = useState("");
   const [copied, setCopied] = useState(false);
+  const [includeAnalysis, setIncludeAnalysis] = useState(true);
   useEffect(() => {
     if (results.length) {
       const baseS = results[0]?.scenario ?? null;
       const parts = results.map((r, i) => generateReport(r, { rr, inflationRate, hasRet, retAmt }, i === 0, i === 0 ? null : baseS));
       const report = parts.join("\n\n" + "=".repeat(60) + "\n\n");
-      const fullText = report + "\n\n【設定JSON（シミュレーター再現用）】\n```json\n" + stateJson + "\n```";
+      const fullText = report + "\n\n【設定JSON（シミュレーター再現用）】\n```json\n" + stateJson + "\n```"
+        + (includeAnalysis ? "\n\n" + generateAnalysisPrompt() : "");
       setText(fullText);
     }
-  }, [results, rr, inflationRate, hasRet, retAmt, stateJson]);
+  }, [results, rr, inflationRate, hasRet, retAmt, stateJson, includeAnalysis]);
   const download = () => {
     const blob = new Blob([text], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
@@ -260,6 +262,10 @@ function ReportTab({ results, rr, inflationRate, hasRet, retAmt, stateJson }: { 
         <button onClick={download} className="rounded border px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">💾TXT保存</button>
         <span className="text-[10px] text-gray-400 self-center">{text.length.toLocaleString()}文字</span>
       </div>
+      <label className="flex items-center gap-1.5 text-[11px] text-gray-600 cursor-pointer select-none">
+        <input type="checkbox" checked={includeAnalysis} onChange={e => setIncludeAnalysis(e.target.checked)} className="rounded" />
+        LLM分析チェック指示を含める
+      </label>
       <textarea value={text} readOnly rows={24}
         className="w-full rounded border bg-gray-50 p-2 font-mono text-[10px] leading-tight text-gray-700 focus:outline-none" onClick={e => (e.target as HTMLTextAreaElement).select()} />
     </div>
