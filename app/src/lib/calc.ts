@@ -933,8 +933,11 @@ function resolveSimConfig(s: Scenario, base: BaseResult, params: CalcParams, bas
     : linked && base_.nisa?.enabled ? base_.nisa
     : undefined;
 
-  // Balance policy: use own if set, else inherit
-  const bpConfig = s.balancePolicy || (linked ? base_.balancePolicy : undefined);
+  // Balance policy: merge own with base (own overrides, but inherit missing fields like cashAnchors)
+  const baseBP = linked ? base_.balancePolicy : undefined;
+  const bpConfig = s.balancePolicy
+    ? { ...baseBP, ...s.balancePolicy, cashAnchors: s.balancePolicy.cashAnchors ?? baseBP?.cashAnchors, cashReserveMaxMonths: s.balancePolicy.cashReserveMaxMonths ?? baseBP?.cashReserveMaxMonths, withdrawalOrder: s.balancePolicy.withdrawalOrder ?? baseBP?.withdrawalOrder }
+    : baseBP;
 
   // NISA config — 個人別に枠を管理
   const nisa: NISAConfig | undefined = nisaConfig;

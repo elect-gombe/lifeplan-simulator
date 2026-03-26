@@ -36,6 +36,9 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
     lines.push("  未設定(undefined)のフィールドはリンク先 → グローバル値にフォールバックします。");
     lines.push("※ 重要: linkedToBase:true かつ overrideSettings:[] のシナリオでは、JSON上の rr/inflationRate 等の値は");
     lines.push("  計算に使用されません（Aの値が適用されます）。JSONはUI状態の保存用であり、実効値は上記レポート本文を参照してください。");
+    lines.push("※ nisa.returnRate はレガシーフィールドです。実際の利回りは Scenario.nisaReturnRate → Scenario.rr → グローバルrr の順に解決されます。");
+    lines.push("※ 保険イベント(insuranceParams)の保険金は死亡年に一括支払いされます。死亡イベント(deathParams)の incomeProtectionManPerMonth は別途の年額給付設定です。");
+    lines.push("※ 中高齢寡婦加算は令和7年改正(2028年施行)により段階的に廃止されます。死亡年が2028年以降の場合、逓減率が適用されます。");
     lines.push("");
   }
 
@@ -55,7 +58,7 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
   const effCurrentAge = resolve("currentAge", s.currentAge);
   const effRetAge = resolve("retirementAge", s.retirementAge);
   const effSimEnd = resolve("simEndAge", s.simEndAge);
-  lines.push(`期間: ${effCurrentAge}歳→${effSimEnd}歳（${effSimEnd - effCurrentAge}年） / 退職: ${effRetAge}歳`);
+  lines.push(`期間: ${effCurrentAge}〜${effSimEnd - 1}歳（${effSimEnd - effCurrentAge}年間） / 退職: ${effRetAge}歳`);
 
   const effectiveRR = resolve("rr", params.rr);
   const effectiveInflation = resolve("inflationRate", params.inflationRate);
@@ -142,8 +145,10 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
 // --- セクション2: 収入・税・手取りテーブル（毎年） ---
 function incomeTable(yrs: YearResult[], s: Scenario): string {
   const hasSpouse = yrs.some(yr => yr.spouse.gross > 0);
+  const hasSurvivor = yrs.some(yr => yr.survivorIncome > 0 || yr.insurancePayoutTotal > 0);
   const spH = hasSpouse ? ["配偶者給与", "配偶者課税所得", "配偶者税率", "配偶者所得税", "配偶者住民税", "配偶者社保"] : [];
-  const headers = ["年齢", "本人給与", "本人課税所得", "本人税率", "本人所得税", "本人住民税", "本人社保", ...spH, "本人年金", ...(hasSpouse ? ["配偶者年金"] : []), "手当", "ローン控除", "手取合計"];
+  const surH = hasSurvivor ? ["遺族収入", "保険金"] : [];
+  const headers = ["年齢", "本人給与", "本人課税所得", "本人税率", "本人所得税", "本人住民税", "本人社保", ...spH, "本人年金", ...(hasSpouse ? ["配偶者年金"] : []), ...surH, "手当", "ローン控除", "手取合計"];
   const rows = yrs.map(yr => {
     const loanDed = yr.self.housingLoanDeduction + yr.spouse.housingLoanDeduction;
     const spData = hasSpouse ? [
@@ -151,12 +156,14 @@ function incomeTable(yrs: YearResult[], s: Scenario): string {
       yr.spouse.marginalRate > 0 ? `${yr.spouse.marginalRate}%` : "-",
       m(yr.spouse.incomeTax), m(yr.spouse.residentTax), m(yr.spouse.socialInsurance),
     ] : [];
+    const surData = hasSurvivor ? [m(yr.survivorIncome), m(yr.insurancePayoutTotal)] : [];
     return [
       `${yr.age}`, m(yr.self.gross), m(yr.self.taxableIncome),
       yr.self.marginalRate > 0 ? `${yr.self.marginalRate}%` : "-",
       m(yr.self.incomeTax), m(yr.self.residentTax), m(yr.self.socialInsurance),
       ...spData,
       m(yr.self.pensionIncome), ...(hasSpouse ? [m(yr.spouse.pensionIncome)] : []),
+      ...surData,
       m(yr.childAllowance), m(loanDed), m(yr.takeHomePay),
     ];
   });
@@ -303,9 +310,13 @@ function summarySection(result: ScenarioResult, yrs: YearResult[]): string {
   lines.push(`生涯手取り合計: ${okuInc > 0 ? `約${okuInc}億` : ""}${manInc.toLocaleString()}万円`);
   lines.push(`生涯支出合計: ${okuExp > 0 ? `約${okuExp}億` : ""}${manExp.toLocaleString()}万円`);
 
-  // DC受取
+  // DC受取（本人＋配偶者）
   const dc = result.dcReceiveDetail;
-  lines.push(`DC受取: ${dc.method} → 税額${mRaw(dc.totalTax)}万 / 手取り${mRaw(dc.netAmount)}万`);
+  const spDC = result.spouseDCReceiveDetail;
+  const totalDCTax = dc.totalTax + (spDC?.totalTax || 0);
+  const totalDCNet = dc.netAmount + (spDC?.netAmount || 0);
+  lines.push(`DC受取: ${dc.method} → 税額${mRaw(totalDCTax)}万 / 手取り${mRaw(totalDCNet)}万`);
+  if (spDC && spDC.netAmount > 0) lines.push(`  (本人: ${mRaw(dc.netAmount)}万 / 配偶者: ${mRaw(spDC.netAmount)}万)`);
 
   // 最小値
   const minCF = yrs.reduce((min, yr) => yr.annualNetCashFlow < min.annualNetCashFlow ? yr : min, yrs[0]);
