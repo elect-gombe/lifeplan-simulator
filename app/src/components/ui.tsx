@@ -102,3 +102,53 @@ export function Sec({ children, c, colSpan }: any) {
     </tr>
   );
 }
+
+/** Inline number input: label + input + unit (compact flex row) */
+export function Inp({ label, value, onChange, unit, w, step, min, max, disabled }: {
+  label?: string; value: number; onChange: (v: number) => void;
+  unit?: string; w?: string; step?: number; min?: number; max?: number; disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      {label && <span className="text-gray-500 text-[10px] whitespace-nowrap">{label}</span>}
+      <input type="number" value={value} step={step} min={min} max={max} disabled={disabled}
+        onChange={e => onChange(Number(e.target.value))}
+        className={`${w || "w-16"} rounded border px-1 py-0.5 text-xs ${disabled ? "opacity-50 bg-gray-50" : ""}`} />
+      {unit && <span className="text-[10px] text-gray-400">{unit}</span>}
+    </div>
+  );
+}
+
+/** Toggle button group (2-N options) */
+export function Btns<T extends string | number>({ options, value, onChange, color, disabled }: {
+  options: { value: T; label: string }[];
+  value: T; onChange: (v: T) => void;
+  color?: string; disabled?: boolean;
+}) {
+  const activeClass = color === "green" ? "bg-green-600 text-white"
+    : color === "indigo" ? "bg-indigo-600 text-white"
+    : color === "pink" ? "bg-pink-600 text-white"
+    : color === "slate" ? "bg-slate-700 text-white"
+    : "bg-blue-600 text-white";
+  return (
+    <div className="flex gap-1">
+      {options.map(o => (
+        <button key={String(o.value)} onClick={() => !disabled && onChange(o.value)}
+          className={`rounded px-2 py-0.5 text-[10px] ${value === o.value ? activeClass : "bg-gray-100"} ${disabled ? "opacity-50" : ""}`}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Link toggle button (🔗A / ✏️独自) */
+export function Lnk({ linked, onToggle }: { linked: boolean; onToggle: () => void }) {
+  return (
+    <button onClick={onToggle}
+      className={`text-[10px] rounded px-1.5 py-0.5 ${linked ? "bg-gray-200 text-gray-500" : "bg-blue-100 text-blue-600"}`}
+      title={linked ? "Aにリンク中（独自設定に変更）" : "独自設定中（Aにリンク）"}>
+      {linked ? "🔗A" : "✏️独自"}
+    </button>
+  );
+}

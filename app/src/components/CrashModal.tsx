@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import type { LifeEvent, MarketCrashParams } from "../lib/types";
 import { Modal } from "./ui";
+import type { EventModalBaseProps } from "./EventModal";
 
 const DEFAULTS: MarketCrashParams = {
   dropRate: 40,
@@ -8,12 +9,6 @@ const DEFAULTS: MarketCrashParams = {
   recoveryYears: 15,
 };
 
-/**
- * 回復ボーナス利回りを算出:
- * 暴落含めた(recoveryYears+1)年間の幾何平均がtargetRRになるように
- * (1-drop/100) × (1+bonus)^N = (1+target)^(N+1)
- * bonus = ((1+target)^(N+1) / (1-drop/100))^(1/N) - 1
- */
 function calcBonusRate(dropRate: number, recoveryYears: number, targetRR: number): number {
   const target = targetRR / 100;
   const drop = dropRate / 100;
@@ -21,18 +16,16 @@ function calcBonusRate(dropRate: number, recoveryYears: number, targetRR: number
   const afterDrop = 1 - drop;
   if (afterDrop <= 0 || recoveryYears <= 0) return targetRR;
   const bonus = Math.pow(totalGrowth / afterDrop, 1 / recoveryYears) - 1;
-  return Math.round(bonus * 1000) / 10; // %表記、小数1桁
+  return Math.round(bonus * 1000) / 10;
 }
 
-/** 回復レート配列を生成（全年同一ボーナス or カスタム） */
 export function generateRecoveryRates(dropRate: number, recoveryYears: number, targetRR: number): number[] {
   const bonus = calcBonusRate(dropRate, recoveryYears, targetRR);
   return Array(recoveryYears).fill(bonus);
 }
 
-/** 実効幾何平均利回りを計算（暴落年+回復期間） */
 function calcEffectiveCAGR(dropRate: number, rates: number[]): number {
-  let product = 1 - dropRate / 100; // 暴落年
+  let product = 1 - dropRate / 100;
   for (const r of rates) product *= (1 + r / 100);
   const n = rates.length + 1;
   return (Math.pow(product, 1 / n) - 1) * 100;
@@ -40,11 +33,10 @@ function calcEffectiveCAGR(dropRate: number, rates: number[]): number {
 
 interface SimPoint { value: number; cost: number; gain: number; }
 
-/** プレビュー用: 資産推移を計算（時価・元本・含み益） */
 function simulateAsset(initial: number, contrib: number, years: number, normalRR: number, crashAt: number, dropRate: number, recoveryRates: number[]): SimPoint[] {
   const result: SimPoint[] = [];
   let asset = initial;
-  let cost = initial; // 投入額累計
+  let cost = initial;
   for (let y = 0; y <= years; y++) {
     result.push({ value: asset, cost, gain: asset - cost });
     if (y === crashAt) {
@@ -60,11 +52,7 @@ function simulateAsset(initial: number, contrib: number, years: number, normalRR
   return result;
 }
 
-export function CrashModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent, defaultRR }: {
-  isOpen: boolean; onClose: () => void;
-  onSave: (event: LifeEvent) => void;
-  currentAge: number; retirementAge: number;
-  existingEvent?: LifeEvent | null;
+export function CrashModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent, defaultRR }: EventModalBaseProps & {
   defaultRR?: number;
 }) {
   const [age, setAge] = useState(currentAge + 5);
@@ -107,13 +95,11 @@ export function CrashModal({ isOpen, onClose, onSave, currentAge, retirementAge,
     setCustomRates(rates);
   };
 
-  // プレビュー
   const pvYears = Math.max(recoveryYears + 8, 25);
   const crashAt = 3;
   const pvCrash = useMemo(() => simulateAsset(10000000, 400000, pvYears, targetRR, crashAt, dropRate, effectiveRates), [targetRR, dropRate, effectiveRates, pvYears]);
   const pvNormal = useMemo(() => simulateAsset(10000000, 400000, pvYears, targetRR, -1, 0, []), [targetRR, pvYears]);
 
-  // Chart
   const cW = 520, cH = 220, pL = 55, pR = 10, pT = 15, pB = 22;
   const allVals = [...pvCrash.map(p => p.value), ...pvNormal.map(p => p.value)];
   const maxV = Math.max(...allVals);
@@ -121,15 +107,8 @@ export function CrashModal({ isOpen, onClose, onSave, currentAge, retirementAge,
   const x = (i: number) => pL + (i / pvYears) * (cW - pL - pR);
   const yv = (v: number) => pT + (maxV === minV ? 0.5 : (1 - (v - minV) / (maxV - minV))) * (cH - pT - pB);
   const linePath = (data: SimPoint[], key: keyof SimPoint) => data.map((p, i) => `${i === 0 ? "M" : "L"}${x(i)},${yv(p[key])}`).join(" ");
-  // 含み益/含み損の塗りつぶしエリア（時価と元本の間）
-  const gainFill = (data: SimPoint[]) => {
-    const top = data.map((p, i) => `${x(i)},${yv(p.value)}`).join(" L");
-    const bot = data.map((p, i) => `${x(data.length - 1 - i)},${yv(data[data.length - 1 - i].cost)}`).join(" L");
-    return `M${top} L${bot} Z`;
-  };
 
   const handleSave = () => {
-    // 保存時に最新の値で再生成（stale useMemo対策）
     const ratesToSave = customRates && customRates.length === recoveryYears
       ? customRates
       : generateRecoveryRates(dropRate, recoveryYears, targetRR);
@@ -255,7 +234,6 @@ export function CrashModal({ isOpen, onClose, onSave, currentAge, retirementAge,
           const zeroY = gy(0);
           const gainPath = pvCrash.map((p, i) => `${i === 0 ? "M" : "L"}${x(i)},${gy(p.gain)}`).join(" ");
           const fillAbove = gainPath + ` L${x(pvYears)},${zeroY} L${x(0)},${zeroY} Z`;
-          // 含み益回復ポイント: 暴落後に初めてgain >= 0になる年
           let recoveryPoint = -1;
           for (let i = crashAt + 1; i <= pvYears; i++) {
             if (pvCrash[i].gain >= 0) { recoveryPoint = i; break; }
@@ -265,33 +243,25 @@ export function CrashModal({ isOpen, onClose, onSave, currentAge, retirementAge,
             <div className="rounded border p-3">
               <div className="text-xs font-bold text-gray-600 mb-1">含み益 / 含み損（暴落シナリオ）</div>
               <svg viewBox={`0 0 ${cW} ${gH}`} className="w-full" style={{ maxHeight: 140 }}>
-                {/* 0ライン */}
                 <line x1={pL} y1={zeroY} x2={cW - pR} y2={zeroY} stroke="#374151" strokeWidth={0.5} />
                 <text x={pL - 4} y={zeroY + 3} textAnchor="end" fontSize={8} fill="#374151">0</text>
-                {/* Yグリッド */}
                 {[gMin, gMax].filter(v => v !== 0).map(v => (
                   <g key={v}><line x1={pL} y1={gy(v)} x2={cW - pR} y2={gy(v)} stroke="#e5e7eb" strokeWidth={0.5} />
                     <text x={pL - 4} y={gy(v) + 3} textAnchor="end" fontSize={8} fill="#9ca3af">{Math.round(v / 10000)}万</text></g>
                 ))}
-                {/* 暴落帯 */}
                 <rect x={x(crashAt)} y={pT} width={Math.max(x(crashAt + 1) - x(crashAt), 2)} height={gH - pT - pB} fill="#dc2626" opacity={0.1} />
-                {/* 含み損期間の帯 */}
                 {recoveryPoint > 0 && (
                   <rect x={x(crashAt)} y={pT} width={x(recoveryPoint) - x(crashAt)} height={gH - pT - pB} fill="#fbbf24" opacity={0.08} />
                 )}
-                {/* 塗りつぶし: 含み益=緑、含み損=赤 */}
                 <clipPath id="aboveZero"><rect x={pL} y={pT} width={cW - pL - pR} height={zeroY - pT} /></clipPath>
                 <clipPath id="belowZero"><rect x={pL} y={zeroY} width={cW - pL - pR} height={gH - pB - zeroY} /></clipPath>
                 <path d={fillAbove} fill="#22c55e" opacity={0.2} clipPath="url(#aboveZero)" />
                 <path d={fillAbove} fill="#dc2626" opacity={0.2} clipPath="url(#belowZero)" />
-                {/* 含み益回復ポイント */}
                 {recoveryPoint > 0 && <>
                   <line x1={x(recoveryPoint)} y1={pT} x2={x(recoveryPoint)} y2={gH - pB} stroke="#f59e0b" strokeWidth={1} strokeDasharray="3,2" />
                   <text x={x(recoveryPoint)} y={pT + 10} textAnchor="middle" fontSize={7} fill="#d97706">{recoveryFromCrash}年で回復</text>
                 </>}
-                {/* ライン */}
                 <path d={gainPath} fill="none" stroke="#374151" strokeWidth={1.5} />
-                {/* X軸 */}
                 {[0, crashAt, ...(recoveryPoint > 0 && recoveryPoint !== crashAt + recoveryYears ? [recoveryPoint] : []), crashAt + recoveryYears, pvYears].map(yr => (
                   <text key={yr} x={x(yr)} y={gH - 4} textAnchor="middle" fontSize={8} fill="#9ca3af">{yr}年</text>
                 ))}

@@ -32,6 +32,8 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
     lines.push("※ このレポートはライフプランシミュレーターの出力です。末尾にJSON設定を添付しています。");
     lines.push("※ JSON内の linkedToBase:true のシナリオは、シナリオAと同じ前提条件（配偶者・住居・NISA・子供・保険等）で計算されています。");
     lines.push("  JSON上の spouse.enabled:false 等はUI上の「独自設定なし＝Aを流用」を意味し、「配偶者なし」ではありません。");
+    lines.push("※ 利回り設定の優先順位: Scenario.dcReturnRate/nisaReturnRate/taxableReturnRate → Scenario.rr → グローバルrr");
+    lines.push("  未設定(undefined)のフィールドはリンク先 → グローバル値にフォールバックします。");
     lines.push("");
   }
 
@@ -45,6 +47,9 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
   const effectiveRR = s.rr ?? params.rr;
   const effectiveInflation = s.inflationRate ?? params.inflationRate;
   lines.push(`運用利回り: ${effectiveRR}%${s.rr != null ? '(シナリオ独自)' : ''} / インフレ率: ${effectiveInflation}%${s.inflationRate != null ? '(シナリオ独自)' : ''}`);
+  if (s.dcReturnRate != null || s.nisaReturnRate != null || s.taxableReturnRate != null || s.cashInterestRate != null) {
+    lines.push(`個別利回り: DC${s.dcReturnRate ?? '共通'}% / NISA${s.nisaReturnRate ?? '共通'}% / 特定${s.taxableReturnRate ?? '共通'}% / 現金${s.cashInterestRate ?? 0}%`);
+  }
   if (params.hasRet) lines.push(`会社退職金: ${Math.round(params.retAmt / 10000).toLocaleString()}万円`);
 
   // 配偶者（linkedToBaseの場合、計算にはAの配偶者が含まれるがJSON上はenabled:false）
@@ -74,7 +79,8 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
 
   // NISA
   if (s.nisa?.enabled) {
-    lines.push(`NISA: 年${s.nisa.annualLimitMan}万×${s.nisa.accounts}口座 / 生涯${s.nisa.lifetimeLimitMan}万 / 利回り${s.nisa.returnRate}%`);
+    const effNisaRR = s.nisaReturnRate ?? s.rr ?? params.rr;
+    lines.push(`NISA: 年${s.nisa.annualLimitMan}万×${s.nisa.accounts}口座 / 生涯${s.nisa.lifetimeLimitMan}万 / 利回り${effNisaRR}%`);
   }
 
   // DC

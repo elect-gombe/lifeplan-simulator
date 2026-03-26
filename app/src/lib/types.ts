@@ -107,7 +107,7 @@ export interface NISAConfig {
   accounts: 1 | 2;             // 口座数（1=本人のみ, 2=夫婦2口座）
   annualLimitMan: number;       // 1人あたり年間投資枠（万円）default 360
   lifetimeLimitMan: number;     // 1人あたり生涯投資枠（万円）default 1800
-  returnRate: number;           // 運用利回り（%）NISA=非課税, 特定口座=20.315%課税
+  returnRate?: number;          // [廃止予定] Scenario.nisaReturnRate を使用。後方互換のため残存
   spouseAnnualLimitMan?: number;   // 配偶者の年間枠（未設定なら本人と同じ）
   spouseLifetimeLimitMan?: number; // 配偶者の生涯枠（未設定なら本人と同じ）
 }
@@ -499,19 +499,28 @@ export function isEventActive(e: LifeEvent, age: number, allEvents?: LifeEvent[]
   return age < eAge + e.durationYears;
 }
 
-export const EVENT_TYPES: Record<string, { label: string; icon: string; color: string; defaultAnnual: number; defaultOnetime: number; defaultDuration: number }> = {
-  child:     { label: "子供",       icon: "👶", color: "#f59e0b", defaultAnnual: 50,  defaultOnetime: 50,  defaultDuration: 0 },
-  education: { label: "教育費",     icon: "🎓", color: "#8b5cf6", defaultAnnual: 120, defaultOnetime: 0,   defaultDuration: 4 },
-  property:  { label: "住宅購入",   icon: "🏠", color: "#3b82f6", defaultAnnual: 120, defaultOnetime: 500, defaultDuration: 35 },
-  car:       { label: "車",         icon: "🚗", color: "#10b981", defaultAnnual: 30,  defaultOnetime: 300, defaultDuration: 7 },
-  marriage:  { label: "結婚",       icon: "💍", color: "#ec4899", defaultAnnual: 0,   defaultOnetime: 300, defaultDuration: 0 },
-  insurance: { label: "保険",       icon: "🛡️", color: "#6366f1", defaultAnnual: 0,  defaultOnetime: 0,   defaultDuration: 0 },
-  travel:    { label: "旅行・趣味", icon: "✈️", color: "#14b8a6", defaultAnnual: 30,  defaultOnetime: 0,   defaultDuration: 0 },
-  rent:      { label: "家賃",       icon: "🏢", color: "#64748b", defaultAnnual: 120, defaultOnetime: 0,   defaultDuration: 10 },
-  nursing:   { label: "介護",       icon: "🏥", color: "#be185d", defaultAnnual: 84,  defaultOnetime: 0,   defaultDuration: 6 },
-  death:       { label: "死亡",       icon: "⚰️", color: "#1e293b", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
-  relocation:  { label: "住み替え", icon: "🏡", color: "#0891b2", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
-  gift:        { label: "贈与",     icon: "🎁", color: "#a855f7", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
-  crash:       { label: "暴落",     icon: "📉", color: "#dc2626", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 1 },
+export interface EventTypeDef {
+  label: string; icon: string; color: string;
+  defaultAnnual: number; defaultOnetime: number; defaultDuration: number;
+  /** LifeEvent上のパラメータキー (モーダル編集対応イベント用) */
+  paramsKey?: keyof LifeEvent;
+  /** 編集ボタンのCSS classes */
+  editBtnClass?: string;
+}
+
+export const EVENT_TYPES: Record<string, EventTypeDef> = {
+  child:       { label: "子供",       icon: "👶", color: "#f59e0b", defaultAnnual: 50,  defaultOnetime: 50,  defaultDuration: 0 },
+  education:   { label: "教育費",     icon: "🎓", color: "#8b5cf6", defaultAnnual: 120, defaultOnetime: 0,   defaultDuration: 4 },
+  property:    { label: "住宅購入",   icon: "🏠", color: "#3b82f6", defaultAnnual: 120, defaultOnetime: 500, defaultDuration: 35, paramsKey: "propertyParams",   editBtnClass: "bg-blue-100 text-blue-600" },
+  car:         { label: "車",         icon: "🚗", color: "#10b981", defaultAnnual: 30,  defaultOnetime: 300, defaultDuration: 7,  paramsKey: "carParams",        editBtnClass: "bg-green-100 text-green-600" },
+  marriage:    { label: "結婚",       icon: "💍", color: "#ec4899", defaultAnnual: 0,   defaultOnetime: 300, defaultDuration: 0 },
+  insurance:   { label: "保険",       icon: "🛡️", color: "#6366f1", defaultAnnual: 0,  defaultOnetime: 0,   defaultDuration: 0,  paramsKey: "insuranceParams",  editBtnClass: "bg-indigo-100 text-indigo-600" },
+  travel:      { label: "旅行・趣味", icon: "✈️", color: "#14b8a6", defaultAnnual: 30,  defaultOnetime: 0,   defaultDuration: 0 },
+  rent:        { label: "家賃",       icon: "🏢", color: "#64748b", defaultAnnual: 120, defaultOnetime: 0,   defaultDuration: 10 },
+  nursing:     { label: "介護",       icon: "🏥", color: "#be185d", defaultAnnual: 84,  defaultOnetime: 0,   defaultDuration: 6 },
+  death:       { label: "死亡",       icon: "⚰️", color: "#1e293b", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0,  paramsKey: "deathParams",      editBtnClass: "bg-gray-200 text-gray-600" },
+  relocation:  { label: "住み替え",   icon: "🏡", color: "#0891b2", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0,  paramsKey: "relocationParams", editBtnClass: "bg-cyan-100 text-cyan-600" },
+  gift:        { label: "贈与",       icon: "🎁", color: "#a855f7", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0,  paramsKey: "giftParams",       editBtnClass: "bg-purple-100 text-purple-600" },
+  crash:       { label: "暴落",       icon: "📉", color: "#dc2626", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 1,  paramsKey: "marketCrashParams", editBtnClass: "bg-red-100 text-red-600" },
   custom:      { label: "カスタム",   icon: "📌", color: "#78716c", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
 };

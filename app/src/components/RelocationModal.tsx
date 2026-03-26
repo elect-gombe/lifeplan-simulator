@@ -6,14 +6,9 @@ import { calcPropertyCapitalGainsTax } from "../lib/tax";
 import { Modal } from "./ui";
 import { PropertyFormWithPreview } from "./PropertyForm";
 import { DEFAULT_PROPERTY_PARAMS } from "./PropertyModal";
+import type { EventModalBaseProps } from "./EventModal";
 
-export function RelocationModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent, allEvents, onUpdatePropertySale }: {
-  isOpen: boolean;
-  onClose: () => void;
-  onSave: (event: LifeEvent) => void;
-  currentAge: number;
-  retirementAge: number;
-  existingEvent?: LifeEvent | null;
+export function RelocationModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent, allEvents, onUpdatePropertySale }: EventModalBaseProps & {
   allEvents?: LifeEvent[];
   onUpdatePropertySale?: (propertyEventId: number, patch: Partial<PropertyParams>) => void;
 }) {

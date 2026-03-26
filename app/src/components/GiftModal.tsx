@@ -1,62 +1,32 @@
-import React, { useState, useEffect } from "react";
-import type { LifeEvent, GiftParams } from "../lib/types";
+import React from "react";
+import type { GiftParams } from "../lib/types";
 import { calcGiftTax } from "../lib/tax";
-import { Modal } from "./ui";
+import { Btns } from "./ui";
+import { EventModal, type EventModalBaseProps, type EventModalDef } from "./EventModal";
 
-export function GiftModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent }: {
-  isOpen: boolean;
-  onClose: () => void;
-  onSave: (event: LifeEvent) => void;
-  currentAge: number;
-  retirementAge: number;
-  existingEvent?: LifeEvent | null;
-}) {
-  const defaults: GiftParams = {
-    giftType: "calendar",
-    amountMan: 500,
-    recipientRelation: "lineal",
-  };
+const giftDef: EventModalDef<GiftParams> = {
+  type: "gift",
+  title: "🎁 贈与",
+  defaults: { giftType: "calendar", amountMan: 500, recipientRelation: "lineal" },
+  paramsKey: "giftParams",
+  ageOffset: 10,
+  buildLabel: (gp) => `贈与(${gp.amountMan}万)`,
+};
 
-  const [giftAge, setGiftAge] = useState(currentAge + 10);
-  const [gp, setGP] = useState<GiftParams>(defaults);
-
-  useEffect(() => {
-    if (existingEvent?.giftParams) {
-      setGP(existingEvent.giftParams);
-      setGiftAge(existingEvent.age);
-    }
-  }, [existingEvent]);
-
-  const u = (patch: Partial<GiftParams>) => setGP(prev => ({ ...prev, ...patch }));
-
-  const amountYen = gp.amountMan * 10000;
-  const taxResult = calcGiftTax(amountYen, gp.giftType, gp.recipientRelation);
-  const totalCostMan = gp.amountMan + Math.round(taxResult.tax / 10000);
-
-  const handleSave = () => {
-    const event: LifeEvent = {
-      id: existingEvent?.id || Date.now(),
-      age: giftAge,
-      type: "gift",
-      label: `贈与(${gp.amountMan}万)`,
-      oneTimeCostMan: 0,
-      annualCostMan: 0,
-      durationYears: 0,
-      giftParams: gp,
-    };
-    onSave(event);
-    onClose();
-  };
-
+export function GiftModal(props: EventModalBaseProps) {
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`🎁 贈与${existingEvent ? "（編集）" : ""}`}
-      onSave={handleSave} saveLabel={existingEvent ? "更新" : "追加"}>
+    <EventModal def={giftDef} {...props}>
+      {({ params: gp, u, age, setAge, currentAge, retirementAge }) => {
+        const amountYen = gp.amountMan * 10000;
+        const taxResult = calcGiftTax(amountYen, gp.giftType, gp.recipientRelation);
+        const totalCostMan = gp.amountMan + Math.round(taxResult.tax / 10000);
 
+        return (<>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-gray-600 mb-1">贈与年齢</label>
-              <input type="number" value={giftAge} min={currentAge} max={retirementAge - 1}
-                onChange={e => setGiftAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
+              <input type="number" value={age} min={currentAge} max={retirementAge - 1}
+                onChange={e => setAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
             </div>
             <div>
               <label className="block font-semibold text-gray-600 mb-1">贈与額（万円）<span className="ml-1 cursor-help text-gray-400" title="暦年課税: 年110万以下は非課税。住宅資金贈与は最大1,000万非課税枠あり">ⓘ</span></label>
@@ -68,12 +38,8 @@ export function GiftModal({ isOpen, onClose, onSave, currentAge, retirementAge, 
           {/* 課税方式 */}
           <div className="rounded border p-3 space-y-2">
             <label className="block font-semibold text-gray-600">課税方式</label>
-            <div className="flex gap-2">
-              <button onClick={() => u({ giftType: "calendar" })}
-                className={`rounded px-3 py-1 ${gp.giftType === "calendar" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>暦年課税</button>
-              <button onClick={() => u({ giftType: "settlement" })}
-                className={`rounded px-3 py-1 ${gp.giftType === "settlement" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>相続時精算課税</button>
-            </div>
+            <Btns options={[{value:"calendar" as const,label:"暦年課税"},{value:"settlement" as const,label:"相続時精算課税"}]}
+              value={gp.giftType} onChange={v => u({ giftType: v })} />
             <div className="text-gray-400 text-[10px]">
               {gp.giftType === "calendar"
                 ? "暦年課税: 年110万円の基礎控除。超過分に累進税率を適用。"
@@ -84,12 +50,8 @@ export function GiftModal({ isOpen, onClose, onSave, currentAge, retirementAge, 
           {/* 贈受者関係 */}
           <div className="rounded border p-3 space-y-2">
             <label className="block font-semibold text-gray-600">贈受者の関係</label>
-            <div className="flex gap-2">
-              <button onClick={() => u({ recipientRelation: "lineal" })}
-                className={`rounded px-3 py-1 ${gp.recipientRelation === "lineal" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>直系尊属</button>
-              <button onClick={() => u({ recipientRelation: "other" })}
-                className={`rounded px-3 py-1 ${gp.recipientRelation === "other" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>その他</button>
-            </div>
+            <Btns options={[{value:"lineal" as const,label:"直系尊属"},{value:"other" as const,label:"その他"}]}
+              value={gp.recipientRelation} onChange={v => u({ recipientRelation: v })} />
             <div className="text-gray-400 text-[10px]">
               {gp.recipientRelation === "lineal"
                 ? "直系尊属（父母・祖父母）からの贈与は特例税率が適用され、税負担が軽減されます。"
@@ -116,7 +78,8 @@ export function GiftModal({ isOpen, onClose, onSave, currentAge, retirementAge, 
               合計: {totalCostMan.toLocaleString()}万円
             </div>
           </div>
-
-    </Modal>
+        </>);
+      }}
+    </EventModal>
   );
 }

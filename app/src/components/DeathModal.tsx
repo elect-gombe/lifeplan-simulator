@@ -1,77 +1,62 @@
 import React, { useState, useEffect } from "react";
-import type { LifeEvent, DeathParams, EventTarget } from "../lib/types";
+import type { DeathParams, EventTarget } from "../lib/types";
 import { calcSurvivorPension } from "../lib/calc";
-import { Modal } from "./ui";
+import { EventModal, type EventModalBaseProps, type EventModalDef } from "./EventModal";
 
-export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent }: {
-  isOpen: boolean;
-  onClose: () => void;
-  onSave: (event: LifeEvent) => void;
-  currentAge: number;
-  retirementAge: number;
-  existingEvent?: LifeEvent | null;
-}) {
-  const defaults: DeathParams = {
-    expenseReductionPct: 70,
-    hasDanshin: true,
-    survivorPensionManPerYear: 0,  // 0 = 自動計算（calc.tsで年齢・子の数・年収から算出）
-    incomeProtectionManPerMonth: 0,
-    incomeProtectionUntilAge: 65,
-  };
+const deathDef: EventModalDef<DeathParams> = {
+  type: "death",
+  title: "⚰️ 死亡イベント（収入保障シミュレーション）",
+  btnClass: "bg-slate-700 hover:bg-slate-800",
+  defaults: {
+    expenseReductionPct: 70, hasDanshin: true,
+    survivorPensionManPerYear: 0, incomeProtectionManPerMonth: 0, incomeProtectionUntilAge: 65,
+  },
+  paramsKey: "deathParams",
+  ageOffset: 10,
+  buildLabel: () => "", // overridden via buildExtra
+};
 
-  const [deathAge, setDeathAge] = useState(currentAge + 10);
-  const [dp, setDP] = useState<DeathParams>(defaults);
+export function DeathModal(props: EventModalBaseProps) {
+  const { existingEvent, currentAge } = props;
   const [target, setTarget] = useState<EventTarget>("self");
   const [childCount, setChildCount] = useState(2);
   const [avgAnnualSalaryMan, setAvgAnnualSalaryMan] = useState(700);
-  const [survivorAge, setSurvivorAge] = useState(deathAge - 2);
+  const [survivorAge, setSurvivorAge] = useState(currentAge + 10 - 2);
 
   useEffect(() => {
     if (existingEvent?.deathParams) {
-      setDP(existingEvent.deathParams);
-      setDeathAge(existingEvent.age);
       setTarget(existingEvent.target || "self");
     }
   }, [existingEvent]);
 
-  // 遺族年金プレビュー（calc.ts calcSurvivorPension を使用）
-  const pensionPreview = (() => {
-    const avgSalary = avgAnnualSalaryMan * 10000;
-    const contribYears = Math.max(deathAge - 22, 0);
-    const childAges = Array.from({ length: childCount }, (_, i) => i); // 仮の子年齢(0,1,2...)=全員18歳未満
-    const deathCalYear = new Date().getFullYear() + (deathAge - currentAge);
-    const r = calcSurvivorPension(avgSalary, contribYears, childAges, survivorAge, true, deathCalYear);
-    // 逓減率（UI表示用）
-    let widowTaperRate = 1;
-    if (deathCalYear >= 2028) widowTaperRate = Math.max(26 - (deathCalYear - 2028 + 1), 0) / 26;
-    return { basicPension: r.basic, employeePension: r.employee, widowSupplement: r.widowSupplement,
-      widowTaperRate, total: r.total, totalMan: Math.round(r.total / 10000) };
-  })();
-
-  const u = (patch: Partial<DeathParams>) => setDP(prev => ({ ...prev, ...patch }));
-
-  const protectionAnnual = dp.incomeProtectionManPerMonth * 12;
-  const protectionYears = Math.max(dp.incomeProtectionUntilAge - deathAge, 0);
-  const protectionTotal = protectionAnnual * protectionYears;
-
-  const targetLabel = target === "spouse" ? "配偶者" : "本人";
-  const handleSave = () => {
-    onSave({
-      id: existingEvent?.id || Date.now(),
-      age: deathAge,
-      type: "death",
-      label: `${targetLabel}死亡(${deathAge}歳)`,
-      oneTimeCostMan: 0, annualCostMan: 0, durationYears: 0,
-      target,
-      deathParams: dp,
-    });
-    onClose();
+  // Override buildLabel and buildExtra to include target
+  const def: EventModalDef<DeathParams> = {
+    ...deathDef,
+    buildLabel: (_, age) => `${target === "spouse" ? "配偶者" : "本人"}死亡(${age}歳)`,
+    buildExtra: () => ({ target }),
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="⚰️ 死亡イベント（収入保障シミュレーション）"
-      btnClass="bg-slate-700 hover:bg-slate-800" onSave={handleSave} saveLabel={existingEvent ? "更新" : "追加"}>
+    <EventModal def={def} {...props}>
+      {({ params: dp, u, age, setAge, currentAge: curAge, retirementAge }) => {
+        const pensionPreview = (() => {
+          const avgSalary = avgAnnualSalaryMan * 10000;
+          const contribYears = Math.max(age - 22, 0);
+          const childAges = Array.from({ length: childCount }, (_, i) => i);
+          const deathCalYear = new Date().getFullYear() + (age - curAge);
+          const r = calcSurvivorPension(avgSalary, contribYears, childAges, survivorAge, true, deathCalYear);
+          let widowTaperRate = 1;
+          if (deathCalYear >= 2028) widowTaperRate = Math.max(26 - (deathCalYear - 2028 + 1), 0) / 26;
+          return { basicPension: r.basic, employeePension: r.employee, widowSupplement: r.widowSupplement,
+            widowTaperRate, total: r.total, totalMan: Math.round(r.total / 10000) };
+        })();
 
+        const protectionAnnual = dp.incomeProtectionManPerMonth * 12;
+        const protectionYears = Math.max(dp.incomeProtectionUntilAge - age, 0);
+        const protectionTotal = protectionAnnual * protectionYears;
+        const targetLabel = target === "spouse" ? "配偶者" : "本人";
+
+        return (<>
           <div className="rounded bg-gray-50 p-2 text-gray-600">
             世帯メンバーが死亡した場合の家計シミュレーションです。収入保障保険の必要保障額を検討するために使います。
           </div>
@@ -93,8 +78,8 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-gray-600 mb-1">死亡時年齢（{targetLabel}）</label>
-              <input type="number" value={deathAge} min={currentAge} max={retirementAge - 1}
-                onChange={e => setDeathAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
+              <input type="number" value={age} min={curAge} max={retirementAge - 1}
+                onChange={e => setAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
             </div>
             <div>
               <label className="block font-semibold text-gray-600 mb-1">生活費（元の何%）</label>
@@ -137,7 +122,7 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
               <div>遺族基礎年金: <b>{Math.round(pensionPreview.basicPension / 10000)}万円/年</b>
                 {childCount > 0 ? ` (81.6万 + 子${childCount}人加算)` : " (子なし: 支給なし)"}</div>
               <div>遺族厚生年金: <b>{Math.round(pensionPreview.employeePension / 10000)}万円/年</b>
-                {` (月額${Math.min(Math.round(avgAnnualSalaryMan * 10000 / 12), 650000).toLocaleString()}円×5.481/1000×${Math.max((deathAge - 22) * 12, 300)}月×3/4)`}</div>
+                {` (月額${Math.min(Math.round(avgAnnualSalaryMan * 10000 / 12), 650000).toLocaleString()}円×5.481/1000×${Math.max((age - 22) * 12, 300)}月×3/4)`}</div>
               {pensionPreview.widowSupplement > 0 && (
                 <div>中高齢寡婦加算: <b>{Math.round(pensionPreview.widowSupplement / 10000)}万円/年</b>
                   {pensionPreview.widowTaperRate < 1
@@ -145,7 +130,7 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
                     : " (子なし・40-65歳の妻)"}</div>
               )}
               {childCount === 0 && survivorAge >= 40 && survivorAge < 65 && pensionPreview.widowTaperRate === 0 && (
-                <div className="text-orange-600">中高齢寡婦加算: 廃止済み（{new Date().getFullYear() + (deathAge - currentAge)}年死亡）</div>
+                <div className="text-orange-600">中高齢寡婦加算: 廃止済み（{new Date().getFullYear() + (age - curAge)}年死亡）</div>
               )}
               <div className="font-bold border-t pt-1 mt-1">プレビュー合計: 約{pensionPreview.totalMan}万円/年</div>
               <div className="text-[10px] text-gray-400">
@@ -166,7 +151,7 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
               </div>
               <div>
                 <label className="block text-gray-500 mb-1">保障期間（歳まで）</label>
-                <input type="number" value={dp.incomeProtectionUntilAge} min={deathAge} max={80}
+                <input type="number" value={dp.incomeProtectionUntilAge} min={age} max={80}
                   onChange={e => u({ incomeProtectionUntilAge: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
               </div>
             </div>
@@ -194,7 +179,8 @@ export function DeathModal({ isOpen, onClose, onSave, currentAge, retirementAge,
               <div className="text-[10px] text-gray-400">シナリオ内の保険イベントで対象が「{targetLabel}」のものが自動的にトリガーされます（定期保険: 一時金、収入保障: 月額給付）</div>
             </div>
           </div>
-
-    </Modal>
+        </>);
+      }}
+    </EventModal>
   );
 }

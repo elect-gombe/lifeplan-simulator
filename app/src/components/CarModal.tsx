@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useMemo } from "react";
-import type { LifeEvent, CarParams } from "../lib/types";
+import React from "react";
+import type { CarParams } from "../lib/types";
 import { calcMonthlyPaymentEqual } from "../lib/calc";
-import { Modal, BarChart } from "./ui";
+import { BarChart, Btns, Inp } from "./ui";
+import { EventModal, type EventModalBaseProps, type EventModalDef } from "./EventModal";
 
 // ===== 車コストプレビュー =====
 interface CarYearData {
   age: number;
-  purchase: number;   // 車両購入（万）
-  loan: number;       // ローン返済（万）
-  maintenance: number; // 維持費（万）
-  insurance: number;  // 保険（万）
+  purchase: number;
+  loan: number;
+  maintenance: number;
+  insurance: number;
   total: number;
   isReplace: boolean;
 }
@@ -36,20 +37,17 @@ function CarCostPreview({ cp, purchaseAge, simEndAge }: {
     const isReplace = cp.replaceEveryYears > 0 && y > 0 && y % cp.replaceEveryYears === 0;
     const isFirstYear = y === 0;
 
-    // Purchase cost
     let purchase = 0;
     if (isFirstYear || isReplace) {
-      purchase = cp.loanYears > 0 ? 0 : cp.priceMan; // 一括の場合のみ購入年に計上
+      purchase = cp.loanYears > 0 ? 0 : cp.priceMan;
     }
 
-    // Loan payment
     let loan = 0;
     if (cp.loanYears > 0) {
       const yearInCycle = cp.replaceEveryYears > 0 ? y % cp.replaceEveryYears : y;
       if (yearInCycle < cp.loanYears) {
         loan = loanAnnualMan;
       }
-      // 買い替え初年度は新ローン開始
       if (isReplace) loan = loanAnnualMan;
     }
 
@@ -69,9 +67,7 @@ function CarCostPreview({ cp, purchaseAge, simEndAge }: {
   const loanInterestTotal = cp.loanYears > 0 ? Math.round((loanMonthly * cp.loanYears * 12 - cp.priceMan * 10000) / 10000) : 0;
   const replacements = cp.replaceEveryYears > 0 ? Math.floor((totalYears - 1) / cp.replaceEveryYears) : 0;
   const totalCarPurchases = cp.priceMan * (1 + replacements);
-  const maxYear = Math.max(...yearData.map(d => d.total), 1);
 
-  // Milestones for table
   const milestones = new Set<number>();
   milestones.add(0);
   if (cp.loanYears > 0) milestones.add(cp.loanYears);
@@ -235,138 +231,86 @@ function CarCostPreview({ cp, purchaseAge, simEndAge }: {
   );
 }
 
-export function CarModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent }: {
-  isOpen: boolean;
-  onClose: () => void;
-  onSave: (event: LifeEvent) => void;
-  currentAge: number;
-  retirementAge: number;
-  existingEvent?: LifeEvent | null;
-}) {
-  const defaults: CarParams = {
-    priceMan: 300, loanYears: 5, loanRate: 3.0,
-    maintenanceAnnualMan: 15, insuranceAnnualMan: 8,
-    replaceEveryYears: 7,
-  };
+const carDef: EventModalDef<CarParams> = {
+  type: "car",
+  title: "🚗 車の購入・買い替え",
+  btnClass: "bg-green-600 hover:bg-green-700",
+  wide: true,
+  defaults: { priceMan: 300, loanYears: 5, loanRate: 3.0, maintenanceAnnualMan: 15, insuranceAnnualMan: 8, replaceEveryYears: 7 },
+  paramsKey: "carParams",
+  ageOffset: 3,
+  buildLabel: (cp) => `車(${cp.priceMan}万/${cp.replaceEveryYears > 0 ? cp.replaceEveryYears + "年毎" : "一度"})`,
+};
 
-  const [purchaseAge, setPurchaseAge] = useState(currentAge + 3);
-  const [cp, setCP] = useState<CarParams>(defaults);
-
-  useEffect(() => {
-    if (existingEvent?.carParams) {
-      setCP(existingEvent.carParams);
-      setPurchaseAge(existingEvent.age);
-    }
-  }, [existingEvent]);
-
-  const u = (patch: Partial<CarParams>) => setCP(prev => ({ ...prev, ...patch }));
-
-  const loanMonthly = cp.loanYears > 0 ? calcMonthlyPaymentEqual(cp.priceMan * 10000, cp.loanRate, cp.loanYears) : 0;
-  const annualRunningCost = cp.maintenanceAnnualMan + cp.insuranceAnnualMan;
-
-  const handleSave = () => {
-    onSave({
-      id: existingEvent?.id || Date.now(),
-      age: purchaseAge, type: "car",
-      label: `車(${cp.priceMan}万/${cp.replaceEveryYears > 0 ? cp.replaceEveryYears + "年毎" : "一度"})`,
-      oneTimeCostMan: 0, annualCostMan: 0, durationYears: 0,
-      carParams: cp,
-    });
-    onClose();
-  };
-
-  const simEndAge = retirementAge;
-
+export function CarModal(props: EventModalBaseProps) {
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`🚗 車の購入・買い替え${existingEvent ? "（編集）" : ""}`}
-      btnClass="bg-green-600 hover:bg-green-700" onSave={handleSave} saveLabel={existingEvent ? "更新" : "追加"} wide>
+    <EventModal def={carDef} {...props}>
+      {({ params: cp, u, age, setAge, currentAge, retirementAge }) => {
+        const loanMonthly = cp.loanYears > 0 ? calcMonthlyPaymentEqual(cp.priceMan * 10000, cp.loanRate, cp.loanYears) : 0;
+        const annualRunningCost = cp.maintenanceAnnualMan + cp.insuranceAnnualMan;
+        const simEndAge = retirementAge;
 
-      {/* 2-column layout */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Left: Settings */}
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block font-semibold text-gray-600 mb-1">購入時年齢</label>
-              <input type="number" value={purchaseAge} min={currentAge} max={retirementAge - 1}
-                onChange={e => setPurchaseAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
-            </div>
-            <div>
-              <label className="block font-semibold text-gray-600 mb-1">車両価格（万円）</label>
-              <input type="number" value={cp.priceMan} step={50}
-                onChange={e => u({ priceMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
-            </div>
-          </div>
-
-          {/* Replacement cycle */}
-          <div className="rounded border p-2 space-y-1.5">
-            <label className="block font-semibold text-gray-600 text-[11px]">買い替えサイクル</label>
-            <div className="flex gap-1.5">
-              <button onClick={() => u({ replaceEveryYears: 0 })}
-                className={`rounded px-2 py-0.5 text-[10px] ${cp.replaceEveryYears === 0 ? "bg-green-600 text-white" : "bg-gray-100"}`}>一度のみ</button>
-              {[3, 5, 7, 10].map(y => (
-                <button key={y} onClick={() => u({ replaceEveryYears: y })}
-                  className={`rounded px-2 py-0.5 text-[10px] ${cp.replaceEveryYears === y ? "bg-green-600 text-white" : "bg-gray-100"}`}>{y}年毎</button>
-              ))}
-            </div>
-            {cp.replaceEveryYears > 0 && (
-              <div className="text-[10px] text-gray-400">
-                {purchaseAge}歳から{cp.replaceEveryYears}年ごとに買い替え。同額の車を想定。
-              </div>
-            )}
-          </div>
-
-          {/* Loan */}
-          <div className="rounded border p-2 space-y-1.5">
-            <label className="block font-semibold text-gray-600 text-[11px]">ローン</label>
-            <div className="flex gap-1.5">
-              <button onClick={() => u({ loanYears: 0 })}
-                className={`rounded px-2 py-0.5 text-[10px] ${cp.loanYears === 0 ? "bg-green-600 text-white" : "bg-gray-100"}`}>一括</button>
-              {[3, 5, 7].map(y => (
-                <button key={y} onClick={() => u({ loanYears: y })}
-                  className={`rounded px-2 py-0.5 text-[10px] ${cp.loanYears === y ? "bg-green-600 text-white" : "bg-gray-100"}`}>{y}年</button>
-              ))}
-            </div>
-            {cp.loanYears > 0 && (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] text-gray-500">金利</span>
-                  <input type="number" value={cp.loanRate} step={0.1} min={0}
-                    onChange={e => u({ loanRate: Number(e.target.value) })} className="w-14 rounded border px-1.5 py-1" />
-                  <span className="text-[10px] text-gray-400">%</span>
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Left: Settings */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold text-gray-600 mb-1">購入時年齢</label>
+                  <input type="number" value={age} min={currentAge} max={retirementAge - 1}
+                    onChange={e => setAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
                 </div>
-                <span className="text-[10px] text-gray-400">月額{(loanMonthly / 10000).toFixed(1)}万</span>
+                <div>
+                  <label className="block font-semibold text-gray-600 mb-1">車両価格（万円）</label>
+                  <input type="number" value={cp.priceMan} step={50}
+                    onChange={e => u({ priceMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
+                </div>
               </div>
-            )}
-          </div>
 
-          {/* Running costs */}
-          <div className="rounded border p-2 space-y-1.5">
-            <label className="block font-semibold text-gray-600 text-[11px]">維持費（年額）</label>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-gray-500 whitespace-nowrap">車検・整備・税</span>
-                <input type="number" value={cp.maintenanceAnnualMan} step={1} min={0}
-                  onChange={e => u({ maintenanceAnnualMan: Number(e.target.value) })} className="w-14 rounded border px-1.5 py-1" />
-                <span className="text-[10px] text-gray-400">万</span>
+              {/* Replacement cycle */}
+              <div className="rounded border p-2 space-y-1.5">
+                <label className="block font-semibold text-gray-600 text-[11px]">買い替えサイクル</label>
+                <Btns options={[{value:0,label:"一度のみ"},{value:3,label:"3年毎"},{value:5,label:"5年毎"},{value:7,label:"7年毎"},{value:10,label:"10年毎"}]}
+                  value={cp.replaceEveryYears} onChange={v => u({ replaceEveryYears: v })} color="green" />
+                {cp.replaceEveryYears > 0 && (
+                  <div className="text-[10px] text-gray-400">
+                    {age}歳から{cp.replaceEveryYears}年ごとに買い替え。同額の車を想定。
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-gray-500">保険料</span>
-                <input type="number" value={cp.insuranceAnnualMan} step={1} min={0}
-                  onChange={e => u({ insuranceAnnualMan: Number(e.target.value) })} className="w-14 rounded border px-1.5 py-1" />
-                <span className="text-[10px] text-gray-400">万</span>
+
+              {/* Loan */}
+              <div className="rounded border p-2 space-y-1.5">
+                <label className="block font-semibold text-gray-600 text-[11px]">ローン</label>
+                <Btns options={[{value:0,label:"一括"},{value:3,label:"3年"},{value:5,label:"5年"},{value:7,label:"7年"}]}
+                  value={cp.loanYears} onChange={v => u({ loanYears: v })} color="green" />
+                {cp.loanYears > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Inp label="金利" value={cp.loanRate} onChange={v => u({ loanRate: v })} unit="%" w="w-14" step={0.1} min={0} />
+                    <span className="text-[10px] text-gray-400">月額{(loanMonthly / 10000).toFixed(1)}万</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Running costs */}
+              <div className="rounded border p-2 space-y-1.5">
+                <label className="block font-semibold text-gray-600 text-[11px]">維持費（年額）</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Inp label="車検・整備・税" value={cp.maintenanceAnnualMan} onChange={v => u({ maintenanceAnnualMan: v })} unit="万" w="w-14" step={1} min={0} />
+                  <Inp label="保険料" value={cp.insuranceAnnualMan} onChange={v => u({ insuranceAnnualMan: v })} unit="万" w="w-14" step={1} min={0} />
+                </div>
+                <div className="text-[10px] text-gray-400">維持費合計: <b>{annualRunningCost}万円/年</b></div>
               </div>
             </div>
-            <div className="text-[10px] text-gray-400">維持費合計: <b>{annualRunningCost}万円/年</b></div>
-          </div>
-        </div>
 
-        {/* Right: Preview */}
-        <div className="space-y-3">
-          <div className="font-bold text-green-800 text-sm">コストプラン</div>
-          <CarCostPreview cp={cp} purchaseAge={purchaseAge} simEndAge={simEndAge} />
-        </div>
-      </div>
-    </Modal>
+            {/* Right: Preview */}
+            <div className="space-y-3">
+              <div className="font-bold text-green-800 text-sm">コストプラン</div>
+              <CarCostPreview cp={cp} purchaseAge={age} simEndAge={simEndAge} />
+            </div>
+          </div>
+        );
+      }}
+    </EventModal>
   );
 }

@@ -75,7 +75,7 @@ function migrateScenario(s: any, oldFields?: any): Scenario {
       retirementAge: 65,
       ...s.spouse,
     } : { enabled: false, currentAge: 30, retirementAge: 65, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true, pensionStartAge: 65, pensionWorkStartAge: 22 },
-    nisa: s.nisa ?? { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 },
+    nisa: s.nisa ?? { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, },
     balancePolicy: s.balancePolicy ?? { cashReserveMonths: 6, nisaPriority: true },
     overrideTracks: s.overrideTracks ?? [],
     excludedBaseEventIds: s.excludedBaseEventIds ?? [],
@@ -182,7 +182,7 @@ function mkScenario(id: number): Scenario {
     pensionStartAge: 65, pensionWorkStartAge: 22,
     dcReceiveMethod: isBase ? DEFAULT_DC_RECEIVE_METHOD : undefined as any, // B: undefined=Aにリンク
     spouse: { enabled: false, currentAge: 28, retirementAge: 65, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true, pensionStartAge: 65, pensionWorkStartAge: 22 },
-    nisa: { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, returnRate: 5 },
+    nisa: { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, },
     balancePolicy: { cashReserveMonths: 6, nisaPriority: true },
   };
 }

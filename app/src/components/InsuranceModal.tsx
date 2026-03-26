@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
-import type { LifeEvent, InsuranceParams, EventTarget } from "../lib/types";
-import { Modal, BarChart } from "./ui";
+import type { InsuranceParams, EventTarget } from "../lib/types";
+import { BarChart } from "./ui";
+import { EventModal, type EventModalBaseProps, type EventModalDef } from "./EventModal";
 
 // ===== 保険コストプレビュー =====
 interface InsYearData {
   age: number;
-  premium: number;       // 保険料（万/年）
-  payoutIfDeath: number; // この年に死亡した場合の受取総額（万）
-  cumulativePremium: number; // 累積保険料（万）
+  premium: number;
+  payoutIfDeath: number;
+  cumulativePremium: number;
   inCoverage: boolean;
 }
 
@@ -22,10 +23,8 @@ function InsuranceCostPreview({ ip, startAge, target }: {
   const premiumAnnual = ip.premiumMonthlyMan * 12;
   const totalPremium = premiumAnnual * coverageYears;
 
-  // Build year-by-year data
   const yearData: InsYearData[] = [];
   let cumPremium = 0;
-  // Show until max of coverage end, payout end
   const maxAge = Math.max(ip.coverageEndAge, ip.insuranceType === "income_protection" ? ip.payoutUntilAge : ip.coverageEndAge);
   const totalYears = maxAge - startAge;
 
@@ -39,7 +38,6 @@ function InsuranceCostPreview({ ip, startAge, target }: {
       if (ip.insuranceType === "term_life") {
         payoutIfDeath = ip.lumpSumPayoutMan;
       } else {
-        // 収入保障: 死亡時点から payoutUntilAge まで月額支給
         const remainMonths = Math.max((ip.payoutUntilAge - age) * 12, 0);
         payoutIfDeath = ip.monthlyPayoutMan * remainMonths;
       }
@@ -53,9 +51,7 @@ function InsuranceCostPreview({ ip, startAge, target }: {
 
   const maxPayout = Math.max(...yearData.map(d => d.payoutIfDeath), 1);
   const maxCumPremium = Math.max(cumPremium, 1);
-  const chartHeight = 72;
 
-  // Milestones for table
   const milestones = new Set<number>();
   milestones.add(0);
   milestones.add(Math.min(4, totalYears - 1));
@@ -69,7 +65,6 @@ function InsuranceCostPreview({ ip, startAge, target }: {
   milestones.add(totalYears - 1);
   const showYears = [...milestones].filter(y => y >= 0 && y < totalYears).sort((a, b) => a - b);
 
-  // Return ratio (受取倍率)
   const maxPayoutAtStart = yearData[0]?.payoutIfDeath || 0;
   const returnRatio = totalPremium > 0 ? (maxPayoutAtStart / totalPremium).toFixed(1) : "-";
 
@@ -198,154 +193,143 @@ function InsuranceCostPreview({ ip, startAge, target }: {
   );
 }
 
-export function InsuranceModal({ isOpen, onClose, onSave, currentAge, retirementAge, existingEvent }: {
-  isOpen: boolean;
-  onClose: () => void;
-  onSave: (event: LifeEvent) => void;
-  currentAge: number;
-  retirementAge: number;
-  existingEvent?: LifeEvent | null;
-}) {
-  const defaults: InsuranceParams = {
-    insuranceType: "income_protection",
-    premiumMonthlyMan: 0.5,
-    lumpSumPayoutMan: 3000,
-    monthlyPayoutMan: 15,
-    payoutUntilAge: 65,
-    coverageEndAge: 65,
-  };
+const insuranceDef: EventModalDef<InsuranceParams> = {
+  type: "insurance",
+  title: "🛡️ 保険",
+  btnClass: "bg-indigo-600 hover:bg-indigo-700",
+  wide: true,
+  defaults: {
+    insuranceType: "income_protection", premiumMonthlyMan: 0.5,
+    lumpSumPayoutMan: 3000, monthlyPayoutMan: 15, payoutUntilAge: 65, coverageEndAge: 65,
+  },
+  paramsKey: "insuranceParams",
+  ageOffset: 0,
+  buildLabel: () => "", // overridden dynamically
+};
 
-  const [startAge, setStartAge] = useState(currentAge);
-  const [ip, setIP] = useState<InsuranceParams>(defaults);
+export function InsuranceModal(props: EventModalBaseProps) {
+  const { existingEvent } = props;
   const [target, setTarget] = useState<EventTarget>("self");
 
   useEffect(() => {
     if (existingEvent?.insuranceParams) {
-      setIP(existingEvent.insuranceParams);
-      setStartAge(existingEvent.age);
       setTarget(existingEvent.target || "self");
     }
   }, [existingEvent]);
 
-  const u = (patch: Partial<InsuranceParams>) => setIP(prev => ({ ...prev, ...patch }));
-
-  const coverageYears = Math.max(ip.coverageEndAge - startAge, 0);
-  const targetLabel = target === "spouse" ? "配偶者" : "本人";
-
-  const handleSave = () => {
-    const typeLabel = ip.insuranceType === "term_life"
-      ? `定期保険(${ip.lumpSumPayoutMan}万)`
-      : `収入保障(${ip.monthlyPayoutMan}万/月)`;
-    onSave({
-      id: existingEvent?.id || Date.now(),
-      age: startAge,
-      type: "insurance",
-      label: `${targetLabel}${typeLabel}`,
-      oneTimeCostMan: 0, annualCostMan: 0, durationYears: coverageYears,
+  const def: EventModalDef<InsuranceParams> = {
+    ...insuranceDef,
+    buildLabel: (ip) => {
+      const targetLabel = target === "spouse" ? "配偶者" : "本人";
+      const typeLabel = ip.insuranceType === "term_life"
+        ? `定期保険(${ip.lumpSumPayoutMan}万)`
+        : `収入保障(${ip.monthlyPayoutMan}万/月)`;
+      return `${targetLabel}${typeLabel}`;
+    },
+    buildExtra: (ip) => ({
       target,
-      insuranceParams: ip,
-    });
-    onClose();
+      durationYears: Math.max(ip.coverageEndAge - (existingEvent?.age || props.currentAge), 0),
+    }),
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`🛡️ 保険${existingEvent ? "（編集）" : ""}`}
-      btnClass="bg-indigo-600 hover:bg-indigo-700" onSave={handleSave} saveLabel={existingEvent ? "更新" : "追加"} wide>
+    <EventModal def={def} {...props}>
+      {({ params: ip, u, age, setAge, currentAge, retirementAge }) => {
+        const coverageYears = Math.max(ip.coverageEndAge - age, 0);
+        const targetLabel = target === "spouse" ? "配偶者" : "本人";
 
-      {/* 2-column layout */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Left: Settings */}
-        <div className="space-y-3">
-          <div className="rounded bg-gray-50 p-2 text-[10px] text-gray-500">
-            対象者の死亡イベントと連動。死亡時に保険料停止→保険金支払い。
-          </div>
-
-          {/* 被保険者 + 保険タイプ */}
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded border p-2 space-y-1">
-              <label className="block font-semibold text-gray-600 text-[11px]">被保険者</label>
-              <div className="flex gap-1">
-                <button onClick={() => setTarget("self")}
-                  className={`rounded px-2 py-0.5 text-[10px] ${target === "self" ? "bg-indigo-600 text-white" : "bg-gray-100"}`}>本人</button>
-                <button onClick={() => setTarget("spouse")}
-                  className={`rounded px-2 py-0.5 text-[10px] ${target === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"}`}>配偶者</button>
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Left: Settings */}
+            <div className="space-y-3">
+              <div className="rounded bg-gray-50 p-2 text-[10px] text-gray-500">
+                対象者の死亡イベントと連動。死亡時に保険料停止→保険金支払い。
               </div>
-            </div>
-            <div className="rounded border p-2 space-y-1">
-              <label className="block font-semibold text-gray-600 text-[11px]">保険タイプ<span className="ml-1 cursor-help text-gray-400" title="定期保険=死亡時に一括支給。収入保障=死亡後に毎月支給(掛金が安い)">ⓘ</span></label>
-              <div className="flex gap-1">
-                <button onClick={() => u({ insuranceType: "term_life" })}
-                  className={`rounded px-2 py-0.5 text-[10px] ${ip.insuranceType === "term_life" ? "bg-indigo-600 text-white" : "bg-gray-100"}`}>定期(一時金)</button>
-                <button onClick={() => u({ insuranceType: "income_protection" })}
-                  className={`rounded px-2 py-0.5 text-[10px] ${ip.insuranceType === "income_protection" ? "bg-indigo-600 text-white" : "bg-gray-100"}`}>収入保障(月額)</button>
-              </div>
-            </div>
-          </div>
 
-          {/* Age + coverage period */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block font-semibold text-gray-600 mb-1 text-[11px]">加入時年齢</label>
-              <input type="number" value={startAge} min={currentAge} max={retirementAge - 1}
-                onChange={e => setStartAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
-            </div>
-            <div>
-              <label className="block font-semibold text-gray-600 mb-1 text-[11px]">保険期間（歳まで）</label>
-              <input type="number" value={ip.coverageEndAge} min={startAge + 1} max={80}
-                onChange={e => u({ coverageEndAge: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
-            </div>
-          </div>
-
-          {/* Premium */}
-          <div className="rounded border p-2 space-y-1">
-            <label className="block font-semibold text-gray-600 text-[11px]">保険料</label>
-            <div className="flex items-center gap-1">
-              <input type="number" value={ip.premiumMonthlyMan} step={0.1} min={0}
-                onChange={e => u({ premiumMonthlyMan: Number(e.target.value) })} className="w-20 rounded border px-2 py-1" />
-              <span className="text-[10px] text-gray-400">万円/月</span>
-              <span className="text-[10px] text-gray-400 ml-2">= 年{(ip.premiumMonthlyMan * 12).toFixed(1)}万</span>
-            </div>
-          </div>
-
-          {/* Payout */}
-          {ip.insuranceType === "term_life" ? (
-            <div className="rounded border p-2 space-y-1">
-              <label className="block font-semibold text-gray-600 text-[11px]">死亡保険金<span className="ml-1 cursor-help text-gray-400" title="目安: 年間生活費×必要年数−遺族年金−貯蓄。子供が小さいほど多めに">ⓘ</span></label>
-              <div className="flex items-center gap-1">
-                <input type="number" value={ip.lumpSumPayoutMan} step={100} min={0}
-                  onChange={e => u({ lumpSumPayoutMan: Number(e.target.value) })} className="w-24 rounded border px-2 py-1" />
-                <span className="text-[10px] text-gray-400">万円（一括）</span>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded border p-2 space-y-1">
-              <label className="block font-semibold text-gray-600 text-[11px]">月額保障<span className="ml-1 cursor-help text-gray-400" title="目安: 現在の手取月額の6〜7割。遺族年金と合わせて生活費をカバー">ⓘ</span></label>
               <div className="grid grid-cols-2 gap-2">
-                <div className="flex items-center gap-1">
-                  <input type="number" value={ip.monthlyPayoutMan} step={1} min={0}
-                    onChange={e => u({ monthlyPayoutMan: Number(e.target.value) })} className="w-16 rounded border px-2 py-1" />
-                  <span className="text-[10px] text-gray-400">万/月</span>
+                <div className="rounded border p-2 space-y-1">
+                  <label className="block font-semibold text-gray-600 text-[11px]">被保険者</label>
+                  <div className="flex gap-1">
+                    <button onClick={() => setTarget("self")}
+                      className={`rounded px-2 py-0.5 text-[10px] ${target === "self" ? "bg-indigo-600 text-white" : "bg-gray-100"}`}>本人</button>
+                    <button onClick={() => setTarget("spouse")}
+                      className={`rounded px-2 py-0.5 text-[10px] ${target === "spouse" ? "bg-pink-600 text-white" : "bg-gray-100"}`}>配偶者</button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] text-gray-500">〜</span>
-                  <input type="number" value={ip.payoutUntilAge} min={startAge} max={80}
-                    onChange={e => u({ payoutUntilAge: Number(e.target.value) })} className="w-14 rounded border px-2 py-1" />
-                  <span className="text-[10px] text-gray-400">歳まで</span>
+                <div className="rounded border p-2 space-y-1">
+                  <label className="block font-semibold text-gray-600 text-[11px]">保険タイプ<span className="ml-1 cursor-help text-gray-400" title="定期保険=死亡時に一括支給。収入保障=死亡後に毎月支給(掛金が安い)">ⓘ</span></label>
+                  <div className="flex gap-1">
+                    <button onClick={() => u({ insuranceType: "term_life" })}
+                      className={`rounded px-2 py-0.5 text-[10px] ${ip.insuranceType === "term_life" ? "bg-indigo-600 text-white" : "bg-gray-100"}`}>定期(一時金)</button>
+                    <button onClick={() => u({ insuranceType: "income_protection" })}
+                      className={`rounded px-2 py-0.5 text-[10px] ${ip.insuranceType === "income_protection" ? "bg-indigo-600 text-white" : "bg-gray-100"}`}>収入保障(月額)</button>
+                  </div>
                 </div>
               </div>
-              <div className="text-[10px] text-gray-400">
-                年額{(ip.monthlyPayoutMan * 12).toFixed(0)}万 × 最大{Math.max(ip.payoutUntilAge - startAge, 0)}年 = 最大{(ip.monthlyPayoutMan * 12 * Math.max(ip.payoutUntilAge - startAge, 0)).toLocaleString()}万
-              </div>
-            </div>
-          )}
-        </div>
 
-        {/* Right: Preview */}
-        <div className="space-y-3">
-          <div className="font-bold text-indigo-800 text-sm">保険プラン</div>
-          <InsuranceCostPreview ip={ip} startAge={startAge} target={target} />
-        </div>
-      </div>
-    </Modal>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold text-gray-600 mb-1 text-[11px]">加入時年齢</label>
+                  <input type="number" value={age} min={currentAge} max={retirementAge - 1}
+                    onChange={e => setAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
+                </div>
+                <div>
+                  <label className="block font-semibold text-gray-600 mb-1 text-[11px]">保険期間（歳まで）</label>
+                  <input type="number" value={ip.coverageEndAge} min={age + 1} max={80}
+                    onChange={e => u({ coverageEndAge: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
+                </div>
+              </div>
+
+              <div className="rounded border p-2 space-y-1">
+                <label className="block font-semibold text-gray-600 text-[11px]">保険料</label>
+                <div className="flex items-center gap-1">
+                  <input type="number" value={ip.premiumMonthlyMan} step={0.1} min={0}
+                    onChange={e => u({ premiumMonthlyMan: Number(e.target.value) })} className="w-20 rounded border px-2 py-1" />
+                  <span className="text-[10px] text-gray-400">万円/月</span>
+                  <span className="text-[10px] text-gray-400 ml-2">= 年{(ip.premiumMonthlyMan * 12).toFixed(1)}万</span>
+                </div>
+              </div>
+
+              {ip.insuranceType === "term_life" ? (
+                <div className="rounded border p-2 space-y-1">
+                  <label className="block font-semibold text-gray-600 text-[11px]">死亡保険金<span className="ml-1 cursor-help text-gray-400" title="目安: 年間生活費×必要年数−遺族年金−貯蓄。子供が小さいほど多めに">ⓘ</span></label>
+                  <div className="flex items-center gap-1">
+                    <input type="number" value={ip.lumpSumPayoutMan} step={100} min={0}
+                      onChange={e => u({ lumpSumPayoutMan: Number(e.target.value) })} className="w-24 rounded border px-2 py-1" />
+                    <span className="text-[10px] text-gray-400">万円（一括）</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded border p-2 space-y-1">
+                  <label className="block font-semibold text-gray-600 text-[11px]">月額保障<span className="ml-1 cursor-help text-gray-400" title="目安: 現在の手取月額の6〜7割。遺族年金と合わせて生活費をカバー">ⓘ</span></label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex items-center gap-1">
+                      <input type="number" value={ip.monthlyPayoutMan} step={1} min={0}
+                        onChange={e => u({ monthlyPayoutMan: Number(e.target.value) })} className="w-16 rounded border px-2 py-1" />
+                      <span className="text-[10px] text-gray-400">万/月</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-gray-500">〜</span>
+                      <input type="number" value={ip.payoutUntilAge} min={age} max={80}
+                        onChange={e => u({ payoutUntilAge: Number(e.target.value) })} className="w-14 rounded border px-2 py-1" />
+                      <span className="text-[10px] text-gray-400">歳まで</span>
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-gray-400">
+                    年額{(ip.monthlyPayoutMan * 12).toFixed(0)}万 × 最大{Math.max(ip.payoutUntilAge - age, 0)}年 = 最大{(ip.monthlyPayoutMan * 12 * Math.max(ip.payoutUntilAge - age, 0)).toLocaleString()}万
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Right: Preview */}
+            <div className="space-y-3">
+              <div className="font-bold text-indigo-800 text-sm">保険プラン</div>
+              <InsuranceCostPreview ip={ip} startAge={age} target={target} />
+            </div>
+          </div>
+        );
+      }}
+    </EventModal>
   );
 }
