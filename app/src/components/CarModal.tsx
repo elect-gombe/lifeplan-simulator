@@ -20,7 +20,8 @@ function CarCostPreview({ cp, purchaseAge, simEndAge }: {
   purchaseAge: number;
   simEndAge: number;
 }) {
-  const totalYears = Math.min(simEndAge - purchaseAge, 60);
+  const effectiveEnd = Math.min(cp.endAge ?? simEndAge, simEndAge);
+  const totalYears = Math.min(effectiveEnd - purchaseAge, 60);
   if (totalYears <= 0) return null;
 
   const loanMonthly = cp.loanYears > 0 ? calcMonthlyPaymentEqual(cp.priceMan * 10000, cp.loanRate, cp.loanYears) : 0;
@@ -236,10 +237,11 @@ const carDef: EventModalDef<CarParams> = {
   title: "🚗 車の購入・買い替え",
   btnClass: "bg-green-600 hover:bg-green-700",
   wide: true,
-  defaults: { priceMan: 300, loanYears: 5, loanRate: 3.0, maintenanceAnnualMan: 15, insuranceAnnualMan: 8, replaceEveryYears: 7 },
+  defaults: { priceMan: 300, loanYears: 5, loanRate: 3.0, maintenanceAnnualMan: 15, insuranceAnnualMan: 8, replaceEveryYears: 7, endAge: 80 },
   paramsKey: "carParams",
   ageOffset: 3,
-  buildLabel: (cp) => `車(${cp.priceMan}万/${cp.replaceEveryYears > 0 ? cp.replaceEveryYears + "年毎" : "一度"})`,
+  buildLabel: (cp, age) => `車(${cp.priceMan}万/${cp.replaceEveryYears > 0 ? cp.replaceEveryYears + "年毎" : "一度"}〜${cp.endAge ?? 80}歳)`,
+  buildExtra: (cp, age) => ({ durationYears: Math.max((cp.endAge ?? 80) - age, 0) }),
 };
 
 export function CarModal(props: EventModalBaseProps) {
@@ -264,6 +266,11 @@ export function CarModal(props: EventModalBaseProps) {
                   <label className="block font-semibold text-gray-600 mb-1">車両価格（万円）</label>
                   <input type="number" value={cp.priceMan} step={50}
                     onChange={e => u({ priceMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
+                </div>
+                <div>
+                  <label className="block font-semibold text-gray-600 mb-1">所有終了年齢</label>
+                  <input type="number" value={cp.endAge ?? 80} min={age + 1} max={100} step={1}
+                    onChange={e => u({ endAge: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
                 </div>
               </div>
 

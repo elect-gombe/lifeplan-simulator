@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import type { LifeEvent } from "../lib/types";
 import { BarChart } from "./ui";
 
-type LivingType = "home" | "rural" | "urban";
+export type LivingType = "home" | "rural" | "urban";
 
 interface Stage {
   key: string;
@@ -15,23 +15,25 @@ interface Stage {
   livingType?: LivingType;
 }
 
-const LIVING_COSTS: Record<LivingType, { label: string; annualMan: number }> = {
+export const LIVING_COSTS: Record<LivingType, { label: string; annualMan: number }> = {
   home:  { label: "自宅", annualMan: 0 },
   rural: { label: "地方下宿", annualMan: 60 },
   urban: { label: "都内下宿", annualMan: 96 },
 };
 
-const STAGE_DEFAULTS: Record<string, { label: string; from: number; to: number; public: number; private: number; hasLiving?: boolean }> = {
-  nursery:    { label: "保育園",   from: 0,  to: 3,  public: 30,  private: 40 },
-  kinder:     { label: "幼稚園",   from: 3,  to: 6,  public: 25,  private: 50 },
-  elementary: { label: "小学校",   from: 6,  to: 12, public: 35,  private: 160 },
-  middle:     { label: "中学校",   from: 12, to: 15, public: 50,  private: 140 },
-  high:       { label: "高校",     from: 15, to: 18, public: 50,  private: 100 },
-  university: { label: "大学",     from: 18, to: 22, public: 80,  private: 130, hasLiving: true },
+// 出典: 文部科学省「令和3年度子供の学習費調査」/ 日本学生支援機構「令和2年度学生生活調査」
+// 値は学校教育費+学校外活動費の年額（万円）
+export const STAGE_DEFAULTS: Record<string, { label: string; from: number; to: number; public: number; private: number; hasLiving?: boolean }> = {
+  nursery:    { label: "保育園",   from: 0,  to: 3,  public: 26,  private: 37 },
+  kinder:     { label: "幼稚園",   from: 3,  to: 6,  public: 17,  private: 31 },
+  elementary: { label: "小学校",   from: 6,  to: 12, public: 35,  private: 167 },
+  middle:     { label: "中学校",   from: 12, to: 15, public: 54,  private: 144 },
+  high:       { label: "高校",     from: 15, to: 18, public: 51,  private: 105 },
+  university: { label: "大学",     from: 18, to: 22, public: 67,  private: 137, hasLiving: true },
   grad:       { label: "大学院",   from: 22, to: 24, public: 80,  private: 120, hasLiving: true },
 };
 
-const TEMPLATES: { key: string; label: string; config: Record<string, { enabled: boolean; variant: "public" | "private"; livingType?: LivingType }> }[] = [
+export const TEMPLATES: { key: string; label: string; config: Record<string, { enabled: boolean; variant: "public" | "private"; livingType?: LivingType }> }[] = [
   {
     key: "public_all", label: "すべて公立",
     config: { nursery: { enabled: true, variant: "public" }, kinder: { enabled: true, variant: "public" }, elementary: { enabled: true, variant: "public" }, middle: { enabled: true, variant: "public" }, high: { enabled: true, variant: "public" }, university: { enabled: true, variant: "public" }, grad: { enabled: false, variant: "public" } },
@@ -58,13 +60,13 @@ const TEMPLATES: { key: string; label: string; config: Record<string, { enabled:
   },
 ];
 
-function calcStageAnnual(def: typeof STAGE_DEFAULTS[string], variant: "public" | "private", livingType?: LivingType): number {
+export function calcStageAnnual(def: typeof STAGE_DEFAULTS[string], variant: "public" | "private", livingType?: LivingType): number {
   const base = variant === "private" ? def.private : def.public;
   const living = def.hasLiving && livingType ? LIVING_COSTS[livingType].annualMan : 0;
   return base + living;
 }
 
-function buildStages(template: typeof TEMPLATES[number]): Stage[] {
+export function buildStages(template: typeof TEMPLATES[number]): Stage[] {
   return Object.entries(STAGE_DEFAULTS).map(([key, def]) => {
     const cfg = template.config[key] || { enabled: false, variant: "public" as const };
     return {
@@ -112,21 +114,30 @@ function reconstructStages(parentEvent: LifeEvent, subEvents: LifeEvent[]): Stag
 }
 
 // ===== Cost Preview Component =====
-function CostPreview({ stages, baseCareMan, birthCostMan, weddingSupportEnabled, weddingSupportMan, weddingSupportChildAge, childCount }: {
+function CostPreview({ stages, baseCareMan, birthCostMan, weddingSupportEnabled, weddingSupportMan, weddingSupportChildAge, housingAidEnabled, housingAidMan, housingAidChildAge, childCount }: {
   stages: Stage[];
   baseCareMan: number;
   birthCostMan: number;
   weddingSupportEnabled: boolean;
   weddingSupportMan: number;
   weddingSupportChildAge: number;
+  housingAidEnabled: boolean;
+  housingAidMan: number;
+  housingAidChildAge: number;
   childCount: number;
 }) {
   const enabledStages = stages.filter(s => s.enabled);
   const lastStageEnd = enabledStages.reduce((max, s) => Math.max(max, s.toChildAge), 18);
 
+  const maxChildAge = Math.max(
+    lastStageEnd,
+    weddingSupportEnabled ? weddingSupportChildAge : 0,
+    housingAidEnabled ? housingAidChildAge : 0,
+  );
+
   // Build year-by-year cost array for one child
   const yearCosts: { age: number; care: number; edu: number; event: number }[] = [];
-  for (let childAge = 0; childAge <= Math.max(lastStageEnd, weddingSupportEnabled ? weddingSupportChildAge : 0); childAge++) {
+  for (let childAge = 0; childAge <= maxChildAge; childAge++) {
     let edu = 0;
     for (const s of enabledStages) {
       if (childAge >= s.fromChildAge && childAge < s.toChildAge) edu += s.annualMan;
@@ -135,12 +146,13 @@ function CostPreview({ stages, baseCareMan, birthCostMan, weddingSupportEnabled,
     let event = 0;
     if (childAge === 0) event += birthCostMan;
     if (weddingSupportEnabled && childAge === weddingSupportChildAge) event += weddingSupportMan;
+    if (housingAidEnabled && childAge === housingAidChildAge) event += housingAidMan;
     yearCosts.push({ age: childAge, care, edu, event });
   }
 
   const totalCare = yearCosts.reduce((s, y) => s + y.care, 0);
   const totalEdu = enabledStages.reduce((s, st) => s + st.annualMan * (st.toChildAge - st.fromChildAge), 0);
-  const totalEvent = birthCostMan + (weddingSupportEnabled ? weddingSupportMan : 0);
+  const totalEvent = birthCostMan + (weddingSupportEnabled ? weddingSupportMan : 0) + (housingAidEnabled ? housingAidMan : 0);
   const grandTotal = totalCare + totalEdu + totalEvent;
   const maxYear = Math.max(...yearCosts.map(y => y.care + y.edu + y.event), 1);
 
@@ -264,6 +276,15 @@ function CostPreview({ stages, baseCareMan, birthCostMan, weddingSupportEnabled,
                 <td className="px-1 py-0.5 text-right font-mono">{weddingSupportMan}万</td>
               </tr>
             )}
+            {housingAidEnabled && (
+              <tr className="border-b border-gray-100">
+                <td className="px-1 py-0.5">住宅取得援助</td>
+                <td className="px-1 py-0.5 text-right text-gray-400">{housingAidChildAge}歳</td>
+                <td className="px-1 py-0.5 text-right">-</td>
+                <td className="px-1 py-0.5 text-right">-</td>
+                <td className="px-1 py-0.5 text-right font-mono">{housingAidMan}万</td>
+              </tr>
+            )}
             <tr className="font-bold bg-gray-50">
               <td className="px-1 py-0.5" colSpan={4}>1人あたり合計</td>
               <td className="px-1 py-0.5 text-right font-mono">{grandTotal.toLocaleString()}万</td>
@@ -302,6 +323,9 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
   const [weddingSupportMan, setWeddingSupportMan] = useState(92);
   const [weddingSupportChildAge, setWeddingSupportChildAge] = useState(30);
   const [weddingSupportEnabled, setWeddingSupportEnabled] = useState(true);
+  const [housingAidEnabled, setHousingAidEnabled] = useState(false);
+  const [housingAidChildAge, setHousingAidChildAge] = useState(30);
+  const [housingAidMan, setHousingAidMan] = useState(300);
   const [stages, setStages] = useState<Stage[]>(() => buildStages(TEMPLATES[2]));
   const [childCount, setChildCount] = useState(3);
   const [firstBirthAge, setFirstBirthAge] = useState(currentAge + 3);
@@ -327,6 +351,16 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
       setWeddingSupportChildAge(weddingEvt.ageOffset ?? 30);
     } else {
       setWeddingSupportEnabled(false);
+    }
+
+    // Reconstruct housing aid
+    const housingAidEvt = existingSubs.find(e => e.type === "custom" && e.label.includes("住宅取得援助"));
+    if (housingAidEvt) {
+      setHousingAidEnabled(true);
+      setHousingAidMan(housingAidEvt.oneTimeCostMan);
+      setHousingAidChildAge(housingAidEvt.ageOffset ?? 30);
+    } else {
+      setHousingAidEnabled(false);
     }
   }, [isEditing, existingParent?.id]);
 
@@ -382,6 +416,19 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
         durationYears: 1,
         parentId,
         ageOffset: weddingSupportChildAge,
+      });
+    }
+    if (housingAidEnabled && housingAidMan > 0) {
+      evts.push({
+        id: Date.now() + Math.round(Math.random() * 100000),
+        age: age + housingAidChildAge,
+        type: "custom",
+        label: `${name} 住宅取得援助`,
+        oneTimeCostMan: housingAidMan,
+        annualCostMan: 0,
+        durationYears: 1,
+        parentId,
+        ageOffset: housingAidChildAge,
       });
     }
     return evts;
@@ -499,6 +546,25 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
                 </>)}
               </div>
 
+              {/* 住宅取得援助 */}
+              <div className="flex flex-wrap items-center gap-2 rounded border p-2">
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input type="checkbox" checked={housingAidEnabled} onChange={e => setHousingAidEnabled(e.target.checked)} className="accent-blue-500" />
+                  <span className="text-xs font-semibold text-gray-600">住宅取得援助</span>
+                </label>
+                {housingAidEnabled && (<>
+                  <input type="number" value={housingAidMan} step={50} min={0}
+                    onChange={e => setHousingAidMan(Number(e.target.value))}
+                    className="w-14 rounded border px-1.5 py-1 text-xs text-right" />
+                  <span className="text-[10px] text-gray-400">万</span>
+                  <span className="text-[10px] text-gray-500">子が</span>
+                  <input type="number" value={housingAidChildAge} step={1} min={20} max={45}
+                    onChange={e => setHousingAidChildAge(Number(e.target.value))}
+                    className="w-10 rounded border px-1 py-1 text-xs text-right" />
+                  <span className="text-[10px] text-gray-400">歳時</span>
+                </>)}
+              </div>
+
               {/* Templates */}
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">テンプレート</label>
@@ -556,6 +622,9 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
               weddingSupportEnabled={weddingSupportEnabled}
               weddingSupportMan={weddingSupportMan}
               weddingSupportChildAge={weddingSupportChildAge}
+              housingAidEnabled={housingAidEnabled}
+              housingAidMan={housingAidMan}
+              housingAidChildAge={housingAidChildAge}
               childCount={effectiveChildCount}
             />
           </div>

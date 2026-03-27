@@ -34,6 +34,12 @@ export interface PropertyParams {
   maintenanceMonthlyMan: number; // 管理費（万円/月）
   taxAnnualMan: number;     // 固定資産税（万円/年）
   hasLoanDeduction: boolean;
+  // Phase 13: 住宅ローン控除の認定種別（未設定=従来の上限35万/13年）
+  certifiedType?: "standard" | "certified" | "zeh" | "advanced";
+  // standard: 一般住宅（10年、借入限度3000万→max21万）
+  // certified: 認定長期優良/低炭素（13年、借入限度5000万→max35万）
+  // zeh: ZEH（13年、借入限度4500万→max31.5万）
+  // advanced: 先進的省エネ（13年、借入限度3500万→max24.5万）
   loanStructure: LoanStructure;    // 単独 or ペアローン
   pairRatio: number;               // ペアローン時の本人負担割合 (0-100%)
   deductionTarget: "self" | "spouse" | "both"; // 住宅ローン控除の対象
@@ -100,6 +106,7 @@ export interface SpouseConfig {
   pensionStartAge?: number;     // 年金受給開始年齢
   pensionWorkStartAge?: number; // 就職年齢
   dcReceiveMethod?: DCReceiveMethod;
+  careerHistory?: CareerPeriod[]; // 配偶者の職歴（Phase 4）
 }
 
 export interface NISAConfig {
@@ -165,6 +172,7 @@ export interface CarParams {
   maintenanceAnnualMan: number;
   insuranceAnnualMan: number;
   replaceEveryYears: number; // 買い替えサイクル（0=一度のみ）
+  endAge?: number;          // 所有終了年齢（未設定=シミュ終了まで）
 }
 
 // DC/iDeCo受取方法のデフォルト値
@@ -173,6 +181,31 @@ export const DEFAULT_DC_RECEIVE_METHOD: DCReceiveMethod = {
 };
 
 export type EventTarget = "self" | "spouse";
+
+// Phase 4: 職歴・キャリアトラック
+export type PensionSchemeType = "employee" | "national" | "mutual";
+// 厚生年金 | 国民年金 | 共済年金
+
+export interface CareerPeriod {
+  id: number;
+  startAge: number;
+  endAge: number;
+  pensionScheme: PensionSchemeType;
+  avgAnnualSalaryMan?: number;    // 平均年収（万円）。未設定=incomeKFから推定
+  retirementBonusMan?: number;    // 退職一時金（万円）
+  label?: string;                 // 表示用（例: "A社 正社員"）
+}
+
+// Phase 2: 私的年金パラメータ
+export interface PrivatePensionParams {
+  pensionType: "individual_annuity" | "corporate_db" | "small_business_mutual";
+  payoutStartAge: number;           // 受取開始年齢
+  payoutEndAge: number;             // 受取終了年齢（0=終身）
+  payoutAnnualMan: number;          // 年額（万円）
+  contributionMonthlyMan?: number;  // 掛金（万円/月）
+  contributionEndAge?: number;      // 払込終了年齢
+  isPublicPensionTaxed: boolean;    // 公的年金等控除の対象か
+}
 
 export interface MarketCrashParams {
   dropRate: number;        // 初年度下落率(%) 例: 50
@@ -201,6 +234,17 @@ export interface LifeEvent {
   relocationParams?: RelocationParams;  // Phase 5: 住み替え
   giftParams?: GiftParams;              // Phase 6: 贈与税
   marketCrashParams?: MarketCrashParams; // 暴落イベント
+  privatePensionParams?: PrivatePensionParams; // Phase 2: 私的年金
+  // Phase 11: その他収支の収入区分・間隔設定
+  incomeType?: "expense" | "salary" | "rental" | "business" | "misc";
+  // 支出（正のcost）| 給与収入 | 不動産所得 | 事業所得 | 雑所得（負コストとして計上）
+  intervalYears?: number;  // N年ごとの発生間隔（デフォルト1=毎年）
+  afterDeathRule?: {                           // Phase 3: 死亡後の取扱い
+    selfDeath: "continue" | "stop" | "reduce";
+    selfDeathReducePct?: number;               // "reduce"時の残存率（%）
+    spouseDeath: "continue" | "stop" | "reduce";
+    spouseDeathReducePct?: number;
+  };
   disabled?: boolean;  // true=計算から除外（UIではグレーアウト表示）
 }
 
@@ -299,6 +343,59 @@ export interface Scenario {
   nisaReturnRate?: number;     // NISA利回り（%）。未設定=グローバルrr
   taxableReturnRate?: number;  // 特定口座利回り（%）。未設定=グローバルrr
   cashInterestRate?: number;   // 現金利率（%）。デフォルト0
+  // Phase 4: 職歴・キャリアトラック
+  careerHistory?: CareerPeriod[];  // 本人の職歴（未設定=就職〜退職を厚生年金1期間として計算）
+  // Phase 5: 年齢別運用利回り
+  returnRateKF?: Keyframe[];       // 年齢別の全体利回り（%）。設定時はrr/dcReturnRate等のデフォルトより優先
+  // Phase 15: 児童手当
+  childAllowanceEnabled?: boolean; // 児童手当を考慮するか（デフォルト true）
+  // Phase 16: 老後の基本生活費
+  retirementLivingExpenseMan?: number; // 老後の基本生活費（万円/月）。設定時はpensionStartAge以降に適用
+  // Phase 10: 万一後の配偶者収入見直し
+  afterSelfDeathSpouseIncome?: {
+    enabled: boolean;
+    monthlyMan: number;          // 月収（万円）
+    bonusMan: number;            // 賞与（万円/年）
+    retirementAge: number;       // 退職年齢
+  };
+  // Phase 1: 生活費自動調整
+  livingExpenseRules?: {
+    enabled: boolean;
+    childIndependenceAge: number;    // 子の独立年齢（デフォルト22）
+    reductionPerChildPct: number;    // 子1人あたりの減額率（デフォルト10）
+    selfDeathReductionPct: number;   // 世帯主死亡後の生活費（直前の何%、デフォルト70）
+    spouseDeathReductionPct: number; // 配偶者死亡後の生活費（直前の何%、デフォルト70）
+  };
+  // Phase 14: 結婚年齢（第3号被保険者期間の計算に使用）
+  marriageAge?: number; // 本人の結婚時年齢
+  // Phase 9: 国民健康保険料率詳細設定
+  nhsSettings?: {
+    // 医療分
+    medEqualAmount: number;     // 世帯平等割額（円/年）
+    medPerCapita: number;       // 被保険者均等割額（円/人/年）
+    medIncomeRate: number;      // 所得割率（%）
+    medCap: number;             // 賦課限度額（円/年）
+    // 後期高齢者支援金分
+    supportEqualAmount: number;
+    supportPerCapita: number;
+    supportIncomeRate: number;
+    supportCap: number;
+    // 介護保険分（40〜64歳）
+    careEqualAmount: number;
+    carePerCapita: number;
+    careIncomeRate: number;
+    careCap: number;
+  };
+  // Phase 7: 必要保障額分析設定
+  protectionSettings?: {
+    funeralCostMan: number;            // 葬儀費用（万円、デフォルト200）
+    emergencyReserveMan: number;       // 遺族の予備生活資金（万円、デフォルト0）
+    survivorLivingRatio: number;       // 遺族生活費割合（%、デフォルト70）
+    deathRetirementBonusMan?: number;  // 死亡退職金・弔慰金（万円、デフォルト0）
+    afterDeathRentEnabled?: boolean;   // 万一後の家賃を見直すか
+    afterDeathRentMonthlyMan?: number; // 万一後の家賃（万円/月）
+    afterDeathRentEndAge?: number;     // 何歳まで（0=終身）
+  };
   // UI state: section open/close (persisted in JSON)
   sectionOpen?: Record<string, boolean>;
 }
@@ -524,4 +621,5 @@ export const EVENT_TYPES: Record<string, EventTypeDef> = {
   gift:        { label: "贈与",       icon: "🎁", color: "#a855f7", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0,  paramsKey: "giftParams",       editBtnClass: "bg-purple-100 text-purple-600" },
   crash:       { label: "暴落",       icon: "📉", color: "#dc2626", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 1,  paramsKey: "marketCrashParams", editBtnClass: "bg-red-100 text-red-600" },
   custom:      { label: "カスタム",   icon: "📌", color: "#78716c", defaultAnnual: 0,   defaultOnetime: 0,   defaultDuration: 0 },
+  pension_private: { label: "私的年金", icon: "🏦", color: "#0d9488", defaultAnnual: 0, defaultOnetime: 0, defaultDuration: 0, paramsKey: "privatePensionParams", editBtnClass: "bg-teal-100 text-teal-600" },
 };

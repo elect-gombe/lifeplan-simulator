@@ -79,6 +79,12 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
   }
   if (params.hasRet) lines.push(`会社退職金: ${Math.round(params.retAmt / 10000)}万円`);
 
+  // Phase 1: 生活費自動調整
+  const ler = s.livingExpenseRules;
+  if (ler?.enabled) {
+    lines.push(`生活費自動調整: ON（子独立${ler.childIndependenceAge}歳時1人あたり-${ler.reductionPerChildPct}% / 本人万一後${ler.selfDeathReductionPct}% / 配偶者万一後${ler.spouseDeathReductionPct}%）`);
+  }
+
   // 配偶者（linkedToBaseの場合、計算にはAの配偶者が含まれるがJSON上はenabled:false）
   const hasSpouseInCalc = s.spouse?.enabled || (s.linkedToBase && !s.spouse?.enabled);
   if (s.spouse?.enabled) {

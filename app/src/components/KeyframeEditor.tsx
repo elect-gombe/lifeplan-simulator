@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import type { Keyframe, Scenario, TrackKey, SpouseConfig, DCReceiveMethod, SocialInsuranceParams } from "../lib/types";
+import type { Keyframe, Scenario, TrackKey, SpouseConfig, DCReceiveMethod, SocialInsuranceParams, CareerPeriod, PensionSchemeType } from "../lib/types";
 import { DEFAULT_DC_RECEIVE_METHOD, DEFAULT_SI_PARAMS } from "../lib/types";
 import { sortKF } from "../lib/types";
 import { Section } from "./Section";
@@ -11,7 +11,7 @@ import { ScenarioSettingsSection } from "./ScenarioSettingsSection";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
 
-interface TrackDef { key: TrackKey; label: string; unit: string; defaultValue: number; step: number; help?: string; }
+export interface TrackDef { key: TrackKey; label: string; unit: string; defaultValue: number; step: number; help?: string; }
 const TRACKS: TrackDef[] = [
   { key: "incomeKF", label: "年収", unit: "万円", defaultValue: 700, step: 10 },
   { key: "expenseKF", label: "基本生活費(世帯)", unit: "万円/月", defaultValue: 15, step: 1, help: "世帯全体の月額生活費。住居費・イベント費は別途加算" },
@@ -21,7 +21,7 @@ const TRACKS: TrackDef[] = [
 ];
 
 // ===== Track Row (shared by 本人 and 配偶者) =====
-function TrackRow({ track, keyframes, onChange, currentAge, retirementAge, linked, onToggleLink, baseKFs }: {
+export function TrackRow({ track, keyframes, onChange, currentAge, retirementAge, linked, onToggleLink, baseKFs }: {
   track: TrackDef; keyframes: Keyframe[]; onChange: (kfs: Keyframe[]) => void;
   currentAge: number; retirementAge: number;
   linked: boolean; onToggleLink?: () => void; baseKFs?: Keyframe[];
@@ -29,7 +29,8 @@ function TrackRow({ track, keyframes, onChange, currentAge, retirementAge, linke
   const [adding, setAdding] = useState(false);
   const [newAge, setNewAge] = useState(currentAge);
   const [newVal, setNewVal] = useState(track.defaultValue);
-  const display = linked ? (baseKFs || []) : keyframes;
+  const safeKFs = keyframes || [];
+  const display = linked ? (baseKFs || []) : safeKFs;
   const ro = linked;
 
   return (
@@ -51,9 +52,9 @@ function TrackRow({ track, keyframes, onChange, currentAge, retirementAge, linke
           <div key={kf.age} className={`flex items-center gap-1.5 pl-2 text-xs ${ro ? "opacity-50" : ""}`}>
             <span className="w-8 text-gray-500 font-mono text-[10px]">{kf.age}歳</span>
             {ro ? <span className="font-mono text-gray-500">{kf.value}</span>
-              : <input type="number" value={kf.value} step={track.step} onChange={(e) => onChange(keyframes.map(k => k.age === kf.age ? { ...k, value: Number(e.target.value) } : k))} className="w-24 rounded border px-1.5 py-1 text-xs" />}
+              : <input type="number" value={kf.value} step={track.step} onChange={(e) => onChange(safeKFs.map(k => k.age === kf.age ? { ...k, value: Number(e.target.value) } : k))} className="w-24 rounded border px-1.5 py-1 text-xs" />}
             <span className="text-gray-400 text-[10px]">{track.unit}</span>
-            {!ro && <button onClick={() => onChange(keyframes.filter(k => k.age !== kf.age))} className="text-[10px] text-gray-300 hover:text-red-500">×</button>}
+            {!ro && <button onClick={() => onChange(safeKFs.filter(k => k.age !== kf.age))} className="text-[10px] text-gray-300 hover:text-red-500">×</button>}
           </div>
         ))}
         {adding && !ro && (
@@ -61,7 +62,7 @@ function TrackRow({ track, keyframes, onChange, currentAge, retirementAge, linke
             <input type="number" value={newAge} min={currentAge} max={retirementAge - 1} step={1} onChange={(e) => setNewAge(Number(e.target.value))} className="w-14 rounded border px-1.5 py-1 text-xs" />
             <span className="text-gray-400 text-[10px]">歳</span>
             <input type="number" value={newVal} step={track.step} onChange={(e) => setNewVal(Number(e.target.value))} className="w-24 rounded border px-1.5 py-0.5 text-xs" />
-            <button onClick={() => { onChange(sortKF([...keyframes.filter(k => k.age !== newAge), { age: newAge, value: newVal }])); setAdding(false); }} className="text-[10px] text-blue-600 font-bold">OK</button>
+            <button onClick={() => { onChange(sortKF([...safeKFs.filter(k => k.age !== newAge), { age: newAge, value: newVal }])); setAdding(false); }} className="text-[10px] text-blue-600 font-bold">OK</button>
             <button onClick={() => setAdding(false)} className="text-[10px] text-gray-400">×</button>
           </div>
         )}
@@ -70,9 +71,71 @@ function TrackRow({ track, keyframes, onChange, currentAge, retirementAge, linke
   );
 }
 
+// ===== Phase 4: Career History Editor =====
+const SCHEME_LABELS: Record<PensionSchemeType, string> = {
+  employee: "厚生", national: "国民", mutual: "共済",
+};
+
+export function CareerHistoryEditor({ history, onChange, workStartAge, retirementAge, disabled }: {
+  history: CareerPeriod[];
+  onChange: (h: CareerPeriod[]) => void;
+  workStartAge: number;
+  retirementAge: number;
+  disabled?: boolean;
+}) {
+  const addPeriod = () => {
+    const lastEnd = history.length > 0 ? history[history.length - 1].endAge : workStartAge;
+    onChange([...history, { id: Date.now(), startAge: lastEnd, endAge: retirementAge, pensionScheme: "employee" }]);
+  };
+  const autoGenerate = () => {
+    onChange([{ id: Date.now(), startAge: workStartAge, endAge: retirementAge, pensionScheme: "employee" }]);
+  };
+  const removePeriod = (id: number) => onChange(history.filter(p => p.id !== id));
+  const updatePeriod = (id: number, patch: Partial<CareerPeriod>) =>
+    onChange(history.map(p => p.id === id ? { ...p, ...patch } : p));
+
+  return (
+    <details className="text-[10px] col-span-2 w-full">
+      <summary className="cursor-pointer text-gray-500 flex items-center gap-1 select-none">
+        職歴{history.length > 0 ? ` (${history.length}件)` : ""}
+        <span className="text-gray-400">{history.length === 0 ? "（未設定=就職〜退職を厚生1期間）" : ""}</span>
+      </summary>
+      <div className="mt-1 border rounded p-1.5 space-y-1 bg-gray-50">
+        {history.length === 0 && (
+          <div className="text-gray-400">未設定: 就職〜退職を厚生年金1期間として自動計算</div>
+        )}
+        {history.map(p => (
+          <div key={p.id} className="flex flex-wrap items-center gap-1 bg-white rounded border p-1">
+            <Inp label="開始" value={p.startAge} onChange={v => updatePeriod(p.id, { startAge: v })} unit="歳" w="w-10" step={1} min={18} max={70} disabled={disabled} />
+            <Inp label="終了" value={p.endAge} onChange={v => updatePeriod(p.id, { endAge: v })} unit="歳" w="w-10" step={1} min={p.startAge + 1} max={75} disabled={disabled} />
+            <div className="flex items-center gap-0.5">
+              <span className="text-gray-500">年金:</span>
+              <Btns options={[{value:"employee" as const,label:"厚生"},{value:"national" as const,label:"国民"},{value:"mutual" as const,label:"共済"}]}
+                value={p.pensionScheme} onChange={v => updatePeriod(p.id, { pensionScheme: v })} disabled={disabled} />
+            </div>
+            {p.pensionScheme !== "national" && (
+              <Inp label="平均年収" value={p.avgAnnualSalaryMan ?? 0} onChange={v => updatePeriod(p.id, { avgAnnualSalaryMan: v || undefined })} unit="万(0=KF参照)" w="w-14" step={50} min={0} disabled={disabled} />
+            )}
+            <Inp label="退職金" value={p.retirementBonusMan ?? 0} onChange={v => updatePeriod(p.id, { retirementBonusMan: v || undefined })} unit="万(0=なし)" w="w-14" step={100} min={0} disabled={disabled} />
+            <input value={p.label ?? ""} onChange={e => updatePeriod(p.id, { label: e.target.value || undefined })} placeholder="ラベル" className="w-20 rounded border px-1 py-0.5 text-[10px]" disabled={disabled} />
+            {!disabled && <button onClick={() => removePeriod(p.id)} className="text-gray-300 hover:text-red-500 ml-auto">×</button>}
+          </div>
+        ))}
+        {!disabled && (
+          <div className="flex gap-1">
+            <button onClick={autoGenerate} className="text-[10px] rounded px-1.5 py-0.5 bg-gray-200 text-gray-600 hover:bg-gray-300">自動生成</button>
+            <button onClick={addPeriod} className="text-[10px] rounded px-1.5 py-0.5 bg-blue-100 text-blue-600 hover:bg-blue-200">＋追加</button>
+            {history.length > 0 && <button onClick={() => onChange([])} className="text-[10px] rounded px-1.5 py-0.5 bg-red-50 text-red-400 hover:bg-red-100">クリア</button>}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 // ===== Unified Member Editor (本人 / 配偶者 共通) =====
 // データの読み書きを抽象化して同一UIを使い回す
-interface MemberData {
+export interface MemberData {
   incomeKF: Keyframe[]; expenseKF: Keyframe[];
   dcTotalKF: Keyframe[]; companyDCKF: Keyframe[]; idecoKF: Keyframe[];
   salaryGrowthRate: number; sirPct: number; hasFurusato: boolean;
@@ -82,7 +145,7 @@ interface MemberData {
 
 const DEFAULT_DC_RM = DEFAULT_DC_RECEIVE_METHOD;
 
-function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge, extraFields, linked, readOnly, baseData, trackLinked, onToggleTrack, excludeTracks, dcLinked, onToggleDCLink, open, onToggle, enabled, onToggleEnabled, enabledLabel }: {
+export function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge, extraFields, linked, readOnly, baseData, trackLinked, onToggleTrack, excludeTracks, dcLinked, onToggleDCLink, open, onToggle, enabled, onToggleEnabled, enabledLabel }: {
   label: string; color: string;
   data: MemberData;
   onUpdate: (patch: Partial<MemberData & Record<string, any>>) => void;
@@ -101,6 +164,22 @@ function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge,
   onToggleEnabled?: (v: boolean) => void;
   enabledLabel?: string;
 }) {
+  // currentAge が変わったとき、各KFの先頭年齢を連動させる
+  const prevAge = React.useRef(currentAge);
+  React.useEffect(() => {
+    if (prevAge.current === currentAge) return;
+    prevAge.current = currentAge;
+    const syncFirst = (kf: Keyframe[]) =>
+      kf.length > 0 ? [{ ...kf[0], age: currentAge }, ...kf.slice(1)] : kf;
+    const patch: Partial<MemberData> = {};
+    let changed = false;
+    for (const key of ["incomeKF", "expenseKF", "dcTotalKF", "companyDCKF", "idecoKF"] as const) {
+      const orig = data[key];
+      if (orig.length > 0 && orig[0].age !== currentAge) { patch[key] = syncFirst(orig) as any; changed = true; }
+    }
+    if (changed) onUpdate(patch);
+  }, [currentAge]);
+
   const isRO = readOnly && linked;
   // When linked & readOnly, display base data for scalar settings
   const display = isRO && baseData ? baseData : data;
@@ -307,6 +386,8 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
           <Inp label="DC通算" value={s.years} onChange={v => onChange({ ...s, years: v })} unit="年" w="w-14" step={1} disabled={isLinked} />
           <Inp label="年金開始" value={s.pensionStartAge ?? 65} onChange={v => onChange({ ...s, pensionStartAge: v })} unit="歳" w="w-12" min={60} max={75} step={1} disabled={isLinked} />
           <Inp label="就職" value={s.pensionWorkStartAge ?? 22} onChange={v => onChange({ ...s, pensionWorkStartAge: v })} unit="歳" w="w-12" min={18} max={30} step={1} disabled={isLinked} />
+          <Inp label="結婚" value={s.marriageAge ?? 0} onChange={v => onChange({ ...s, marriageAge: v || undefined })} unit="歳(0=未設定)" w="w-12" min={0} max={60} step={1} disabled={isLinked} />
+          <CareerHistoryEditor history={s.careerHistory || []} onChange={h => onChange({ ...s, careerHistory: h.length > 0 ? h : undefined })} workStartAge={s.pensionWorkStartAge ?? 22} retirementAge={s.retirementAge} disabled={isLinked} />
         </>}
       />
 
@@ -329,6 +410,7 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
           <Inp label="退職" value={effectiveSp.retirementAge ?? 65} onChange={v => onChange({ ...s, spouse: { ...sp, retirementAge: v } })} unit="歳" w="w-12" min={effectiveSp.currentAge + 1} max={80} step={1} disabled={spInherited} />
           <Inp label="年金開始" value={effectiveSp.pensionStartAge ?? 65} onChange={v => onChange({ ...s, spouse: { ...sp, pensionStartAge: v } })} unit="歳" w="w-12" min={60} max={75} step={1} disabled={spInherited} />
           <Inp label="就職" value={effectiveSp.pensionWorkStartAge ?? 22} onChange={v => onChange({ ...s, spouse: { ...sp, pensionWorkStartAge: v } })} unit="歳" w="w-12" min={18} max={30} step={1} disabled={spInherited} />
+          <CareerHistoryEditor history={effectiveSp.careerHistory || []} onChange={h => onChange({ ...s, spouse: { ...sp, careerHistory: h.length > 0 ? h : undefined } })} workStartAge={effectiveSp.pensionWorkStartAge ?? 22} retirementAge={effectiveSp.retirementAge ?? 65} disabled={spInherited} />
         </>}
         open={secOpen("spouse")} onToggle={() => toggleSec("spouse")}
         enabled={spouseEnabled}
