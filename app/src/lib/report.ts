@@ -65,7 +65,9 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
   const effectiveInflation = resolve("inflationRate", params.inflationRate);
   const rrSource = settingLinked("rr") ? '(Aから継承)' : (s.rr != null ? '(シナリオ独自)' : '');
   const infSource = settingLinked("inflationRate") ? '(Aから継承)' : (s.inflationRate != null ? '(シナリオ独自)' : '');
-  lines.push(`運用利回り: ${effectiveRR}%${rrSource} / インフレ率: ${effectiveInflation}%${infSource}`);
+  const effectiveMacroSlide = resolve("macroSlideRate", -0.8);
+  const msSource = settingLinked("macroSlideRate") ? '(Aから継承)' : (s.macroSlideRate != null ? '(シナリオ独自)' : '');
+  lines.push(`運用利回り: ${effectiveRR}%${rrSource} / インフレ率: ${effectiveInflation}%${infSource} / マクロスライド: ${effectiveMacroSlide}%${msSource}`);
 
   // 個別利回り: リンク時はAの値にフォールバック
   const effDCRR = s.dcReturnRate ?? (linked ? base?.dcReturnRate : undefined);

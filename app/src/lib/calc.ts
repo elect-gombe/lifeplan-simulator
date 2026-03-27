@@ -765,9 +765,10 @@ interface SimConfig {
   cashAnchors: { age: number; amountMan: number }[];
   // Spouse DC receive method
   spouseRM: DCReceiveMethod;
-  // Inflation
+  // Inflation & macro slide
   effectiveInflation: number;
   inflation: number;
+  macroSlideRate: number; // % per year (default -0.8)
   // Params pass-through
   defaultGrossMan: number;
   taxOpts: TaxOpts;
@@ -795,6 +796,13 @@ interface SimState {
   spouseSalaryYears: number;
   totalC: number;
   totalPensionLoss: number;
+  // DC受取実績の累積（総括表示用）
+  selfDCReceivedLumpSum: number;
+  selfDCReceivedAnnuityTotal: number;
+  selfDCReceivedTax: number;
+  spouseDCReceivedLumpSum: number;
+  spouseDCReceivedAnnuityTotal: number;
+  spouseDCReceivedTax: number;
 }
 
 function initSimState(effectiveCurrentAssets: number): SimState {
@@ -815,6 +823,12 @@ function initSimState(effectiveCurrentAssets: number): SimState {
     spouseSalaryYears: 0,
     totalC: 0,
     totalPensionLoss: 0,
+    selfDCReceivedLumpSum: 0,
+    selfDCReceivedAnnuityTotal: 0,
+    selfDCReceivedTax: 0,
+    spouseDCReceivedLumpSum: 0,
+    spouseDCReceivedAnnuityTotal: 0,
+    spouseDCReceivedTax: 0,
   };
 }
 
@@ -966,6 +980,7 @@ function resolveSimConfig(s: Scenario, base: BaseResult, params: CalcParams, bas
 
   const effectiveInflation = settingLinked("inflationRate") ? (base_.inflationRate ?? params.inflationRate) : (s.inflationRate ?? params.inflationRate);
   const inflation = effectiveInflation / 100;
+  const macroSlideRate = settingLinked("macroSlideRate") ? (base_.macroSlideRate ?? -0.8) : (s.macroSlideRate ?? -0.8);
 
   return {
     linked, base_, currentAge, baseCalendarYear, selfRetirementAge, retirementAge,
@@ -977,7 +992,7 @@ function resolveSimConfig(s: Scenario, base: BaseResult, params: CalcParams, bas
     selfNISAAnnualLimit, selfNISALifetimeLimit, spouseNISAAnnualLimit, spouseNISALifetimeLimit,
     dcRate, nisaReturnRate, taxableReturnRate, cashRate,
     cashReserveMinMonths, cashReserveMaxMonths, nisaPriority, cashAnchors,
-    spouseRM, effectiveInflation, inflation,
+    spouseRM, effectiveInflation, inflation, macroSlideRate,
     defaultGrossMan, taxOpts, housingLoanDed, PY, hasRet, retAmt,
   };
 }
@@ -1141,11 +1156,13 @@ function phaseDeathInheritance(
   };
 
   if (isDeathYear) {
+    state.selfDCReceivedLumpSum += state.selfDCAsset; // 死亡一時金として累積記録
     processDeathInheritance("本人", state.selfDCAsset, state.selfNISAAsset, !!spouse && !isSpouseDead);
     state.selfDCAsset = 0;
     cumulativeDCAsset = state.selfDCAsset + state.spouseDCAsset;
   }
   if (isSpouseDeathYear) {
+    state.spouseDCReceivedLumpSum += state.spouseDCAsset; // 死亡一時金として累積記録
     processDeathInheritance("配偶者", state.spouseDCAsset, state.spouseNISAAsset, true);
     state.spouseDCAsset = 0;
     cumulativeDCAsset = state.selfDCAsset + state.spouseDCAsset;
@@ -1447,6 +1464,9 @@ function phaseDCReception(
   selfDCReceiveLumpSum = dcReceiveLumpSum - preSelfLump;
   selfDCReceiveAnnuityAnnual = dcReceiveAnnuityAnnual - preSelfAnn;
   if (selfDCReceiveLumpSum > 0 || selfDCReceiveAnnuityAnnual > 0) selfDCRetirementDeduction = selfRetDed;
+  // 累積記録（総括表示用）
+  state.selfDCReceivedLumpSum += selfDCReceiveLumpSum;
+  state.selfDCReceivedTax += selfDCReceiveTax;
 
   if (state.spouseDCAsset > 0 && spouse) {
     const preSpTax = dcReceiveTax, preSpLump = dcReceiveLumpSum, preSpAnn = dcReceiveAnnuityAnnual;
@@ -1458,6 +1478,9 @@ function phaseDCReception(
     spouseDCReceiveLumpSum = dcReceiveLumpSum - preSpLump;
     spouseDCReceiveAnnuityAnnual = dcReceiveAnnuityAnnual - preSpAnn;
     if (spouseDCReceiveLumpSum > 0 || spouseDCReceiveAnnuityAnnual > 0) spouseDCRetirementDeduction = spRetDed;
+    // 累積記録（総括表示用）
+    state.spouseDCReceivedLumpSum += spouseDCReceiveLumpSum;
+    state.spouseDCReceivedTax += spouseDCReceiveTax;
   }
   const cumulativeDCAsset = state.selfDCAsset + state.spouseDCAsset;
 
@@ -1595,15 +1618,39 @@ function assembleFinalResult(
   const lPL = state.totalPensionLoss * config.PY;
   const dcRetDed = rDed(effectiveYears);
 
+  // DC受取の総括: シミュレーション中の実績 + 残存DC資産の理論受取を合算
   const rmFinal = effectiveDCReceiveMethod || DEFAULT_DC_RECEIVE_METHOD;
-  const dcReceiveDetail = calcDCReceiveTax(state.selfDCAsset, otherRet, dcRetDed, rmFinal, retirementAge, rr);
+
+  // 残存DC（年金部分の未受取分 or 退職後の再積立分）は一時金として受け取ると仮定
+  const selfRemainingDCDetail = state.selfDCAsset > 0
+    ? calcDCReceiveTax(state.selfDCAsset, otherRet, dcRetDed, { type: "lump_sum", annuityYears: 20, annuityStartAge: 65 }, retirementAge, rr)
+    : { totalTax: 0, netAmount: 0, lumpSumAmount: 0, lumpSumTax: 0, annuityAnnual: 0, annuityTotalTax: 0, annuityYears: 0, annuityStartAge: 0, method: "一時金" as const };
+
+  const dcReceiveDetail: import("./types").DCReceiveDetail = {
+    method: rmFinal.type === "lump_sum" ? "一時金" : rmFinal.type === "annuity" ? `年金(${rmFinal.annuityYears || 20}年)` : `併用(一時金${rmFinal.combinedLumpSumRatio || 50}%)`,
+    lumpSumAmount: state.selfDCReceivedLumpSum + selfRemainingDCDetail.lumpSumAmount,
+    lumpSumTax: state.selfDCReceivedTax + selfRemainingDCDetail.lumpSumTax,
+    annuityAnnual: 0, annuityTotalTax: 0, annuityYears: 0, annuityStartAge: 0,
+    totalTax: state.selfDCReceivedTax + selfRemainingDCDetail.totalTax,
+    netAmount: (state.selfDCReceivedLumpSum - state.selfDCReceivedTax) + state.selfDCReceivedAnnuityTotal + selfRemainingDCDetail.netAmount,
+  };
 
   let spouseDCReceiveDetail: import("./types").DCReceiveDetail | undefined;
-  if (state.spouseDCAsset > 0 && spouse) {
+  if ((state.spouseDCAsset > 0 || state.spouseDCReceivedLumpSum > 0) && spouse) {
     const spContribYears = yearResults.filter(yr => yr.spouse.dcContribution > 0).length;
     const spYears = spContribYears > 0 ? spContribYears : effectiveYears;
     const spRetDed = rDed(spYears);
-    spouseDCReceiveDetail = calcDCReceiveTax(state.spouseDCAsset, 0, spRetDed, spouseRM, retirementAge, rr);
+    const spRemainingDCDetail = state.spouseDCAsset > 0
+      ? calcDCReceiveTax(state.spouseDCAsset, 0, spRetDed, { type: "lump_sum", annuityYears: 20, annuityStartAge: 65 }, retirementAge, rr)
+      : { totalTax: 0, netAmount: 0, lumpSumAmount: 0, lumpSumTax: 0, annuityAnnual: 0, annuityTotalTax: 0, annuityYears: 0, annuityStartAge: 0, method: "一時金" as const };
+    spouseDCReceiveDetail = {
+      method: spouseRM.type === "lump_sum" ? "一時金" : `併用(一時金${spouseRM.combinedLumpSumRatio || 50}%)`,
+      lumpSumAmount: state.spouseDCReceivedLumpSum + spRemainingDCDetail.lumpSumAmount,
+      lumpSumTax: state.spouseDCReceivedTax + spRemainingDCDetail.lumpSumTax,
+      annuityAnnual: 0, annuityTotalTax: 0, annuityYears: 0, annuityStartAge: 0,
+      totalTax: state.spouseDCReceivedTax + spRemainingDCDetail.totalTax,
+      netAmount: (state.spouseDCReceivedLumpSum - state.spouseDCReceivedTax) + state.spouseDCReceivedAnnuityTotal + spRemainingDCDetail.netAmount,
+    };
   }
 
   const exitDelta = dcReceiveDetail.totalTax + (spouseDCReceiveDetail?.totalTax || 0);
@@ -1635,13 +1682,17 @@ interface PensionResult {
 function calcPublicPensionForMember(
   isDead: boolean, currentAge: number, startAge: number, workStartAge: number,
   retAge: number, cumSalary: number, years: number,
+  pensionSlideFactor: number,
 ): { income: number; employeeAnnual: number; detail: string } {
   if (isDead || currentAge < startAge) return { income: 0, employeeAnnual: 0, detail: "" };
   const avg = years > 0 ? cumSalary / years : 0;
   const empMonths = Math.max(Math.min(retAge, 65) - workStartAge, 0) * 12;
   const natMonths = Math.min((65 - 20) * 12, 480);
   const pe = estimatePublicPension(avg, empMonths, natMonths, startAge);
-  return { income: pe.totalAnnual, employeeAnnual: Math.round(pe.employeeAnnual * pe.adjustmentFactor), detail: pe.detail };
+  // マクロ経済スライド適用: 受給開始からの累積調整
+  const adjusted = Math.round(pe.totalAnnual * pensionSlideFactor);
+  const adjEmployee = Math.round(pe.employeeAnnual * pe.adjustmentFactor * pensionSlideFactor);
+  return { income: adjusted, employeeAnnual: adjEmployee, detail: pe.detail };
 }
 
 function applyWorkingPensionReduction(pensionEmployeeAnnual: number, grossIncome: number): number {
@@ -1655,20 +1706,34 @@ function applyWorkingPensionReduction(pensionEmployeeAnnual: number, grossIncome
   return 0;
 }
 
+/** マクロ経済スライド累積係数を計算
+ *  毎年の改定率 = max(0, 物価上昇率 + マクロスライド調整率) — 名目下限ルール
+ *  インフレ率が一定の場合、yearsReceiving年後の累積係数 = (1 + adjRate)^yearsReceiving */
+function pensionMacroSlideFactor(yearsReceiving: number, inflationPct: number, macroSlidePct: number): number {
+  if (yearsReceiving <= 0) return 1;
+  const annualAdj = Math.max(0, inflationPct / 100 + macroSlidePct / 100);
+  return Math.pow(1 + annualAdj, yearsReceiving);
+}
+
 function phasePension(
   age: number, selfGross: number, state: SimState, config: SimConfig, ageInfo: AgeEventInfo,
 ): PensionResult {
   const { isSelfDead, isSpouseDead, spouseAge } = ageInfo;
-  const { spouse, selfRetirementAge, effectivePensionStartAge, effectivePensionWorkStartAge } = config;
+  const { spouse, selfRetirementAge, effectivePensionStartAge, effectivePensionWorkStartAge, effectiveInflation, macroSlideRate } = config;
 
+  const selfStartAge = effectivePensionStartAge ?? 65;
+  const selfSlideFactor = pensionMacroSlideFactor(age - selfStartAge, effectiveInflation, macroSlideRate);
   const selfPen = calcPublicPensionForMember(
-    isSelfDead, age, effectivePensionStartAge ?? 65, effectivePensionWorkStartAge ?? 22,
-    selfRetirementAge, state.cumulativeSalary, state.salaryYears,
+    isSelfDead, age, selfStartAge, effectivePensionWorkStartAge ?? 22,
+    selfRetirementAge, state.cumulativeSalary, state.salaryYears, selfSlideFactor,
   );
+
+  const spStartAge = spouse?.pensionStartAge ?? 65;
+  const spSlideFactor = pensionMacroSlideFactor(spouseAge - spStartAge, effectiveInflation, macroSlideRate);
   const spPen = spouse
     ? calcPublicPensionForMember(
-        isSpouseDead, spouseAge, spouse.pensionStartAge ?? 65, spouse.pensionWorkStartAge ?? 22,
-        spouse.retirementAge ?? 65, state.spouseCumulativeSalary, state.spouseSalaryYears,
+        isSpouseDead, spouseAge, spStartAge, spouse.pensionWorkStartAge ?? 22,
+        spouse.retirementAge ?? 65, state.spouseCumulativeSalary, state.spouseSalaryYears, spSlideFactor,
       )
     : { income: 0, employeeAnnual: 0, detail: "" };
 
@@ -2089,7 +2154,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     selfNISAAnnualLimit, selfNISALifetimeLimit, spouseNISAAnnualLimit, spouseNISALifetimeLimit,
     dcRate, nisaReturnRate, taxableReturnRate, cashRate,
     cashReserveMinMonths, cashReserveMaxMonths, nisaPriority, cashAnchors,
-    spouseRM, effectiveInflation, inflation,
+    spouseRM, effectiveInflation, inflation, macroSlideRate,
     defaultGrossMan, taxOpts, housingLoanDed, PY, hasRet, retAmt,
   } = config;
 
@@ -2186,21 +2251,38 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       const deathCalYear = baseCalendarYear + (resolveEventAge(deathEvt, events) - currentAge);
       const pc = calcSurvivorPension(deceasedAvgSalary, deceasedContribYears, childAgesForPension, survivorCurrentAge, survivorIsFemale, deathCalYear);
 
+      // マクロ経済スライド: 遺族年金にも死亡時からの累積調整を適用
+      const deathAge = resolveEventAge(deathEvt, events);
+      const yearsSinceDeath = age - deathAge;
+      const svSlideFactor = pensionMacroSlideFactor(yearsSinceDeath, effectiveInflation, macroSlideRate);
+
       // 65歳以降の併給調整: 遺族厚生年金は遺族自身の老齢厚生年金との差額のみ
-      let adjEmployee = pc.employee;
+      let adjEmployee = Math.round(pc.employee * svSlideFactor);
       if (survivorOwnEmployeePension > 0) {
-        const optionB = Math.round(pc.employee / 3 * 4 / 2) + Math.round(survivorOwnEmployeePension / 2);
-        adjEmployee = Math.max(Math.max(pc.employee, optionB) - survivorOwnEmployeePension, 0);
+        const optionB = Math.round(adjEmployee / 3 * 4 / 2) + Math.round(survivorOwnEmployeePension / 2);
+        adjEmployee = Math.max(Math.max(adjEmployee, optionB) - survivorOwnEmployeePension, 0);
       }
 
-      survivorBasicPension += pc.basic;
+      const adjBasic = Math.round(pc.basic * svSlideFactor);
+      const adjWidow = Math.round(pc.widowSupplement * svSlideFactor);
+      survivorBasicPension += adjBasic;
       survivorEmployeePension += adjEmployee;
-      survivorWidowSupplement += pc.widowSupplement;
-      survivorIncome += pc.basic + adjEmployee + pc.widowSupplement;
+      survivorWidowSupplement += adjWidow;
+      survivorIncome += adjBasic + adjEmployee + adjWidow;
+      // 収入保障: deathParams経由の給付。ただし同一target向けのincome_protection
+      // 保険イベントが存在する場合は二重計上を防止するためスキップ
       if (deathP.incomeProtectionManPerMonth > 0 && age < deathP.incomeProtectionUntilAge) {
-        const amt = deathP.incomeProtectionManPerMonth * 12 * 10000;
-        survivorIncome += amt;
-        survivorIncomeProtection += amt;
+        const deathTarget = deathEvt.target || "self";
+        const hasInsEvt = events.some(e =>
+          e.insuranceParams?.insuranceType === "income_protection" &&
+          (e.target || "self") === deathTarget &&
+          !isEffDisabled(e)
+        );
+        if (!hasInsEvt) {
+          const amt = deathP.incomeProtectionManPerMonth * 12 * 10000;
+          survivorIncome += amt;
+          survivorIncomeProtection += amt;
+        }
       }
     };
 

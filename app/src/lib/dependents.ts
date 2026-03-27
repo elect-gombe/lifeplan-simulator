@@ -8,8 +8,8 @@ export const DEPENDENT_MIN_AGE = 16;
 export const DEPENDENT_SPECIAL_MIN_AGE = 19;
 /** 扶養控除: 特定扶養親族 終了年齢 */
 export const DEPENDENT_SPECIAL_MAX_AGE = 23;
-/** 児童手当: 対象終了年齢 */
-export const CHILD_ALLOWANCE_MAX_AGE = 18;
+/** 児童手当: 対象終了年齢（18歳到達年度末≈19歳未満で近似） */
+export const CHILD_ALLOWANCE_MAX_AGE = 19;
 
 // 扶養控除: child age determines deduction amount
 export function dependentDeductionForChild(childAge: number): number {

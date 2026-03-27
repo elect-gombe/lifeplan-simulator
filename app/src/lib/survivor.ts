@@ -62,8 +62,10 @@ export function calcSurvivorPension(
   survivorIsFemale: boolean = true, // 遺族が女性か（中高齢寡婦加算は妻のみ）
   deathCalendarYear?: number, // 死亡した暦年（段階的廃止の逓減率算定用）
 ): { basic: number; employee: number; widowSupplement: number; total: number; detail: string } {
-  // 18歳以下の子の数
-  const eligibleChildren = childAges.filter(a => a >= 0 && a < 18).length;
+  // 18歳到達年度末（≈19歳未満）までの子の数
+  // 日本年金機構: 「18歳到達年度の末日（3月31日）を経過していない子」
+  // 年単位シミュレーションでは a < 19 で年度末を近似
+  const eligibleChildren = childAges.filter(a => a >= 0 && a < 19).length;
 
   // ■ 遺族基礎年金
   // 65歳以降は自分の老齢基礎年金に切り替わるため、遺族基礎年金は支給されない

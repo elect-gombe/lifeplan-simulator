@@ -245,7 +245,7 @@ export const DEFAULT_OVERRIDE_TRACKS: TrackKey[] = ["dcTotalKF", "companyDCKF", 
 export const LINKABLE_SETTINGS = [
   "currentAge", "retirementAge", "simEndAge", "currentAssetsMan", "selfGender",
   "years", "dependentDeductionHolder",
-  "pensionStartAge", "pensionWorkStartAge",
+  "pensionStartAge", "pensionWorkStartAge", "macroSlideRate",
   "rr", "inflationRate",
 ] as const;
 export type SettingKey = typeof LINKABLE_SETTINGS[number];
@@ -293,6 +293,7 @@ export interface Scenario {
   // シナリオ別の利回り・インフレ率（未設定=共通設定を使用）
   rr?: number;                 // 運用利回り（%）。未設定=共通設定
   inflationRate?: number;      // インフレ率（%）。未設定=共通設定
+  macroSlideRate?: number;     // マクロ経済スライド調整率（%）。デフォルト-0.8。年金改定率=物価上昇率+この値
   // Phase 3: 個別資産クラス利回り
   dcReturnRate?: number;       // DC利回り（%）。未設定=グローバルrr
   nisaReturnRate?: number;     // NISA利回り（%）。未設定=グローバルrr

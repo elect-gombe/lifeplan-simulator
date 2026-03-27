@@ -17,7 +17,7 @@ export function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario, o
     if (!isLinked) return;
     if (settingsLocked) {
       // Unlock: mark all settings as overridden (copy base values)
-      const allKeys: SettingKey[] = ["currentAge", "retirementAge", "simEndAge", "currentAssetsMan", "selfGender", "years", "dependentDeductionHolder", "pensionStartAge", "pensionWorkStartAge", "rr", "inflationRate"];
+      const allKeys: SettingKey[] = ["currentAge", "retirementAge", "simEndAge", "currentAssetsMan", "selfGender", "years", "dependentDeductionHolder", "pensionStartAge", "pensionWorkStartAge", "macroSlideRate", "rr", "inflationRate"];
       const copied: any = {};
       for (const k of allKeys) copied[k] = baseScenario ? (baseScenario as any)[k] ?? (s as any)[k] : (s as any)[k];
       onChange({ ...s, overrideSettings: allKeys, ...copied });
@@ -48,6 +48,12 @@ export function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario, o
           </div>
           <Inp label="利回り" value={val("rr", defaultRR ?? 4)} onChange={v => onChange({ ...s, rr: v })} unit="%" w="w-14" step={0.5} min={0} max={20} disabled={ro} />
           <Inp label="インフレ" value={val("inflationRate", defaultInflation ?? 1.5)} onChange={v => onChange({ ...s, inflationRate: v })} unit="%" w="w-14" step={0.25} min={0} max={10} disabled={ro} />
+          <div className="flex items-center gap-1">
+            <Inp label="スライド調整率" value={val("macroSlideRate", -0.8)} onChange={v => onChange({ ...s, macroSlideRate: v })} unit="%" w="w-14" step={0.1} min={-2} max={0} disabled={ro} />
+            <span className="text-[10px] text-gray-400 whitespace-nowrap" title="年金改定率 = インフレ率 + マクロスライド調整率（名目下限0%）">
+              ({val("inflationRate", defaultInflation ?? 1.5)}%{val("macroSlideRate", -0.8) >= 0 ? "+" : ""}{val("macroSlideRate", -0.8)}%={Math.max(0, (val("inflationRate", defaultInflation ?? 1.5) ?? 0) + (val("macroSlideRate", -0.8) ?? 0)).toFixed(1)}%/年)
+            </span>
+          </div>
         </div>
     </Section>
   );

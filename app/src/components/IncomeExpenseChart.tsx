@@ -210,7 +210,7 @@ function categorizeAssets(yr: YearResult): Record<AssetCategory, number> {
   };
 }
 
-// 負債込みの純資産ライン用
+// 金融資産合計ライン用
 function netWorth(yr: YearResult): number {
   return yr.totalWealth;
 }
@@ -226,7 +226,7 @@ export function IncomeExpenseCharts({ results, hoverAge, onHoverAge }: { results
         <StackedAreaChart title="収入" results={results} categories={INCOME_CATS} getData={categorizeIncome} {...shared} />
         <StackedAreaChart title="支出" results={results} categories={EXPENSE_CATS} getData={categorizeExpenses} {...shared} />
         <StackedAreaChart title="資産" results={results} categories={ASSET_CATS} getData={categorizeAssets}
-          overlayLine={{ label: "純資産", color: "#1e293b", fn: netWorth }} {...shared} />
+          overlayLine={{ label: "金融資産計", color: "#1e293b", fn: netWorth }} {...shared} />
       </div>
     </details>
   );
