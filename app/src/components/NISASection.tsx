@@ -3,6 +3,85 @@ import type { Scenario, NISAConfig, BalancePolicy } from "../lib/types";
 import { Section } from "./Section";
 import { Inp, Btns, Lnk } from "./ui";
 
+// ===== 残高ポリシーエディター（共通コンポーネント） =====
+
+export function BalancePolicyEditor({ bp, onChange, currentAge, hasSpouse, readOnly, linked, onLinkToggle }: {
+  bp: BalancePolicy;
+  onChange: (patch: Partial<BalancePolicy>) => void;
+  currentAge: number;
+  hasSpouse?: boolean;
+  readOnly?: boolean;
+  linked?: boolean;
+  onLinkToggle?: () => void;
+}) {
+  const disabled = !!readOnly;
+  return (
+    <div className={`space-y-1.5 ${disabled ? "opacity-50 pointer-events-none" : ""}`}>
+      <div className="flex items-center gap-1">
+        <span className="text-[10px] font-semibold text-gray-600">残高ポリシー</span>
+        {onLinkToggle && <Lnk linked={!!linked} onToggle={onLinkToggle} />}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-gray-500 text-[10px]">防衛資金<span className="ml-0.5 cursor-help text-gray-400" title="月間支出ベース。下限を下回ったら取り崩し、上限を超えたらNISA/特定へ投資。その間は何もしない(ヒステリシス)">ⓘ</span></span>
+          <Inp label="下限" value={bp.cashReserveMonths} onChange={v => onChange({ cashReserveMonths: v })} w="w-10" step={1} min={0} />
+          <Inp label="〜上限" value={bp.cashReserveMaxMonths ?? bp.cashReserveMonths} onChange={v => onChange({ cashReserveMaxMonths: v })} unit="ヶ月" w="w-10" step={1} min={bp.cashReserveMonths} />
+        </div>
+        <label className="flex items-center gap-1 text-[10px] cursor-pointer">
+          <input type="checkbox" checked={bp.nisaPriority} onChange={e => onChange({ nisaPriority: e.target.checked })} className="accent-green-600" />
+          <span className="text-gray-500">余剰→NISA/特定優先</span>
+        </label>
+      </div>
+      {/* 目標貯金アンカー */}
+      <div className="text-[10px]">
+        <div className="flex items-center gap-1 mb-0.5">
+          <span className="text-gray-500 font-semibold">目標貯金<span className="ml-0.5 cursor-help text-gray-400" title="特定年齢までに現金をX万円確保。目標に向けて投資を抑制し現金を多めに持ちます">ⓘ</span></span>
+          <button onClick={() => onChange({ cashAnchors: [...(bp.cashAnchors || []), { age: currentAge + 5, amountMan: 500 }] })}
+            className="text-blue-500 hover:underline">+ 追加</button>
+        </div>
+        {(bp.cashAnchors || []).map((a, i) => (
+          <div key={i} className="flex items-center gap-1 mb-0.5">
+            <input type="number" value={a.age} min={currentAge + 1} step={1}
+              onChange={e => { const anc = [...(bp.cashAnchors || [])]; anc[i] = { ...a, age: Number(e.target.value) }; onChange({ cashAnchors: anc }); }}
+              className="w-12 rounded border px-1 py-0.5 text-xs" />
+            <span className="text-gray-400">歳までに</span>
+            <input type="number" value={a.amountMan} step={100} min={0}
+              onChange={e => { const anc = [...(bp.cashAnchors || [])]; anc[i] = { ...a, amountMan: Number(e.target.value) }; onChange({ cashAnchors: anc }); }}
+              className="w-16 rounded border px-1 py-0.5 text-xs" />
+            <span className="text-gray-400">万円</span>
+            <button onClick={() => { const anc = [...(bp.cashAnchors || [])]; anc.splice(i, 1); onChange({ cashAnchors: anc }); }}
+              className="text-gray-300 hover:text-red-500">×</button>
+          </div>
+        ))}
+      </div>
+      {/* 引出順序 */}
+      <details className="text-[10px]">
+        <summary className="cursor-pointer text-gray-500">引出順序{bp.withdrawalOrder ? " (カスタム)" : " (デフォルト)"}</summary>
+        <div className="mt-1 space-y-1 bg-gray-50 rounded p-1.5">
+          <div className="text-gray-400">資産取り崩し順序（上から優先）</div>
+          {(() => {
+            const order = bp.withdrawalOrder || ["taxable", "spouseNisa", "selfNisa"];
+            const labels: Record<string, string> = { taxable: "特定口座", spouseNisa: "配偶者NISA", selfNisa: "本人NISA" };
+            const moveUp = (i: number) => { if (i <= 0) return; const o = [...order]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; onChange({ withdrawalOrder: o as any }); };
+            const moveDown = (i: number) => { if (i >= order.length - 1) return; const o = [...order]; [o[i], o[i + 1]] = [o[i + 1], o[i]]; onChange({ withdrawalOrder: o as any }); };
+            return order
+              .filter(src => src !== "spouseNisa" || hasSpouse)
+              .map((src, i) => (
+                <div key={src} className="flex items-center gap-1">
+                  <span className="w-4 text-center text-gray-400">{i + 1}.</span>
+                  <span className="flex-1">{labels[src]}</span>
+                  <button onClick={() => moveUp(i)} className="text-gray-400 hover:text-blue-500" disabled={i === 0}>▲</button>
+                  <button onClick={() => moveDown(i)} className="text-gray-400 hover:text-blue-500" disabled={i === order.length - 1}>▼</button>
+                </div>
+              ));
+          })()}
+          {bp.withdrawalOrder && <button onClick={() => onChange({ withdrawalOrder: undefined })} className="text-blue-500 hover:underline">デフォルトに戻す</button>}
+        </div>
+      </details>
+    </div>
+  );
+}
+
 // ===== NISA / Balance Policy Section =====
 
 export function NISASection({ s, onChange, currentAge, isLinked, baseScenario, open, onToggle }: { s: Scenario; onChange: (s: Scenario) => void; currentAge: number; isLinked?: boolean; baseScenario?: Scenario | null; open: boolean; onToggle: () => void }) {
@@ -90,62 +169,15 @@ export function NISASection({ s, onChange, currentAge, isLinked, baseScenario, o
       )}
       {/* 残高ポリシー — NISA有効/無効に関係なく常に表示 */}
       <div className="border-t border-green-100 pt-1 mt-1">
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] font-semibold text-gray-600">残高ポリシー</span>
-          {baseS && <Lnk linked={bpReadOnly} onToggle={() => bpReadOnly ? setBP({}) : onChange({ ...s, balancePolicy: undefined })} />}
-        </div>
-        <div className={`flex flex-wrap gap-2 mt-0.5 ${bpReadOnly ? "opacity-50 pointer-events-none" : ""}`}>
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-gray-500 text-[10px]">防衛資金<span className="ml-0.5 cursor-help text-gray-400" title="月間支出ベース。下限を下回ったら取り崩し、上限を超えたらNISA/特定へ投資。その間は何もしない(ヒステリシス)">ⓘ</span></span>
-            <Inp label="下限" value={bp.cashReserveMonths} onChange={v => setBP({ cashReserveMonths: v })} w="w-10" step={1} min={0} disabled={bpReadOnly} />
-            <Inp label="〜上限" value={bp.cashReserveMaxMonths ?? bp.cashReserveMonths} onChange={v => setBP({ cashReserveMaxMonths: v })} unit="ヶ月" w="w-10" step={1} min={bp.cashReserveMonths} disabled={bpReadOnly} />
-          </div>
-          <label className="flex items-center gap-1 text-[10px] cursor-pointer"><input type="checkbox" checked={bp.nisaPriority} onChange={e => setBP({ nisaPriority: e.target.checked })} className="accent-green-600" disabled={bpReadOnly} /><span className="text-gray-500">余剰→NISA/特定優先</span></label>
-        </div>
-        {/* 目標貯金アンカー */}
-        <div className="mt-1 text-[10px]">
-          <div className="flex items-center gap-1 mb-0.5">
-            <span className="text-gray-500 font-semibold">目標貯金<span className="ml-0.5 cursor-help text-gray-400" title="特定年齢までに現金をX万円確保。目標に向けて投資を抑制し現金を多めに持ちます">ⓘ</span></span>
-            <button onClick={() => setBP({ cashAnchors: [...(bp.cashAnchors || []), { age: currentAge + 5, amountMan: 500 }] })}
-              className="text-blue-500 hover:underline">+ 追加</button>
-          </div>
-          {(bp.cashAnchors || []).map((a, i) => (
-            <div key={i} className="flex items-center gap-1 mb-0.5">
-              <input type="number" value={a.age} min={currentAge + 1} step={1}
-                onChange={e => { const anc = [...(bp.cashAnchors || [])]; anc[i] = { ...a, age: Number(e.target.value) }; setBP({ cashAnchors: anc }); }}
-                className="w-12 rounded border px-1 py-0.5 text-xs" />
-              <span className="text-gray-400">歳までに</span>
-              <input type="number" value={a.amountMan} step={100} min={0}
-                onChange={e => { const anc = [...(bp.cashAnchors || [])]; anc[i] = { ...a, amountMan: Number(e.target.value) }; setBP({ cashAnchors: anc }); }}
-                className="w-16 rounded border px-1 py-0.5 text-xs" />
-              <span className="text-gray-400">万円</span>
-              <button onClick={() => { const anc = [...(bp.cashAnchors || [])]; anc.splice(i, 1); setBP({ cashAnchors: anc }); }}
-                className="text-gray-300 hover:text-red-500">×</button>
-            </div>
-          ))}
-        </div>
-        {/* Phase 8: 引出戦略 */}
-        <details className="text-[10px] mt-1">
-          <summary className="cursor-pointer text-gray-500">引出順序{bp.withdrawalOrder ? " (カスタム)" : " (デフォルト)"}</summary>
-          <div className="mt-1 space-y-1 bg-gray-50 rounded p-1.5">
-            <div className="text-gray-400">資産取り崩し順序（上から優先）</div>
-            {(() => {
-              const order = bp.withdrawalOrder || ["taxable", "spouseNisa", "selfNisa"];
-              const labels: Record<string, string> = { taxable: "特定口座", spouseNisa: "配偶者NISA", selfNisa: "本人NISA" };
-              const moveUp = (i: number) => { if (i <= 0) return; const o = [...order]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setBP({ withdrawalOrder: o as any }); };
-              const moveDown = (i: number) => { if (i >= order.length - 1) return; const o = [...order]; [o[i], o[i + 1]] = [o[i + 1], o[i]]; setBP({ withdrawalOrder: o as any }); };
-              return order.map((src, i) => (
-                <div key={src} className="flex items-center gap-1">
-                  <span className="w-4 text-center text-gray-400">{i + 1}.</span>
-                  <span className="flex-1">{labels[src]}</span>
-                  <button onClick={() => moveUp(i)} className="text-gray-400 hover:text-blue-500" disabled={i === 0}>▲</button>
-                  <button onClick={() => moveDown(i)} className="text-gray-400 hover:text-blue-500" disabled={i === order.length - 1}>▼</button>
-                </div>
-              ));
-            })()}
-            {bp.withdrawalOrder && <button onClick={() => setBP({ withdrawalOrder: undefined })} className="text-blue-500 hover:underline">デフォルトに戻す</button>}
-          </div>
-        </details>
+        <BalancePolicyEditor
+          bp={bp}
+          onChange={setBP}
+          currentAge={currentAge}
+          hasSpouse={s.spouse?.enabled}
+          readOnly={bpReadOnly}
+          linked={bpReadOnly}
+          onLinkToggle={baseS ? () => bpReadOnly ? setBP({}) : onChange({ ...s, balancePolicy: undefined }) : undefined}
+        />
       </div>
     </Section>
   );

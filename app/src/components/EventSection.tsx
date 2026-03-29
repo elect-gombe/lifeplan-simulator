@@ -2,11 +2,13 @@ import React, { useState } from "react";
 import type { LifeEvent, Scenario } from "../lib/types";
 import { EVENT_TYPES, resolveEventAge } from "../lib/types";
 import { Section, usePersistedSet } from "./Section";
+import { Btns, Inp } from "./ui";
 import { ChildEventModal } from "./ChildEventModal";
 import { PropertyModal } from "./PropertyModal";
 import { CarModal } from "./CarModal";
 import { DeathModal } from "./DeathModal";
 import { InsuranceModal } from "./InsuranceModal";
+import { PrivatePensionModal } from "./PrivatePensionModal";
 import { CrashModal } from "./CrashModal";
 import { GiftModal } from "./GiftModal";
 import { RelocationModal } from "./RelocationModal";
@@ -75,11 +77,14 @@ function EventList({ events, updateEvent, updateEventMulti, removeEvent, current
           ) : (
             <><input type="number" value={e.age} min={currentAge} max={retirementAge} step={1} onChange={ev => updateEvent(e.id, "age", Number(ev.target.value))} className="w-14 rounded border px-1.5 py-1 text-xs" /><span className="text-[10px] text-gray-400">歳</span></>
           )}
-          {!e.marketCrashParams && !e.deathParams && !e.insuranceParams && !e.giftParams && (<>
+          {!e.marketCrashParams && !e.deathParams && !e.insuranceParams && !e.giftParams && !e.privatePensionParams && (<>
             <input type="number" value={e.annualCostMan} step={5} onChange={ev => updateEvent(e.id, "annualCostMan", Number(ev.target.value))} className="w-16 rounded border px-1.5 py-1 text-xs" />
             <span className="text-[10px] text-gray-400">万/年</span>
           </>)}
           {e.durationYears > 0 && !e.marketCrashParams && (<><input type="number" value={e.durationYears} min={0} step={1} onChange={ev => updateEvent(e.id, "durationYears", Number(ev.target.value))} className="w-12 rounded border px-1.5 py-1 text-xs" /><span className="text-[10px] text-gray-400">年</span></>)}
+          {["car","rent","nursing","travel","custom"].includes(e.type) && updateEventMulti && (
+            <Inp label="毎" value={e.intervalYears ?? 1} onChange={v => updateEventMulti(e.id, { intervalYears: v <= 1 ? undefined : v })} unit="年" w="w-8" step={1} min={1} max={20} />
+          )}
           {e.marketCrashParams && <span className="text-[10px] text-gray-400">({e.durationYears}年)</span>}
           {hasChildren && isCollapsed && <span className="text-[10px] text-gray-400">({children.length}件 計{totalChildCost}万)</span>}
           <div className="flex items-center gap-1 ml-auto">
@@ -87,6 +92,35 @@ function EventList({ events, updateEvent, updateEventMulti, removeEvent, current
             <button onClick={() => removeEvent(e.id)} className="text-[10px] text-gray-300 hover:text-red-500">×</button>
           </div>
         </div>
+        {["car","rent","nursing","travel","custom","pension_private"].includes(e.type) && !isDisabled && updateEventMulti && (
+          <details className="ml-4 text-[10px] text-gray-400">
+            <summary className="cursor-pointer hover:text-gray-600 select-none py-0.5">
+              死亡後の取扱い{((e.afterDeathRule?.selfDeath && e.afterDeathRule.selfDeath !== "continue") || (e.afterDeathRule?.spouseDeath && e.afterDeathRule.spouseDeath !== "continue")) ? " ●" : ""}
+            </summary>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 pl-2 pb-1">
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500">本人万一:</span>
+                <Btns options={[{value:"continue" as const,label:"継続"},{value:"stop" as const,label:"停止"},{value:"reduce" as const,label:"減額"}]}
+                  value={e.afterDeathRule?.selfDeath ?? "continue"}
+                  onChange={v => { const r = e.afterDeathRule || { selfDeath: "continue" as const, spouseDeath: "continue" as const }; updateEventMulti(e.id, { afterDeathRule: { ...r, selfDeath: v }}); }} />
+                {e.afterDeathRule?.selfDeath === "reduce" && (
+                  <Inp label="" value={e.afterDeathRule?.selfDeathReducePct ?? 50} unit="%" w="w-12" step={10} min={0} max={100}
+                    onChange={v => updateEventMulti(e.id, { afterDeathRule: { ...e.afterDeathRule!, selfDeathReducePct: v }})} />
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500">配偶者万一:</span>
+                <Btns options={[{value:"continue" as const,label:"継続"},{value:"stop" as const,label:"停止"},{value:"reduce" as const,label:"減額"}]}
+                  value={e.afterDeathRule?.spouseDeath ?? "continue"}
+                  onChange={v => { const r = e.afterDeathRule || { selfDeath: "continue" as const, spouseDeath: "continue" as const }; updateEventMulti(e.id, { afterDeathRule: { ...r, spouseDeath: v }}); }} />
+                {e.afterDeathRule?.spouseDeath === "reduce" && (
+                  <Inp label="" value={e.afterDeathRule?.spouseDeathReducePct ?? 50} unit="%" w="w-12" step={10} min={0} max={100}
+                    onChange={v => updateEventMulti(e.id, { afterDeathRule: { ...e.afterDeathRule!, spouseDeathReducePct: v }})} />
+                )}
+              </div>
+            </div>
+          </details>
+        )}
         {hasChildren && !isCollapsed && children.map(c => renderEvent(c, true, isDisabled))}
       </div>
     );
@@ -166,7 +200,7 @@ export function EventSection({ scenario, onChange, currentAge, retirementAge, ba
   const events = scenario.events || [];
   const baseEvents = (isLinked && baseScenario) ? (baseScenario.events || []) : [];
   const excludedIds = scenario.excludedBaseEventIds || [];
-  type ModalType = "child" | "property" | "car" | "death" | "insurance" | "gift" | "relocation" | "crash" | null;
+  type ModalType = "child" | "property" | "car" | "death" | "insurance" | "gift" | "relocation" | "crash" | "pension_private" | null;
   const [openModal, setOpenModal] = useState<ModalType>(null);
   const [editingEvent, setEditingEvent] = useState<LifeEvent | null>(null);
   const [editingChildEvents, setEditingChildEvents] = useState<LifeEvent[]>([]);
@@ -215,7 +249,7 @@ export function EventSection({ scenario, onChange, currentAge, retirementAge, ba
       <div className="mb-1.5 flex flex-wrap gap-1">
         {Object.entries(EVENT_TYPES).filter(([k]) => k !== "education" && k !== "marriage" && k !== "rent" && k !== "property" && k !== "relocation").map(([k, v]) => (
           <button key={k} onClick={() => {
-            if (["child", "property", "car", "death", "insurance", "gift", "relocation", "crash"].includes(k)) { openModalFor(k as ModalType); }
+            if (["child", "property", "car", "death", "insurance", "gift", "relocation", "crash", "pension_private"].includes(k)) { openModalFor(k as ModalType); }
             else addSimpleEvent(k);
           }} className="rounded border bg-white px-1.5 py-0.5 text-[10px] hover:bg-blue-50 hover:border-blue-300">{v.icon} {v.label}</button>
         ))}
@@ -227,6 +261,7 @@ export function EventSection({ scenario, onChange, currentAge, retirementAge, ba
       <CarModal isOpen={openModal === "car"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <DeathModal isOpen={openModal === "death"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <InsuranceModal isOpen={openModal === "insurance"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
+      <PrivatePensionModal isOpen={openModal === "pension_private"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <CrashModal isOpen={openModal === "crash"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} defaultRR={defaultRR} />
       <GiftModal isOpen={openModal === "gift"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent} />
       <RelocationModal isOpen={openModal === "relocation"} onClose={closeModal} onSave={modalSave} currentAge={currentAge} retirementAge={retirementAge} existingEvent={editingEvent}

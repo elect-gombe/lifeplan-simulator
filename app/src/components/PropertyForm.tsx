@@ -227,7 +227,18 @@ function PropertyFormInputs({ pp, u, purchaseAge, onPurchaseAgeChange }: {
                   className={`rounded px-1.5 py-0.5 text-[10px] ${(pp.deductionTarget || "self") === v ? "bg-green-600 text-white" : "bg-gray-100"}`}>
                   {v === "self" ? "本人" : v === "spouse" ? "配偶者" : "両方"}</button>)}
               </div>}
-              {!isPair && pp.hasLoanDeduction && <div className="text-[9px] text-gray-400">単独ローンは名義人のみ</div>}
+              {pp.hasLoanDeduction && (
+                <div className="flex flex-wrap gap-1 text-[9px]">
+                  <span className="text-gray-500">認定種別:</span>
+                  {([["certified","認定(5000万/13年)"],["zeh","ZEH(4500万/13年)"],["advanced","省エネ(3500万/13年)"],["standard","一般(3000万/10年)"]] as const).map(([val, label]) => (
+                    <button key={val} onClick={() => u({ certifiedType: pp.certifiedType === val ? undefined : val })}
+                      className={`rounded px-1 py-0.5 ${pp.certifiedType === val ? "bg-green-600 text-white" : "bg-gray-100 text-gray-500"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!isPair && pp.hasLoanDeduction && <div className="text-[9px] text-gray-400">未選択=デフォルト（認定長期優良住宅扱い）</div>}
             </div>
           </>;
         })()}

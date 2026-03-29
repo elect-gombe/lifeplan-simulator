@@ -3,7 +3,7 @@ import { fmtMan } from "../lib/format";
 import { EVENT_TYPES, resolveEventAge } from "../lib/types";
 import type { ScenarioResult, LifeEvent, EventYearCost, HousingPhase, YearResult } from "../lib/types";
 import { EXPENSE_CATS, type ExpenseCategory } from "./IncomeExpenseChart";
-import { buildLoanSchedule } from "../lib/calc";
+import { buildLoanSchedule, resolveScenarioField } from "../lib/calc";
 import { HousingPhaseBar } from "./HousingPhaseBar";
 
 const COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
@@ -142,7 +142,7 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
     if (selIdx > 0 && s0.linkedToBase && baseScenario?.housingTimeline?.length) return baseScenario.housingTimeline;
     return undefined;
   })();
-  const simEndAge = s0.simEndAge ?? 85;
+  const simEndAge = resolveScenarioField(s0, selIdx > 0 ? baseScenario : null, "simEndAge") ?? 85;
 
   // Build visible events: grouped by type (子供→住宅→車→保険→その他), then by age within group
   // If housingTimeline is active, filter out rent/property/relocation (replaced by housing phases)

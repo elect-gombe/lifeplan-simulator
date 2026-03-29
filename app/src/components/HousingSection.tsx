@@ -4,7 +4,7 @@ import { Section } from "./Section";
 import { Modal } from "./ui";
 import { PropertyModal } from "./PropertyModal";
 import { HousingPhaseBar } from "./HousingPhaseBar";
-import { buildLoanSchedule } from "../lib/calc";
+import { buildLoanSchedule, resolveScenarioField } from "../lib/calc";
 import { calcPropertyCapitalGainsTax } from "../lib/tax";
 
 // ===== Housing Timeline Section =====
@@ -38,11 +38,11 @@ export function HousingSection({ s, onChange, currentAge, retirementAge, open, o
     loanStructure: "single", pairRatio: 50, deductionTarget: "self", danshinTarget: "self",
   };
 
+  const effectiveHousingTimeline = resolveScenarioField(s, linked ? baseScenario : null, "housingTimeline");
   const phases: HousingPhase[] = useMemo(() => {
-    if (s.housingTimeline?.length) return s.housingTimeline;
-    if (inheritedFromBase && baseScenario?.housingTimeline) return baseScenario.housingTimeline;
+    if (effectiveHousingTimeline?.length) return effectiveHousingTimeline;
     return [{ startAge: currentAge, type: "rent" as const, rentMonthlyMan: 10 }];
-  }, [s.housingTimeline, inheritedFromBase, baseScenario?.housingTimeline, currentAge]);
+  }, [effectiveHousingTimeline, currentAge]);
 
   const setPhases = (p: HousingPhase[]) => onChange({ ...s, housingTimeline: p });
   const updatePhase = (i: number, patch: Partial<HousingPhase>) => { const np = [...phases]; np[i] = { ...np[i], ...patch }; setPhases(np); };
@@ -56,7 +56,7 @@ export function HousingSection({ s, onChange, currentAge, retirementAge, open, o
     setPhases(result.length ? result : [{ startAge: currentAge, type: "rent", rentMonthlyMan: 10 }]);
   };
 
-  const simEnd = s.simEndAge ?? 85;
+  const simEnd = resolveScenarioField(s, linked ? baseScenario : null, "simEndAge") ?? 85;
   const phaseEnd = (i: number) => i < phases.length - 1 ? phases[i + 1].startAge : simEnd;
   const isManaged = !!s.housingTimeline;
   const isReadOnly = inheritedFromBase && !isManaged;

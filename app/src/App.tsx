@@ -12,6 +12,7 @@ import type { GraphFn } from "./components/TaxDetailModal";
 import { TaxRateCharts } from "./components/TaxRateChart";
 import { IncomeExpenseCharts } from "./components/IncomeExpenseChart";
 import { generateReport, generateAnalysisPrompt } from "./lib/report";
+import { SetupWizard } from "./components/SetupWizard";
 
 const STORAGE_KEY = "asset-sim-state-v1";
 
@@ -160,7 +161,7 @@ function importJSON(file: File): Promise<SavedState | null> {
   });
 }
 
-function mkScenario(id: number): Scenario {
+export function mkScenario(id: number): Scenario {
   const isBase = id === 0;
   const isB = id === 1;
   return {
@@ -169,19 +170,19 @@ function mkScenario(id: number): Scenario {
     currentAssetsMan: 500,
     incomeKF: isBase ? [{ age: 30, value: 700 }] : [],
     expenseKF: isBase ? [{ age: 30, value: 15 }] : [],
-    dcTotalKF: [{ age: 30, value: isB ? 35000 : 55000 }],
-    companyDCKF: [{ age: 30, value: 1000 }],
-    idecoKF: [{ age: 30, value: isB ? 20000 : 0 }],
+    dcTotalKF: isBase ? [{ age: 30, value: 55000 }] : [],
+    companyDCKF: isBase ? [{ age: 30, value: 0 }] : [],
+    idecoKF: isBase ? [{ age: 30, value: 0 }] : [],
     salaryGrowthRate: 2,
     events: [], excludedBaseEventIds: [],
-    housingTimeline: isBase ? [{ startAge: 30, type: "rent", rentMonthlyMan: 10 }] : undefined, // Bはundefined=Aにリンク
+    housingTimeline: isBase ? [{ startAge: 30, type: "rent", rentMonthlyMan: 10 }] : undefined,
     linkedToBase: !isBase,
-    overrideTracks: isBase ? [] : [...DEFAULT_OVERRIDE_TRACKS],
+    overrideTracks: [],
     years: 35, hasFurusato: true,
     dependentDeductionHolder: "self",
     pensionStartAge: 65, pensionWorkStartAge: 22,
-    dcReceiveMethod: isBase ? DEFAULT_DC_RECEIVE_METHOD : undefined as any, // B: undefined=Aにリンク
-    spouse: { enabled: false, currentAge: 28, retirementAge: 65, incomeKF: [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true, pensionStartAge: 65, pensionWorkStartAge: 22 },
+    dcReceiveMethod: isBase ? DEFAULT_DC_RECEIVE_METHOD : undefined as any,
+    spouse: { enabled: isBase, currentAge: 28, retirementAge: 65, incomeKF: isBase ? [{ age: 28, value: 500 }] : [], expenseKF: [], dcTotalKF: [], companyDCKF: [], idecoKF: [], salaryGrowthRate: 2, sirPct: 15.75, hasFurusato: true, pensionStartAge: 65, pensionWorkStartAge: 22 },
     nisa: { enabled: false, accounts: 2, annualLimitMan: 360, lifetimeLimitMan: 1800, },
     balancePolicy: { cashReserveMonths: 6, nisaPriority: true },
   };
@@ -290,6 +291,7 @@ export default function App() {
   const [jsonText, setJsonText] = useState("");
   const [copied, setCopied] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
+  const [showWizard, setShowWizard] = useState(() => !saved && !window.location.hash);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // URLハッシュからデータを読み込む（初回のみ）
@@ -462,12 +464,31 @@ export default function App() {
 
   const scenarioGridClass = scenarios.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2";
 
+  const isInitialState = s0 &&
+    s0.events.filter(e => !e.parentId).length === 0 &&
+    s0.currentAssetsMan === 500 &&
+    s0.incomeKF.length === 1 && s0.incomeKF[0].value === 700;
+  const wizardLabel = isInitialState ? "はじめる" : "ウィザード";
+
   return (
     <div className="flex p-3 text-gray-900">
+      {showWizard && (
+        <SetupWizard
+          onComplete={(s) => { updS(0, s); setShowWizard(false); }}
+          onClose={() => setShowWizard(false)}
+          calcParams={calcParams}
+          base={base}
+          initialScenario={s0}
+        />
+      )}
       <div className="flex flex-col gap-3 max-w-6xl w-full shrink-0">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold">FP計算</h1>
           <div className="flex items-center gap-2">
+            <button onClick={() => setShowWizard(true)}
+              className={`rounded px-3 py-1 text-xs font-bold text-white ${isInitialState ? "bg-green-600 hover:bg-green-700" : "bg-gray-400 hover:bg-gray-500"}`}>
+              {wizardLabel}
+            </button>
             <span className={`text-[10px] tabular-nums ${urlLength > 4096 ? "text-red-600 font-bold" : urlLength > 3072 ? "text-amber-600" : "text-gray-400"}`}>
               URL {urlLength.toLocaleString()}/4,096 ({Math.round(urlLength / 4096 * 100)}%){urlLength > 4096 ? " ⚠️超過" : ""}
             </span>
