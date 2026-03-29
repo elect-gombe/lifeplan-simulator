@@ -403,6 +403,7 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
         durationYears: s.toChildAge - s.fromChildAge,
         parentId,
         ageOffset: s.fromChildAge,
+        isPrivate: s.variant === "private",
       });
     }
     if (weddingSupportEnabled && weddingSupportMan > 0) {

@@ -497,6 +497,10 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
               </>}
               {yrs.some(yr => yr && yr.childAllowance > 0) &&
                 <R l="児童手当" hint="0-2歳:1.5万/月 3-18歳:1万/月 第3子以降:3万/月" graphFn={yr => yr.childAllowance} fn={household(yr => yr.childAllowance)} />}
+              {yrs.some(yr => yr && yr.tashiWaiver > 0) &&
+                <R l="多子世帯授業料減免" hint="扶養3人以上で大学在学中の子の授業料を減免（国公立54万/私立70万+入学金）" graphFn={yr => yr.tashiWaiver} fn={household(yr => yr.tashiWaiver)} />}
+              {yrs.some(yr => yr && yr.hsSupport > 0) &&
+                <R l="高校就学支援金" hint="国公立11.9万/年 私立45.7万/年（所得制限なし）" graphFn={yr => yr.hsSupport} fn={household(yr => yr.hsSupport)} />}
               {/* 手取り合計 */}
               <R l="手取り合計" bold bg="bg-emerald-100" hint="給与+年金−税・社保−DC+手当+保険" graphFn={yr => yr.takeHomePay} fn={(yr, s) => {
                 return s === "本人" ? Math.round(yr.takeHomePay - yr.spouse.takeHome) : s === "配偶者" ? Math.round(yr.spouse.takeHome) : Math.round(yr.takeHomePay);

@@ -3,8 +3,8 @@ import { resolveKF, isEventActive, resolveEventAge, DEFAULT_DC_RECEIVE_METHOD, D
 import { txInc, mR, fLm, calcFurusatoDonation, iTx, rTx, apTxCr, hlResidentCap, rDed, rTxC, annuityTax, estimatePublicPension, empDed, spouseDeduction, calcLifeInsuranceDeduction, calcPropertyCapitalGainsTax, calcGiftTax, publicPensionDeduction } from "./tax";
 import { calcMonthlyPaymentEqual, calcAnnualPaymentPrincipalEqual, calcMonthlyPaymentPrincipalEqual, loanBalanceAfterYears, buildLoanSchedule } from "./mortgage";
 import type { LoanScheduleEntry } from "./mortgage";
-import { DEPENDENT_DEDUCTION_GENERAL, DEPENDENT_DEDUCTION_SPECIAL, DEPENDENT_MIN_AGE, DEPENDENT_SPECIAL_MIN_AGE, DEPENDENT_SPECIAL_MAX_AGE, CHILD_ALLOWANCE_MAX_AGE, dependentDeductionForChild, childAllowanceMonthly } from "./dependents";
-export { DEPENDENT_DEDUCTION_GENERAL, DEPENDENT_DEDUCTION_SPECIAL, DEPENDENT_MIN_AGE, DEPENDENT_SPECIAL_MIN_AGE, DEPENDENT_SPECIAL_MAX_AGE, CHILD_ALLOWANCE_MAX_AGE, dependentDeductionForChild, childAllowanceMonthly } from "./dependents";
+import { DEPENDENT_DEDUCTION_GENERAL, DEPENDENT_DEDUCTION_SPECIAL, DEPENDENT_MIN_AGE, DEPENDENT_SPECIAL_MIN_AGE, DEPENDENT_SPECIAL_MAX_AGE, CHILD_ALLOWANCE_MAX_AGE, dependentDeductionForChild, childAllowanceMonthly, tashiTuitionWaiver, UNIVERSITY_AGE_FROM, UNIVERSITY_AGE_TO, highSchoolSupport, HIGH_SCHOOL_AGE_FROM, HIGH_SCHOOL_AGE_TO } from "./dependents";
+export { DEPENDENT_DEDUCTION_GENERAL, DEPENDENT_DEDUCTION_SPECIAL, DEPENDENT_MIN_AGE, DEPENDENT_SPECIAL_MIN_AGE, DEPENDENT_SPECIAL_MAX_AGE, CHILD_ALLOWANCE_MAX_AGE, dependentDeductionForChild, childAllowanceMonthly, tashiTuitionWaiver, UNIVERSITY_AGE_FROM, UNIVERSITY_AGE_TO, highSchoolSupport, HIGH_SCHOOL_AGE_FROM, HIGH_SCHOOL_AGE_TO } from "./dependents";
 export { calcMonthlyPaymentEqual, loanBalanceAfterYears, buildLoanSchedule, calcAnnualPaymentPrincipalEqual, calcMonthlyPaymentPrincipalEqual } from "./mortgage";
 export type { LoanScheduleEntry } from "./mortgage";
 import { calcSurvivorPension, PENSION_RATE_PER_MILLE } from "./survivor";
@@ -833,6 +833,8 @@ interface SimConfig {
   dcRateExplicit: boolean;
   taxableRateExplicit: boolean;
   childAllowanceEnabled: boolean;        // Phase 15: 児童手当
+  tashiWaiverEnabled: boolean;           // 多子世帯授業料減免
+  hsSupportEnabled: boolean;             // 高校就学支援金
   retirementLivingExpenseMan?: number;   // Phase 16: 老後の基本生活費（万円/月）
   afterSelfDeathSpouseIncome?: Scenario["afterSelfDeathSpouseIncome"]; // Phase 10
   nhsSettings?: Scenario["nhsSettings"]; // Phase 9: 国民健康保険料率詳細設定
@@ -1063,6 +1065,8 @@ function resolveSimConfig(s: Scenario, base: BaseResult, params: CalcParams, bas
     dcRateExplicit: s.dcReturnRate != null,
     taxableRateExplicit: s.taxableReturnRate != null,
     childAllowanceEnabled: s.childAllowanceEnabled !== false,
+    tashiWaiverEnabled: s.tashiWaiverEnabled !== false,
+    hsSupportEnabled: s.hsSupportEnabled !== false,
     retirementLivingExpenseMan: s.retirementLivingExpenseMan,
     afterSelfDeathSpouseIncome: s.afterSelfDeathSpouseIncome,
     nhsSettings: s.nhsSettings,
@@ -1075,6 +1079,8 @@ interface DeductionInfo {
   childEvents: LifeEvent[];
   dependentDeductionTotal: number;
   childAllowance: number;
+  tashiWaiver: number;
+  hsSupport: number;
   selfDepDed: number;
   spouseDepDed: number;
   preSpouseInsPremium: number;
@@ -1105,6 +1111,49 @@ function phaseDeductions(ctx: YearContext, config: SimConfig, ageInfo: AgeEventI
     });
   }
 
+  // 多子世帯授業料減免
+  let tashiWaiver = 0;
+  if (config.tashiWaiverEnabled) {
+    const independenceAge = config.livingExpenseRules?.childIndependenceAge ?? 22;
+    const dependentCount = childEvents.filter(ce => {
+      const childAge = age - resolveEventAge(ce, events);
+      return childAge >= 0 && childAge < independenceAge;
+    }).length;
+    if (dependentCount >= 3) {
+      for (const ce of childEvents) {
+        const childBirthAge = resolveEventAge(ce, events);
+        const childAge = age - childBirthAge;
+        if (childAge < UNIVERSITY_AGE_FROM || childAge >= UNIVERSITY_AGE_TO) continue;
+        // 大学在学中の子のサブイベントを探して isPrivate を取得
+        const eduSub = events.find(e =>
+          e.parentId === ce.id && e.type === "education" &&
+          isEventActive(e, age, events) &&
+          (e.ageOffset !== undefined ? e.ageOffset >= UNIVERSITY_AGE_FROM : false)
+        );
+        const isPrivate = eduSub ? (eduSub.isPrivate ?? eduSub.label.includes("私立")) : false;
+        const isFirstYear = childAge === UNIVERSITY_AGE_FROM;
+        tashiWaiver += tashiTuitionWaiver(childAge, dependentCount, isPrivate, isFirstYear);
+      }
+    }
+  }
+
+  // 高校就学支援金
+  let hsSupport = 0;
+  if (config.hsSupportEnabled) {
+    for (const ce of childEvents) {
+      const childBirthAge = resolveEventAge(ce, events);
+      const childAge = age - childBirthAge;
+      if (childAge < HIGH_SCHOOL_AGE_FROM || childAge >= HIGH_SCHOOL_AGE_TO) continue;
+      const eduSub = events.find(e =>
+        e.parentId === ce.id && e.type === "education" &&
+        isEventActive(e, age, events) &&
+        (e.ageOffset !== undefined ? e.ageOffset >= HIGH_SCHOOL_AGE_FROM && e.ageOffset < HIGH_SCHOOL_AGE_TO : false)
+      );
+      const isPrivate = eduSub ? (eduSub.isPrivate ?? eduSub.label.includes("私立")) : false;
+      hsSupport += highSchoolSupport(childAge, isPrivate);
+    }
+  }
+
   let depHolder: "self" | "spouse" = effectiveDepHolder || "self";
   if (depHolder === "self" && isSelfDead && !isSpouseDead) depHolder = "spouse";
   if (depHolder === "spouse" && isSpouseDead && !isSelfDead) depHolder = "self";
@@ -1116,7 +1165,7 @@ function phaseDeductions(ctx: YearContext, config: SimConfig, ageInfo: AgeEventI
   const preSpouseHLDed = prescanHousingLoanDeduction("spouse", events, age, isEffDisabled);
 
   return {
-    childEvents, dependentDeductionTotal, childAllowance,
+    childEvents, dependentDeductionTotal, childAllowance, tashiWaiver, hsSupport,
     selfDepDed, spouseDepDed,
     preSpouseInsPremium, preSpouseLifeInsDed, preSpouseHLDed,
   };
@@ -1606,7 +1655,7 @@ function assembleYearResult(
   const { inheritanceTax, inheritanceEstate, crashLoss, crashDetail } = deathResult;
   const { nisaContribution, selfNISAContribution, spouseNISAContribution, taxableContribution, nisaWithdrawal, taxableWithdrawal } = rebalance;
   const { dcReceiveTax, selfDCReceiveTax, spouseDCReceiveTax, selfDCReceiveLumpSum, spouseDCReceiveLumpSum, selfDCReceiveAnnuityAnnual, spouseDCReceiveAnnuityAnnual, selfDCRetirementDeduction, spouseDCRetirementDeduction } = dcReception;
-  const { childEvents, dependentDeductionTotal, childAllowance, selfDepDed, spouseDepDed } = dedInfo;
+  const { childEvents, dependentDeductionTotal, childAllowance, tashiWaiver, hsSupport, selfDepDed, spouseDepDed } = dedInfo;
 
   const taxableGain = Math.max(state.cumulativeTaxable - state.cumulativeTaxableCost, 0);
   const totalNISA = state.selfNISAAsset + state.spouseNISAAsset;
@@ -1629,7 +1678,7 @@ function assembleYearResult(
     pensionLossAnnual, pensionTax, pensionReduction, survivorIncome,
     survivorBasicPension, survivorEmployeePension, survivorWidowSupplement, survivorIncomeProtection,
     loanBalance,
-    childCount: childEvents.length, dependentDeduction: dependentDeductionTotal, childAllowance,
+    childCount: childEvents.length, dependentDeduction: dependentDeductionTotal, childAllowance, tashiWaiver, hsSupport,
     nisaContribution, nisaWithdrawal, nisaAsset: totalNISA,
     nisaGain: totalNISA - state.selfNISACostBasis - state.spouseNISACostBasis,
     taxableContribution, taxableWithdrawal, taxableAsset: state.cumulativeTaxable, taxableGain,
@@ -2456,7 +2505,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     }
 
     const dedInfo = phaseDeductions(ctx, config, ageInfo);
-    const { childEvents, dependentDeductionTotal, childAllowance, selfDepDed, spouseDepDed, preSpouseLifeInsDed, preSpouseHLDed } = dedInfo;
+    const { childEvents, dependentDeductionTotal, childAllowance, tashiWaiver, hsSupport, selfDepDed, spouseDepDed, preSpouseLifeInsDed, preSpouseHLDed } = dedInfo;
 
     // Spouse income (same framework as main person)
     let spouseTaxResult: MemberTaxResult = ZERO_MEMBER_TAX;
@@ -2497,7 +2546,7 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
     }
 
     const ecResult = phaseEventCosts(ctx, config, ageInfo);
-    const {
+    let {
       eventOngoing, eventOnetime, eventCostBreakdown,
       baseLivingExpense, totalExpense,
       insurancePremiumTotal, insurancePremiumSelf, insurancePremiumSpouse, insurancePayoutTotal,
@@ -2506,6 +2555,20 @@ export function computeScenario(s: Scenario, base: BaseResult, params: CalcParam
       yearHousingLoanDed, yearHousingLoanDedSpouse,
       activeEvts, propertyFixedCostEvts,
     } = ecResult;
+
+    // 多子世帯授業料減免を教育費から差し引く
+    if (tashiWaiver > 0) {
+      eventCostBreakdown.push({ label: "多子世帯授業料減免", icon: "🎓", color: "#10b981", amount: -tashiWaiver });
+      eventOngoing -= tashiWaiver;
+      totalExpense -= tashiWaiver;
+    }
+
+    // 高校就学支援金を教育費から差し引く
+    if (hsSupport > 0) {
+      eventCostBreakdown.push({ label: "高校就学支援金", icon: "🎓", color: "#10b981", amount: -hsSupport });
+      eventOngoing -= hsSupport;
+      totalExpense -= hsSupport;
+    }
 
     // Survivor income (after death) — auto-calculate survivor pension
     let survivorIncome = 0;
