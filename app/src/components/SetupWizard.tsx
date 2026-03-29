@@ -778,12 +778,12 @@ function Step5Preview({
   const result = useMemo(() => computeScenario(scenario, base, calcParams, null), [scenario, base, calcParams]);
 
   const retireIdx = result.yearResults.findIndex(yr => yr.age >= data.retirementAge);
-  const endIdx = result.yearResults.findIndex(yr => yr.age >= data.simEndAge);
+  const endIdx = result.yearResults.length - 1;
   const retireAssets = retireIdx >= 0
-    ? Math.round((result.yearResults[retireIdx].cumulativeSavings + result.yearResults[retireIdx].cumulativeDCAsset + (result.yearResults[retireIdx] as any).cumulativeNISA || 0) / 10000)
+    ? Math.round((result.yearResults[retireIdx].cumulativeSavings + result.yearResults[retireIdx].cumulativeDCAsset + result.yearResults[retireIdx].nisaAsset) / 10000)
     : null;
   const endAssets = endIdx >= 0
-    ? Math.round((result.yearResults[endIdx].cumulativeSavings + result.yearResults[endIdx].cumulativeDCAsset + ((result.yearResults[endIdx] as any).cumulativeNISA || 0)) / 10000)
+    ? Math.round((result.yearResults[endIdx].cumulativeSavings + result.yearResults[endIdx].cumulativeDCAsset + result.yearResults[endIdx].nisaAsset) / 10000)
     : null;
   const currentIncomeMan = data.incomeKF[0]?.value ?? 500;
   const pensionAnnualMan = data.incomeType === "employee"
@@ -824,6 +824,29 @@ function Step5Preview({
               : `持ち家${p.startAge}〜${end}歳`;
           }).join("→")}
         </div>
+        <div className="text-gray-600">年金: {data.pensionStartAge}歳〜 約{pensionAnnualMan}万円/年{data.hasSpouse ? `、配偶者${data.spousePensionStartAge}歳〜` : ""}</div>
+        {(data.dcTotalKF[0]?.value > 0 || data.idecoKF[0]?.value > 0) && (
+          <div className="text-gray-600">
+            DC/iDeCo: {[
+              data.dcTotalKF[0]?.value > 0 && `企業DC ${data.dcTotalKF[0].value.toLocaleString()}円/月`,
+              data.idecoKF[0]?.value > 0 && `iDeCo ${data.idecoKF[0].value.toLocaleString()}円/月`,
+            ].filter(Boolean).join("、")}（{data.dcReceiveMethod === "lump" ? "一括" : data.dcReceiveMethod === "annuity" ? "年金" : "併用"}受取）
+          </div>
+        )}
+        {data.nisaEnabled && (
+          <div className="text-gray-600">NISA: 年間{data.nisaAnnualLimitMan}万円×{data.nisaAccounts}口座</div>
+        )}
+        {(data.insuranceEvents.length > 0 || data.carEvents.length > 0) && (
+          <div className="text-gray-600">
+            {[
+              data.insuranceEvents.length > 0 && `保険${data.insuranceEvents.length}件`,
+              data.carEvents.length > 0 && `車${data.carEvents.length}台`,
+            ].filter(Boolean).join("、")}
+          </div>
+        )}
+        {(data.hasFurusato || data.spouseHasFurusato) && (
+          <div className="text-gray-600">ふるさと納税: {[data.hasFurusato && "本人", data.hasSpouse && data.spouseHasFurusato && "配偶者"].filter(Boolean).join("・")}</div>
+        )}
       </div>
 
       {/* プレビュー */}

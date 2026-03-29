@@ -246,6 +246,7 @@ export interface LifeEvent {
     spouseDeathReducePct?: number;
   };
   disabled?: boolean;  // true=計算から除外（UIではグレーアウト表示）
+  isPrivate?: boolean; // 教育サブイベント: 私立か（多子世帯減免の上限判定に使用）
 }
 
 // Computed cost breakdown for a single year from a structured event
@@ -349,6 +350,8 @@ export interface Scenario {
   returnRateKF?: Keyframe[];       // 年齢別の全体利回り（%）。設定時はrr/dcReturnRate等のデフォルトより優先
   // Phase 15: 児童手当
   childAllowanceEnabled?: boolean; // 児童手当を考慮するか（デフォルト true）
+  tashiWaiverEnabled?: boolean;    // 多子世帯授業料減免を考慮するか（デフォルト true）
+  hsSupportEnabled?: boolean;      // 高校就学支援金を考慮するか（デフォルト true）
   // Phase 16: 老後の基本生活費
   retirementLivingExpenseMan?: number; // 老後の基本生活費（万円/月）。設定時はpensionStartAge以降に適用
   // Phase 10: 万一後の配偶者収入見直し
@@ -480,6 +483,8 @@ export interface YearResult {
   childCount: number;
   dependentDeduction: number;  // 扶養控除合計（円）
   childAllowance: number;     // 児童手当合計（円/年）
+  tashiWaiver: number;        // 多子世帯授業料減免合計（円/年）
+  hsSupport: number;          // 高校就学支援金合計（円/年）
   // 公的年金・遺族年金
   pensionTax: number;           // 年金にかかる税
   pensionReduction: number;     // 在職老齢年金の減額分(年額)

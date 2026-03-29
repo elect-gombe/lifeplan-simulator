@@ -91,6 +91,16 @@ export function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario, o
               onChange={e => onChange({ ...s, childAllowanceEnabled: e.target.checked || undefined })} />
             <span className="text-gray-500 text-[10px]">児童手当を考慮する</span>
           </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" checked={s.tashiWaiverEnabled !== false}
+              onChange={e => onChange({ ...s, tashiWaiverEnabled: e.target.checked || undefined })} />
+            <span className="text-gray-500 text-[10px]">多子世帯授業料減免</span>
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" checked={s.hsSupportEnabled !== false}
+              onChange={e => onChange({ ...s, hsSupportEnabled: e.target.checked || undefined })} />
+            <span className="text-gray-500 text-[10px]">高校就学支援金</span>
+          </label>
           <Inp label="老後生活費" value={s.retirementLivingExpenseMan ?? 0} onChange={v => onChange({ ...s, retirementLivingExpenseMan: v || undefined })} unit="万/月(0=KF)" w="w-12" step={1} min={0} />
         </div>
         {/* Phase 7: 必要保障額分析設定 */}
