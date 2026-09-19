@@ -28,8 +28,8 @@ function sortEventsByType(events: LifeEvent[], allEvents?: LifeEvent[]): LifeEve
 // ===== Collapsible Event List =====
 function EventList({ events, updateEvent, updateEventMulti, removeEvent, currentAge, retirementAge, label, onEdit, onEditChild }: {
   events: LifeEvent[];
-  updateEvent: (id: number, f: string, v: any) => void;
-  updateEventMulti?: (id: number, patch: Record<string, any>) => void;
+  updateEvent: <K extends keyof LifeEvent>(id: number, f: K, v: LifeEvent[K]) => void;
+  updateEventMulti?: (id: number, patch: Partial<LifeEvent>) => void;
   removeEvent: (id: number) => void;
   currentAge: number; retirementAge: number;
   label?: string;
@@ -57,7 +57,7 @@ function EventList({ events, updateEvent, updateEventMulti, removeEvent, current
           {hasChildren && <button onClick={() => toggleCollapse(e.id)} className="text-[10px] text-gray-400 w-4">{isCollapsed ? "▶" : "▼"}</button>}
           <span style={{ color: et.color }}>{et.icon}</span>
           {e.type === "child" && !e.parentId && onEditChild && <button onClick={() => onEditChild(e)} className="text-[10px] rounded px-1 py-0.5 bg-amber-100 text-amber-600">✏️</button>}
-          {et.paramsKey && (e as any)[et.paramsKey] && onEdit && <button onClick={() => onEdit(e)} className={`text-[10px] rounded px-1 py-0.5 ${et.editBtnClass}`}>✏️</button>}
+          {et.paramsKey && e[et.paramsKey] && onEdit && <button onClick={() => onEdit(e)} className={`text-[10px] rounded px-1 py-0.5 ${et.editBtnClass}`}>✏️</button>}
           <input value={e.label} onChange={ev => updateEvent(e.id, "label", ev.target.value)} className="w-28 rounded border px-1.5 py-1 text-xs" />
           {e.marketCrashParams && (
             <span className="text-[10px] text-gray-500">-{e.marketCrashParams.dropRate}% {e.marketCrashParams.target === "all" ? "全口座" : e.marketCrashParams.target === "nisa" ? "NISA" : "特定"}</span>
@@ -218,8 +218,8 @@ export function EventSection({ scenario, onChange, currentAge, retirementAge, ba
   };
   const addChildEvents = (newEvts: LifeEvent[]) => setEvents([...events, ...newEvts].sort((a, b) => a.age - b.age));
   const removeEvent = (id: number) => setEvents(events.filter(e => e.id !== id && e.parentId !== id));
-  const updateEvent = (id: number, f: string, v: any) => setEvents(events.map(e => e.id === id ? { ...e, [f]: v } : e));
-  const updateEventMulti = (id: number, patch: Record<string, any>) => setEvents(events.map(e => e.id === id ? { ...e, ...patch } : e));
+  const updateEvent = <K extends keyof LifeEvent>(id: number, f: K, v: LifeEvent[K]) => setEvents(events.map(e => e.id === id ? { ...e, [f]: v } : e));
+  const updateEventMulti = (id: number, patch: Partial<LifeEvent>) => setEvents(events.map(e => e.id === id ? { ...e, ...patch } : e));
 
   const unlinkBaseEvent = (e: LifeEvent) => {
     const children = baseEvents.filter(c => c.parentId === e.id);

@@ -62,8 +62,8 @@ export function BalancePolicyEditor({ bp, onChange, currentAge, hasSpouse, readO
           {(() => {
             const order = bp.withdrawalOrder || ["taxable", "spouseNisa", "selfNisa"];
             const labels: Record<string, string> = { taxable: "特定口座", spouseNisa: "配偶者NISA", selfNisa: "本人NISA" };
-            const moveUp = (i: number) => { if (i <= 0) return; const o = [...order]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; onChange({ withdrawalOrder: o as any }); };
-            const moveDown = (i: number) => { if (i >= order.length - 1) return; const o = [...order]; [o[i], o[i + 1]] = [o[i + 1], o[i]]; onChange({ withdrawalOrder: o as any }); };
+            const moveUp = (i: number) => { if (i <= 0) return; const o = [...order]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; onChange({ withdrawalOrder: o as BalancePolicy["withdrawalOrder"] }); };
+            const moveDown = (i: number) => { if (i >= order.length - 1) return; const o = [...order]; [o[i], o[i + 1]] = [o[i + 1], o[i]]; onChange({ withdrawalOrder: o as BalancePolicy["withdrawalOrder"] }); };
             return order
               .filter(src => src !== "spouseNisa" || hasSpouse)
               .map((src, i) => (

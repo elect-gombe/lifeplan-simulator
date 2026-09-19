@@ -61,7 +61,7 @@ function SingleChart({ result, color, label, yMax, member, hoverAge, onHoverAge 
   const cumKeys = ["it", "rt", "pension", "health", "nursing", "employ", "dc"] as const;
   const cumAt = (i: number, li: number) => {
     let s = 0;
-    for (let k = 0; k <= li; k++) s += (rates[i] as any)[cumKeys[k]];
+    for (let k = 0; k <= li; k++) s += rates[i][cumKeys[k]];
     return s;
   };
 

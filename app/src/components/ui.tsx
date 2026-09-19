@@ -1,7 +1,12 @@
 import React from "react";
 import { fmt } from "../lib/format";
 
-export function Slider({ label, value, onChange, min, max, step, unit, help }: any) {
+export interface SliderProps {
+  label: React.ReactNode; value: number; onChange: (v: number) => void;
+  min: number; max: number; step?: number; unit?: string; help?: string;
+}
+
+export function Slider({ label, value, onChange, min, max, step, unit, help }: SliderProps) {
   return (
     <div className="space-y-0.5">
       <div className="flex justify-between gap-2 text-xs">
@@ -13,7 +18,12 @@ export function Slider({ label, value, onChange, min, max, step, unit, help }: a
   );
 }
 
-export function NumIn({ label, value, onChange, step, min, max, unit, help, small }: any) {
+export interface NumInProps {
+  label: React.ReactNode; value: number; onChange: (v: number) => void;
+  step?: number; min?: number; max?: number; unit?: string; help?: string; small?: boolean;
+}
+
+export function NumIn({ label, value, onChange, step, min, max, unit, help, small }: NumInProps) {
   return (
     <div>
       <label className="mb-0.5 block text-xs font-semibold">{label}{help && <span className="ml-1 cursor-help text-gray-400" title={help}>ⓘ</span>}</label>
@@ -25,7 +35,9 @@ export function NumIn({ label, value, onChange, step, min, max, unit, help, smal
   );
 }
 
-export function Tog({ label, checked, onChange }: any) {
+export interface TogProps { label: React.ReactNode; checked: boolean; onChange: (v: boolean) => void }
+
+export function Tog({ label, checked, onChange }: TogProps) {
   return (
     <label className="flex cursor-pointer items-center gap-2 text-xs">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="accent-blue-600" />
@@ -34,19 +46,57 @@ export function Tog({ label, checked, onChange }: any) {
   );
 }
 
-export function Row({ l, vs, neg, bold, bg, sub, help, formula }: any) {
+export interface RowProps {
+  l: React.ReactNode;
+  /** One cell per scenario: numbers are rendered as ¥, strings verbatim. */
+  vs: (number | string)[];
+  neg?: boolean; bold?: boolean; bg?: string; sub?: boolean; help?: string; formula?: React.ReactNode;
+}
+
+export function Row({ l, vs, neg, bold, bg, sub, help, formula }: RowProps) {
   return (
     <tr className={`${bold ? "font-bold " : ""}${bg || ""}`}>
       <td className={`break-words border border-gray-300 px-1.5 py-1 align-top text-[11px] leading-tight xl:text-xs ${sub ? "pl-3 text-gray-500" : ""}`}>
         {l}{help && <span className="ml-1 cursor-help text-gray-400" title={help}>ⓘ</span>}
         {formula && <div className="mt-0.5 text-[10px] font-normal leading-tight text-gray-400 xl:text-[11px]">{formula}</div>}
       </td>
-      {vs.map((v: any, i: number) => (
+      {vs.map((v, i) => (
         <td key={i} className={`border border-gray-300 px-1.5 py-1 text-right align-top text-[11px] leading-tight tabular-nums xl:text-xs ${neg && typeof v === "number" && v > 0 ? "text-red-600" : ""}`}>
           {typeof v === "string" ? v : `¥${fmt(v)}`}
         </td>
       ))}
     </tr>
+  );
+}
+
+/**
+ * Bare modal chrome: dimmed backdrop (click = close) + centered white panel
+ * (clicks inside don't propagate). Header/body/footer are up to the caller.
+ */
+export function ModalShell({ onClose, maxWidthClass = "max-w-lg", backdropClass, children }: {
+  onClose: () => void;
+  /** Tailwind max-width for the panel, e.g. "max-w-4xl". */
+  maxWidthClass?: string;
+  /** Override the backdrop classes when a caller needs a different scroll mode. */
+  backdropClass?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={backdropClass || "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-8"} onClick={onClose}>
+      <div className={`w-full rounded-lg bg-white shadow-xl ${maxWidthClass}`} onClick={e => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Standard modal title bar; `right` renders on the far side (e.g. a close button). */
+export function ModalHeader({ title, right }: { title: React.ReactNode; right?: React.ReactNode }) {
+  return (
+    <div className={`border-b px-4 py-3 ${right ? "flex items-center justify-between" : ""}`}>
+      <p className="text-sm font-bold">{title}</p>
+      {right}
+    </div>
   );
 }
 
@@ -56,16 +106,14 @@ export function Modal({ isOpen, onClose, title, btnClass, onSave, saveLabel, wid
 }) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-8" onClick={onClose}>
-      <div className={`w-full rounded-lg bg-white shadow-xl ${wide ? "max-w-4xl" : "max-w-lg"}`} onClick={e => e.stopPropagation()}>
-        <div className="border-b px-4 py-3"><p className="text-sm font-bold">{title}</p></div>
-        <div className="max-h-[75vh] overflow-y-auto p-4 space-y-4 text-xs">{children}</div>
-        <div className="border-t px-4 py-3 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="rounded px-4 py-1.5 text-xs text-gray-500 hover:bg-gray-100">キャンセル</button>
-          <button onClick={onSave} className={`rounded px-4 py-1.5 text-xs text-white font-bold ${btnClass || "bg-blue-600 hover:bg-blue-700"}`}>{saveLabel || "追加"}</button>
-        </div>
+    <ModalShell onClose={onClose} maxWidthClass={wide ? "max-w-4xl" : "max-w-lg"}>
+      <ModalHeader title={title} />
+      <div className="max-h-[75vh] overflow-y-auto p-4 space-y-4 text-xs">{children}</div>
+      <div className="border-t px-4 py-3 flex items-center justify-end gap-2">
+        <button onClick={onClose} className="rounded px-4 py-1.5 text-xs text-gray-500 hover:bg-gray-100">キャンセル</button>
+        <button onClick={onSave} className={`rounded px-4 py-1.5 text-xs text-white font-bold ${btnClass || "bg-blue-600 hover:bg-blue-700"}`}>{saveLabel || "追加"}</button>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -95,7 +143,9 @@ export function BarChart({ height, maxValue, unit, children }: {
   );
 }
 
-export function Sec({ children, c, colSpan }: any) {
+export interface SecProps { children: React.ReactNode; c?: string; colSpan?: number }
+
+export function Sec({ children, c, colSpan }: SecProps) {
   return (
     <tr className={`${c || "bg-gray-100"} font-semibold`}>
       <td colSpan={colSpan} className="border border-gray-300 px-2 py-1 text-xs">{children}</td>
@@ -120,7 +170,7 @@ export function Inp({ label, value, onChange, unit, w, step, min, max, disabled 
 }
 
 /** Toggle button group (2-N options) */
-export function Btns<T extends string | number>({ options, value, onChange, color, disabled }: {
+export function Btns<T extends string | number | boolean>({ options, value, onChange, color, disabled }: {
   options: { value: T; label: string }[];
   value: T; onChange: (v: T) => void;
   color?: string; disabled?: boolean;

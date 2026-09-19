@@ -2,8 +2,14 @@ import React from "react";
 import { BRACKETS } from "../lib/tax";
 import { fmt, fmtMan } from "../lib/format";
 
-export function Chart({ markers }: any) {
-  const vals = markers.map((m: any) => m.val).filter((v: number) => v > 0);
+export interface ChartMarker {
+  id: string | number; val: number; label: string; color: string;
+  thick?: number; dash?: string; opacity?: number;
+}
+
+/** Progressive tax bracket chart with vertical markers for taxable-income values. */
+export function Chart({ markers }: { markers: ChartMarker[] }) {
+  const vals = markers.map(m => m.val).filter(v => v > 0);
   if (!vals.length) return null;
   const mx = Math.max(...vals) * 1.15;
   const cW = 580, cH = 130, pL = 44, pR = 16, pT = 10, pB = 28;
@@ -29,7 +35,7 @@ export function Chart({ markers }: any) {
             <text x={xp(v)} y={pT + h + 13} textAnchor="middle" fontSize={7} fill="#94a3b8">{fmtMan(v)}</text>
           </g>
         ))}
-        {markers.map((m: any) => (
+        {markers.map(m => (
           <g key={m.id}>
             <line x1={xp(m.val)} y1={pT} x2={xp(m.val)} y2={pT + h} stroke={m.color} strokeWidth={m.thick || 1.5} strokeDasharray={m.dash || ""} opacity={m.opacity || 1} />
             <circle cx={xp(m.val)} cy={pT + h} r={2.5} fill={m.color} opacity={m.opacity || 1} />
@@ -37,7 +43,7 @@ export function Chart({ markers }: any) {
         ))}
       </svg>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
-        {markers.map((m: any) => (
+        {markers.map(m => (
           <div key={m.id} className="flex items-center gap-1">
             <svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke={m.color} strokeWidth={m.thick || 1.5} strokeDasharray={m.dash || ""} opacity={m.opacity || 1} /></svg>
             <span style={{ color: m.color, fontWeight: 600 }}>{m.label}</span>

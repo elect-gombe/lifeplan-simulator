@@ -6,6 +6,7 @@ import { PropertyModal } from "./PropertyModal";
 import { HousingPhaseBar } from "./HousingPhaseBar";
 import { buildLoanSchedule, resolveScenarioField } from "../lib/calc";
 import { calcPropertyCapitalGainsTax } from "../lib/tax";
+import type { ScenarioWithUIHints } from "../lib/scenarioFactory";
 
 // ===== Housing Timeline Section =====
 
@@ -23,14 +24,14 @@ export function HousingSection({ s, onChange, currentAge, retirementAge, open, o
 
   // External trigger to open edit modal (from timeline click)
   React.useEffect(() => {
-    const idx = (s as any)._housingEditIdx;
+    const idx = (s as ScenarioWithUIHints)._housingEditIdx;
     if (idx != null && open) {
       setEditingIdx(idx);
       // Clear the trigger
-      const { _housingEditIdx, ...clean } = s as any;
+      const { _housingEditIdx: _drop, ...clean } = s as ScenarioWithUIHints;
       onChange(clean);
     }
-  }, [(s as any)._housingEditIdx, open]);
+  }, [(s as ScenarioWithUIHints)._housingEditIdx, open]);
   const DEFAULT_PP: PropertyParams = {
     priceMan: 5000, downPaymentMan: 500, loanYears: 35, repaymentType: "equal_payment",
     rateType: "variable", fixedRate: 1.8, variableInitRate: 0.5, variableRiskRate: 1.5, variableRiseAfter: 10,

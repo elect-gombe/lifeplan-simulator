@@ -575,7 +575,7 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
               </>)}
 
               {/* ===== 退職金・相続 ===== */}
-              {yrs.some(yr => yr && (yr.dcReceiveTax > 0 || yr.dcReceiveLumpSum > 0 || yr.dcReceiveAnnuityAnnual > 0 || yr.inheritanceTax > 0 || yr.inheritanceEstate > 0)) && <>
+              {yrs.some(yr => yr && (yr.dcReceiveTax > 0 || yr.self.dcReceiveLumpSum > 0 || yr.spouse.dcReceiveLumpSum > 0 || yr.self.dcReceiveAnnuityAnnual > 0 || yr.spouse.dcReceiveAnnuityAnnual > 0 || yr.inheritanceTax > 0 || yr.inheritanceEstate > 0)) && <>
                 <S bg="bg-orange-50">■ 退職金・相続（分離課税）</S>
                 {yrs.some(yr => yr && (yr.self.dcReceiveLumpSum > 0 || yr.spouse.dcReceiveLumpSum > 0 || yr.self.dcReceiveAnnuityAnnual > 0 || yr.spouse.dcReceiveAnnuityAnnual > 0)) && <>
                   {yrs.some(yr => yr && (yr.self.dcReceiveLumpSum > 0 || yr.spouse.dcReceiveLumpSum > 0)) &&

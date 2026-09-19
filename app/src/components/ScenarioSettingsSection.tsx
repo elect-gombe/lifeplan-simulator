@@ -19,19 +19,20 @@ export function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario, o
     if (settingsLocked) {
       // Unlock: mark all settings as overridden (copy base values)
       const allKeys: SettingKey[] = ["currentAge", "retirementAge", "simEndAge", "currentAssetsMan", "selfGender", "years", "dependentDeductionHolder", "pensionStartAge", "pensionWorkStartAge", "macroSlideRate", "rr", "inflationRate"];
-      const copied: any = {};
-      for (const k of allKeys) copied[k] = baseScenario ? (baseScenario as any)[k] ?? (s as any)[k] : (s as any)[k];
+      const copied: Partial<Scenario> = {};
+      for (const k of allKeys) (copied as Record<SettingKey, unknown>)[k] = baseScenario ? baseScenario[k] ?? s[k] : s[k];
       onChange({ ...s, overrideSettings: allKeys, ...copied });
     } else {
       // Re-lock: clear overrides
       onChange({ ...s, overrideSettings: [] });
     }
   };
-  // Display value: base if locked, own if unlocked
-  const val = (key: string, fallback?: any) => {
-    if (settingsLocked && baseScenario) return (baseScenario as any)[key] ?? fallback;
-    return (s as any)[key] ?? fallback;
-  };
+  // Display value: base if locked, own if unlocked. Every caller passes a fallback,
+  // so the result is always defined.
+  function val<K extends keyof Scenario>(key: K, fallback: NonNullable<Scenario[K]>): NonNullable<Scenario[K]> {
+    if (settingsLocked && baseScenario) return baseScenario[key] ?? fallback;
+    return s[key] ?? fallback;
+  }
   const ro = settingsLocked; // read-only shorthand
 
   return (
@@ -80,7 +81,7 @@ export function ScenarioSettingsSection({ s, onChange, isLinked, baseScenario, o
           <div className="flex items-center gap-1">
             <Inp label="スライド調整率" value={val("macroSlideRate", -0.8)} onChange={v => onChange({ ...s, macroSlideRate: v })} unit="%" w="w-14" step={0.1} min={-2} max={0} disabled={ro} />
             <span className="text-[10px] text-gray-400 whitespace-nowrap" title="年金改定率 = インフレ率 + マクロスライド調整率（名目下限0%）">
-              ({val("inflationRate", defaultInflation ?? 1.5)}%{val("macroSlideRate", -0.8) >= 0 ? "+" : ""}{val("macroSlideRate", -0.8)}%={Math.max(0, (val("inflationRate", defaultInflation ?? 1.5) ?? 0) + (val("macroSlideRate", -0.8) ?? 0)).toFixed(1)}%/年)
+              ({val("inflationRate", defaultInflation ?? 1.5)}%{val("macroSlideRate", -0.8) >= 0 ? "+" : ""}{val("macroSlideRate", -0.8)}%={Math.max(0, val("inflationRate", defaultInflation ?? 1.5) + val("macroSlideRate", -0.8)).toFixed(1)}%/年)
             </span>
           </div>
         </div>

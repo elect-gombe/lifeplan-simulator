@@ -143,12 +143,15 @@ export interface MemberData {
   siParams?: SocialInsuranceParams;
 }
 
+/** Patch accepted by MemberEditor; careerHistory is edited via `extraFields` by some hosts (wizard). */
+export type MemberPatch = Partial<MemberData> & { careerHistory?: CareerPeriod[] };
+
 const DEFAULT_DC_RM = DEFAULT_DC_RECEIVE_METHOD;
 
 export function MemberEditor({ label, color, data, onUpdate, currentAge, retirementAge, extraFields, linked, readOnly, baseData, trackLinked, onToggleTrack, excludeTracks, dcLinked, onToggleDCLink, open, onToggle, enabled, onToggleEnabled, enabledLabel }: {
   label: string; color: string;
   data: MemberData;
-  onUpdate: (patch: Partial<MemberData & Record<string, any>>) => void;
+  onUpdate: (patch: MemberPatch) => void;
   currentAge: number; retirementAge: number;
   extraFields?: React.ReactNode;
   linked?: boolean; readOnly?: boolean;
@@ -175,7 +178,7 @@ export function MemberEditor({ label, color, data, onUpdate, currentAge, retirem
     let changed = false;
     for (const key of ["incomeKF", "expenseKF", "dcTotalKF", "companyDCKF", "idecoKF"] as const) {
       const orig = data[key];
-      if (orig.length > 0 && orig[0].age !== currentAge) { patch[key] = syncFirst(orig) as any; changed = true; }
+      if (orig.length > 0 && orig[0].age !== currentAge) { patch[key] = syncFirst(orig); changed = true; }
     }
     if (changed) onUpdate(patch);
   }, [currentAge]);
@@ -230,12 +233,12 @@ export function MemberEditor({ label, color, data, onUpdate, currentAge, retirem
           const isThisTrackLinked = trackLinked ? trackLinked(t.key) : false;
           return (
             <TrackRow key={t.key} track={t}
-              keyframes={(data as any)[t.key] || []}
+              keyframes={data[t.key] || []}
               onChange={(kfs) => onUpdate({ [t.key]: kfs })}
               currentAge={currentAge} retirementAge={retirementAge}
               linked={isThisTrackLinked}
               onToggleLink={onToggleTrack ? () => onToggleTrack(t.key) : undefined}
-              baseKFs={baseData ? (baseData as any)[t.key] || [] : undefined} />
+              baseKFs={baseData ? baseData[t.key] || [] : undefined} />
           );
         })}
         {/* DC/iDeCo受取方法 — 統合 */}
@@ -280,7 +283,7 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
     if (s.overrideTracks.includes(key)) {
       onChange({ ...s, overrideTracks: s.overrideTracks.filter(k => k !== key) });
     } else {
-      const baseKFs = baseScenario ? [...((baseScenario as any)[key] || [])] : [];
+      const baseKFs = baseScenario ? [...(baseScenario[key] || [])] : [];
       onChange({ ...s, overrideTracks: [...s.overrideTracks, key], [key]: baseKFs });
     }
   };
@@ -303,7 +306,7 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
       onChange({ ...s, spouseOverrideTracks: spouseOT.filter(k => k !== key) });
     } else {
       // Unlink: copy base data for this track, add to overrides
-      const baseKFs = [...((baseSp as any)[key] || [])];
+      const baseKFs = [...(baseSp[key] || [])];
       onChange({ ...s, spouseOverrideTracks: [...spouseOT, key], spouse: { ...sp, [key]: baseKFs } });
     }
   };
@@ -370,8 +373,8 @@ export function KeyframeEditor({ s, onChange, idx, currentAge, retirementAge, ba
             onChange({ ...s, dcReceiveMethod: baseScenario?.dcReceiveMethod || DEFAULT_DC_RECEIVE_METHOD });
           } else {
             // リンク復帰: undefinedでベースに追従
-            const { dcReceiveMethod: _, ...rest } = s;
-            onChange({ ...rest, dcReceiveMethod: undefined } as any);
+            // `undefined` is intentional here: it means "follow base" for linked scenarios.
+            onChange({ ...s, dcReceiveMethod: undefined as unknown as DCReceiveMethod });
           }
         } : undefined}
         open={secOpen("self")} onToggle={() => toggleSec("self")}

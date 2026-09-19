@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import type { LifeEvent } from "../lib/types";
-import { BarChart } from "./ui";
+import { BarChart, ModalShell, ModalHeader } from "./ui";
 
 export type LivingType = "home" | "rural" | "urban";
 
@@ -458,11 +458,8 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
   const effectiveChildCount = mode === "batch" ? childCount : 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-8" onClick={onClose}>
-      <div className="w-full max-w-4xl rounded-lg bg-white shadow-xl" onClick={e => e.stopPropagation()}>
-        <div className="border-b px-4 py-3">
-          <p className="text-sm font-bold">👶 子供の{isEditing ? "編集" : "追加"}</p>
-        </div>
+    <ModalShell onClose={onClose} maxWidthClass="max-w-4xl">
+        <ModalHeader title={`👶 子供の${isEditing ? "編集" : "追加"}`} />
         <div className="max-h-[75vh] overflow-y-auto p-4">
 
           {/* Mode switcher (only for new) */}
@@ -638,7 +635,6 @@ export function ChildEventModal({ isOpen, onClose, onAdd, currentAge, retirement
             {isEditing ? "更新" : "追加"}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
