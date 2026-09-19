@@ -41,7 +41,7 @@ export function rTx(ti: number): number {
 }
 
 export function txInc(g: number, opts?: TaxOpts & { dependentDeductionTotal?: number }): number {
-  const o = opts || {} as TaxOpts;
+  const o: TaxOpts & { dependentDeductionTotal?: number } = opts || { dependentsCount: 0, lifeInsuranceDeduction: 0 };
   // Use precise dependent deduction if provided, otherwise fallback to count * 380000
   const depDed = o.dependentDeductionTotal != null
     ? o.dependentDeductionTotal
