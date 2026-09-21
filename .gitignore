@@ -2,3 +2,10 @@ node_modules/
 app/dist/
 app/node_modules/
 /sim
+.playwright-mcp/
+
+# ローカルのバックアップ・ツール設定（リポジトリには入れない）
+*.tar.xz
+.mcp.json
+v2/node_modules/
+v2/dist/
