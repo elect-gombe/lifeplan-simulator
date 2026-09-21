@@ -18,7 +18,14 @@ export const LINK_GROUPS: { key: LinkGroup; label: string }[] = [
 ];
 
 const MEMBER_BASIC = ["name", "age", "sex", "employment"] as const;
-const MEMBER_INCOME = ["income", "incomeGrowthPct", "retireAge", "workStartAge", "pensionStartAge", "dc", "furusato", "severancePay"] as const;
+const MEMBER_INCOME = ["income", "incomeGrowthPct", "retireAge", "workStartAge", "pensionStartAge", "dc",
+  "socialInsurance", "furusato", "severancePay", "deathBenefit"] as const;
+
+// Member に項目を足したとき、どちらのグループにも入れ忘れると「入力できるのに連動プランでは保存されない」
+// という気づきにくい不具合になる。未割り当てが残るとこの行が型エラーになる。
+type UnassignedMemberKey = Exclude<keyof Member, (typeof MEMBER_BASIC)[number] | (typeof MEMBER_INCOME)[number]>;
+const _memberKeyCoverage: [UnassignedMemberKey] extends [never] ? true : UnassignedMemberKey = true;
+void _memberKeyCoverage;
 
 function copyMemberFields(from: Member, to: Member, keys: readonly (keyof Member)[]) {
   for (const k of keys) (to as unknown as Record<string, unknown>)[k] = (from as unknown as Record<string, unknown>)[k];

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defaultPlan, defaultMember, defaultChild, defaultHousingPhase } from "../model";
 import { resolvePlan, resolveAll, overrideGroup, relinkGroup, materialize, copyGroup } from "../link";
-import type { LinkGroup } from "../model";
+import type { LinkGroup, Plan } from "../model";
 
 function setup() {
   const base = defaultPlan({ id: "A", name: "A", self: defaultMember({ age: 40, income: [{ age: 40, value: 700 }] }), children: [defaultChild(0, 42)] });
@@ -76,5 +76,19 @@ describe("resolveAll のオブジェクト同一性", () => {
     const base2 = { ...base, endAge: base.endAge + 1 };
     const r3 = resolveAll([base2, linked, indep]);
     expect(r3[1]).not.toBe(r1[1]); expect(r3[1].endAge).toBe(base2.endAge);
+  });
+});
+
+describe("収入グループの上書きが Member の全項目を運ぶ", () => {
+  it("社会保険の加入区分と死亡退職金も上書きが効く（どのグループにも属さないと入力が消える）", () => {
+    const base = defaultPlan(); base.id = "base";
+    const linked: Plan = { ...structuredClone(defaultPlan()), id: "b", link: { baseId: "base", overrides: ["income"] as LinkGroup[] } };
+    linked.self.socialInsurance = "join";
+    linked.self.deathBenefit = 1000;
+    linked.self.severancePay = 2000; // 既に運べている項目との対比
+    const [, out] = resolveAll([base, linked]);
+    expect(out.self.severancePay).toBe(2000);
+    expect(out.self.socialInsurance).toBe("join");
+    expect(out.self.deathBenefit).toBe(1000);
   });
 });
