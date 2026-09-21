@@ -26,19 +26,21 @@ jobs:
         with:
           node-version: 24
       - name: Install
-        working-directory: app
+        working-directory: v2
         run: npm ci
       - name: Typecheck & Test
-        working-directory: app
+        working-directory: v2
         run: |
           npm run typecheck
           npm test
       - name: Build
-        working-directory: app
+        working-directory: v2
+        env:
+          VITE_BASE: /lifeplan-simulator/
         run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: app/dist
+          path: v2/dist
 
   deploy:
     needs: build
