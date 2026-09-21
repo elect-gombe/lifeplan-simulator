@@ -29,6 +29,7 @@ export function phaseCashFlow(
   propertySaleProceeds: number,
   spouseDCTotal: number,
   yearDCRate?: number, // Phase 5: age-based DC rate override
+  leaveBenefitTotal = 0, // 育児休業給付金（非課税、手取りに加算）
 ): CashFlowResult {
   const usedDCRate = yearDCRate ?? config.dcRate;
   const { cashRate } = config;
@@ -39,7 +40,7 @@ export function phaseCashFlow(
 
   const pensionTax = st.pensionIncomeTax + st.pensionResidentTax + spouseTaxResult.pensionIncomeTax + spouseTaxResult.pensionResidentTax;
 
-  const takeHomePay = st.takeHome + childAllowance + survivorIncome + spouseTaxResult.takeHome + insurancePayoutTotal;
+  const takeHomePay = st.takeHome + childAllowance + survivorIncome + spouseTaxResult.takeHome + insurancePayoutTotal + leaveBenefitTotal;
   const pensionLossAnnual = (st.selfDCContribution / 12 * PENSION_RATE_PER_MILLE) / 1000 * 12;
   const spousePensionLossAnnual = config.spouse ? (spouseTaxResult.selfDCContribution / 12 * PENSION_RATE_PER_MILLE) / 1000 * 12 : 0;
   const annualNetCashFlow = takeHomePay - totalExpense;

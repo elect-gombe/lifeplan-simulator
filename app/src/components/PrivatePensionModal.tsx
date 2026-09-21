@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { PrivatePensionParams, EventTarget } from "../lib/types";
-import { Inp, Btns } from "./ui";
+import { Inp, Btns, Check } from "./ui";
 import { EventModal, type EventModalBaseProps, type EventModalDef } from "./EventModal";
 
 type PensionType = PrivatePensionParams["pensionType"];
@@ -120,25 +120,20 @@ export function PrivatePensionModal(props: EventModalBaseProps) {
               </div>
             </div>
 
-            {/* 積立設定 */}
-            <div className="border-t pt-2">
-              <div className="text-gray-400 mb-1">積立設定（任意）</div>
-              <div className="flex flex-wrap gap-2">
-                <Inp label="月額掛金" value={pp.contributionMonthlyMan ?? 0} onChange={v => u({contributionMonthlyMan: v || undefined})} unit="万円/月" w="w-16" step={0.5} min={0} />
-                <Inp label="払込終了" value={pp.contributionEndAge ?? 60} onChange={v => u({contributionEndAge: v || undefined})} unit="歳" w="w-14" step={1} min={50} max={80} />
+            {/* 積立・税制 */}
+            <>
+              <div className="border-t pt-2">
+                <div className="text-gray-400 mb-1">積立設定（任意）</div>
+                <div className="flex flex-wrap gap-2">
+                  <Inp label="月額掛金" value={pp.contributionMonthlyMan ?? 0} onChange={v => u({ contributionMonthlyMan: v || undefined })} unit="万円/月" w="w-16" step={0.5} min={0} />
+                  <Inp label="払込終了" value={pp.contributionEndAge ?? 60} onChange={v => u({ contributionEndAge: v || undefined })} unit="歳" w="w-14" step={1} min={50} max={80} />
+                </div>
               </div>
-            </div>
-
-            {/* 税制 */}
-            <div className="border-t pt-2">
-              <div className="text-gray-400 mb-1">税制</div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={pp.isPublicPensionTaxed}
-                  onChange={e => u({isPublicPensionTaxed: e.target.checked})} />
-                <span className="text-[10px] text-gray-600">公的年金等控除の対象</span>
-                <span className="text-[9px] text-gray-400">(企業年金DB/小規模共済=対象、個人年金保険=対象外)</span>
-              </label>
-            </div>
+              <div className="border-t pt-2">
+                <div className="text-gray-400 mb-1">税制</div>
+                <Check label="公的年金等控除の対象" checked={pp.isPublicPensionTaxed} onChange={v => u({ isPublicPensionTaxed: v })} help="企業年金DB/小規模共済=対象、個人年金保険=対象外" />
+              </div>
+            </>
 
             {/* プレビュー */}
             <div className="border-t pt-2 text-[10px] text-gray-500">

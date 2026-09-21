@@ -155,9 +155,10 @@ function settingsSummary(s: Scenario, params: { rr: number; inflationRate: numbe
 function incomeTable(yrs: YearResult[]): string {
   const hasSpouse = yrs.some(yr => yr.spouse.gross > 0);
   const hasSurvivor = yrs.some(yr => yr.survivorIncome > 0 || yr.insurancePayoutTotal > 0);
+  const hasLeave = yrs.some(yr => yr.parentalLeaveBenefit > 0);
   const spH = hasSpouse ? ["配偶者給与", "配偶者課税所得", "配偶者税率", "配偶者所得税", "配偶者住民税", "配偶者社保"] : [];
   const surH = hasSurvivor ? ["遺族収入", "保険金"] : [];
-  const headers = ["年齢", "本人給与", "本人課税所得", "本人税率", "本人所得税", "本人住民税", "本人社保", ...spH, "本人年金", ...(hasSpouse ? ["配偶者年金"] : []), ...surH, "手当", "ローン控除", "手取合計"];
+  const headers = ["年齢", "本人給与", "本人課税所得", "本人税率", "本人所得税", "本人住民税", "本人社保", ...spH, "本人年金", ...(hasSpouse ? ["配偶者年金"] : []), ...surH, "手当", ...(hasLeave ? ["育休給付"] : []), "ローン控除", "手取合計"];
   const rows = yrs.map(yr => {
     const loanDed = yr.self.housingLoanDeduction + yr.spouse.housingLoanDeduction;
     const spData = hasSpouse ? [
@@ -173,7 +174,7 @@ function incomeTable(yrs: YearResult[]): string {
       ...spData,
       m(yr.self.pensionIncome), ...(hasSpouse ? [m(yr.spouse.pensionIncome)] : []),
       ...surData,
-      m(yr.childAllowance), m(loanDed), m(yr.takeHomePay),
+      m(yr.childAllowance), ...(hasLeave ? [m(yr.parentalLeaveBenefit)] : []), m(loanDed), m(yr.takeHomePay),
     ];
   });
   return "【収入・税・手取り】※各項目は本人/配偶者別に表示、手取合計は世帯合計\n" + mdTable(headers, rows);

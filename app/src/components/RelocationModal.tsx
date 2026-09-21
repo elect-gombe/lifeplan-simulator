@@ -3,7 +3,7 @@ import type { LifeEvent, RelocationParams, PropertyParams } from "../lib/types";
 import { resolveEventAge } from "../lib/types";
 import { buildLoanSchedule } from "../lib/calc";
 import { calcPropertyCapitalGainsTax } from "../lib/tax";
-import { Modal } from "./ui";
+import { Modal, NumIn, NumField, Btns, Check } from "./ui";
 import { PropertyFormWithPreview } from "./PropertyForm";
 import { DEFAULT_PROPERTY_PARAMS } from "./PropertyModal";
 import type { EventModalBaseProps } from "./EventModal";
@@ -119,23 +119,14 @@ export function RelocationModal({ isOpen, onClose, onSave, currentAge, retiremen
       {/* ヘッダー設定 */}
       <div className="grid grid-cols-3 gap-3 mb-3">
         <div>
-          <label className="block font-semibold text-gray-600 mb-1">住み替え年齢</label>
-          <input type="number" value={relocAge} min={currentAge} max={99}
-            onChange={e => handleRelocAgeChange(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
+          <NumIn label="住み替え年齢" value={relocAge} onChange={v => handleRelocAgeChange(v)} min={currentAge} max={99} unit="歳" fill />
         </div>
         <div>
-          <label className="block font-semibold text-gray-600 mb-1">引越費用（万円）</label>
-          <input type="number" value={rp.movingCostMan} step={10} min={0}
-            onChange={e => uRP({ movingCostMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
+          <NumIn label="引越費用" value={rp.movingCostMan} onChange={v => uRP({ movingCostMan: v })} step={10} min={0} unit="万円" fill />
         </div>
         <div>
           <label className="block font-semibold text-gray-600 mb-1">新居タイプ</label>
-          <div className="flex gap-2 mt-1">
-            <button onClick={() => uRP({ newHousingType: "purchase" })}
-              className={`rounded px-3 py-1 ${rp.newHousingType === "purchase" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>購入</button>
-            <button onClick={() => uRP({ newHousingType: "rent" })}
-              className={`rounded px-3 py-1 ${rp.newHousingType === "rent" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>賃貸</button>
-          </div>
+          <Btns options={[{ value: "purchase" as const, label: "購入" }, { value: "rent" as const, label: "賃貸" }]} value={rp.newHousingType} onChange={v => uRP({ newHousingType: v })} />
         </div>
       </div>
 
@@ -148,35 +139,16 @@ export function RelocationModal({ isOpen, onClose, onSave, currentAge, retiremen
           </summary>
           <div className="px-3 pb-3 space-y-2">
             {/* 売却条件 */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
-              <div className="flex items-center gap-1">
-                <span className="text-amber-700">売却価格</span>
-                <input type="number" value={salePP.salePriceMan ?? ""} step={100}
-                  placeholder={`${Math.round(saleEstimate.salePrice / 10000)}`}
-                  onChange={e => setSalePP(prev => prev ? { ...prev, salePriceMan: e.target.value ? Number(e.target.value) : undefined } : prev)}
-                  className="w-16 rounded border px-1 py-0.5" />
-                <span className="text-gray-400">万</span>
+            <>
+              <div className="flex flex-wrap items-end gap-x-3 gap-y-1 text-[10px]">
+                <NumIn label="売却価格" value={salePP.salePriceMan ?? null} step={100} min={0} unit="万" small placeholder={`${Math.round(saleEstimate.salePrice / 10000)}`} help="空欄＝購入価格×変動率で自動"
+                  onChange={v => setSalePP(prev => prev ? { ...prev, salePriceMan: v } : prev)}
+                  onClear={() => setSalePP(prev => prev ? { ...prev, salePriceMan: undefined } : prev)} />
+                <NumIn label="価値変動" value={salePP.appreciationRate ?? -1} onChange={v => setSalePP(prev => prev ? { ...prev, appreciationRate: v } : prev)} step={0.5} min={-10} max={10} unit="%/年" small />
+                <NumIn label="売却費用" value={salePP.saleCostRate ?? 4} onChange={v => setSalePP(prev => prev ? { ...prev, saleCostRate: v } : prev)} step={0.5} min={0} max={10} unit="%" small />
+                <span className="pb-1"><Check label="居住用控除" checked={salePP.saleIsResidence ?? true} onChange={v => setSalePP(prev => prev ? { ...prev, saleIsResidence: v } : prev)} accent="accent-amber-600" /></span>
               </div>
-              <div className="flex items-center gap-1">
-                <span className="text-amber-700">価値変動</span>
-                <input type="number" value={salePP.appreciationRate ?? -1} step={0.5}
-                  onChange={e => setSalePP(prev => prev ? { ...prev, appreciationRate: Number(e.target.value) } : prev)}
-                  className="w-12 rounded border px-1 py-0.5" />
-                <span className="text-gray-400">%/年</span>
-              </div>
-              <label className="flex items-center gap-1 cursor-pointer">
-                <input type="checkbox" checked={salePP.saleIsResidence ?? true}
-                  onChange={e => setSalePP(prev => prev ? { ...prev, saleIsResidence: e.target.checked } : prev)} className="accent-amber-600" />
-                <span className="text-amber-700">居住用控除</span>
-              </label>
-              <div className="flex items-center gap-1">
-                <span className="text-amber-700">売却費用</span>
-                <input type="number" value={salePP.saleCostRate ?? 4} step={0.5} min={0}
-                  onChange={e => setSalePP(prev => prev ? { ...prev, saleCostRate: Number(e.target.value) } : prev)}
-                  className="w-10 rounded border px-1 py-0.5" />
-                <span className="text-gray-400">%</span>
-              </div>
-            </div>
+            </>
 
             {/* 試算カード */}
             <div className="grid grid-cols-5 gap-1.5 text-center text-[10px]">
@@ -220,14 +192,10 @@ export function RelocationModal({ isOpen, onClose, onSave, currentAge, retiremen
           <div className="font-bold text-gray-700 text-sm">Step 2: 新居（賃貸）</div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-gray-600 mb-1">年間家賃（万円）</label>
-              <input type="number" value={rp.newRentAnnualMan ?? 120} step={10} min={0}
-                onChange={e => uRP({ newRentAnnualMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
+              <NumIn label="年間家賃" value={rp.newRentAnnualMan ?? 120} onChange={v => uRP({ newRentAnnualMan: v })} step={10} min={0} unit="万円" fill />
             </div>
             <div>
-              <label className="block font-semibold text-gray-600 mb-1">賃貸期間（年）</label>
-              <input type="number" value={rp.newRentDurationYears ?? 25} min={1} max={50}
-                onChange={e => uRP({ newRentDurationYears: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
+              <NumIn label="賃貸期間" value={rp.newRentDurationYears ?? 25} onChange={v => uRP({ newRentDurationYears: v })} min={1} max={50} unit="年" fill />
             </div>
           </div>
           <div className="rounded bg-blue-50 p-2 text-gray-700">

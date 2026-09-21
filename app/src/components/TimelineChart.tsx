@@ -34,6 +34,7 @@ function yearIncomePcts(yr: YearResult): { label: string; pct: number; color: st
     { label: "年金", value: yr.self.pensionIncome + yr.spouse.pensionIncome, color: "#f59e0b" },
     { label: "遺族年金", value: yr.survivorIncome, color: "#8b5cf6" },
     { label: "児童手当", value: yr.childAllowance, color: "#10b981" },
+    { label: "育休給付", value: yr.parentalLeaveBenefit, color: "#f472b6" },
     { label: "保険金", value: yr.insurancePayoutTotal, color: "#06b6d4" },
   ];
   const total = items.reduce((s, i) => s + i.value, 0);
@@ -462,48 +463,46 @@ export function TimelineChart({ results, currentAge, retirementAge, onYearClick,
         <span className="text-red-400">赤破線=ローン残高</span>
       </div>
 
-      {/* Tooltip */}
+      {/* Year summary — 行数と各行の高さを固定して、ホバー中にグラフ位置が上下しないようにする */}
       {hoverAge != null && hoverData && (
         <div className="mt-2 rounded border bg-gray-50 p-2 text-xs">
-          <div className="font-bold text-gray-700 mb-1">
+          <div className="mb-1 font-bold text-gray-700">
             {hoverAge}歳
-            <span className="font-normal text-gray-400 ml-2">クリックで詳細</span>
+            <span className="ml-2 font-normal text-gray-400">クリックで詳細</span>
           </div>
-          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${results.length}, 1fr)` }}>
-            {hoverData.map((yr, si) => yr && (
-              <div key={si} className="space-y-0.5">
-                <div className="font-bold" style={{ color: COLORS[si] }}>{results[si].scenario.name}</div>
-                <div>年収 {Math.round(yr.grossMan)}万{yr.spouse.gross > 0 ? ` + 配偶者${Math.round(yr.spouse.gross / 10000)}万` : ""}
-                  {(yr.self.pensionIncome > 0 || yr.spouse.pensionIncome > 0) && ` 年金${fmtMan(yr.self.pensionIncome + yr.spouse.pensionIncome)}`}
-                  {" / "}手取り {fmtMan(yr.takeHomePay)}</div>
-                <div className="flex items-center gap-0.5 flex-wrap">
-                  <span className="text-gray-400">収入</span>
-                  {yearIncomePcts(yr).map(p => <span key={p.label} style={{ color: p.color }}>{p.label}{p.pct}%</span>)}
-                </div>
-                <div>支出 {fmtMan(yr.totalExpense)}（基本{fmtMan(yr.baseLivingExpense)} + イベント{fmtMan(yr.eventOngoing + yr.eventOnetime)}）</div>
-                <div className="flex items-center gap-0.5 flex-wrap">
-                  <span className="text-gray-400">支出</span>
-                  {yearExpensePcts(yr).map(p => <span key={p.label} style={{ color: p.color }}>{p.label}{p.pct}%</span>)}
-                </div>
-                <div className="font-bold">総資産 {fmtMan(yr.totalWealth)}</div>
-                {yr.cumulativeDCAsset > 0 && (
-                  <div className="text-gray-500">DC {fmtMan(yr.cumulativeDCAsset)}{yr.spouse.dcAsset > 0 ? ` (本人${fmtMan(yr.self.dcAsset)} 配偶者${fmtMan(yr.spouse.dcAsset)})` : ""}</div>
-                )}
-                {(yr.nisaAsset > 0 || yr.taxableAsset > 0) && (
-                  <div className="text-green-600">
-                    {yr.nisaAsset > 0 && `NISA ${fmtMan(yr.nisaAsset)}${yr.spouse.nisaAsset > 0 ? ` (本人${fmtMan(yr.self.nisaAsset)} 配偶者${fmtMan(yr.spouse.nisaAsset)})` : ""}`}
-                    {yr.taxableAsset > 0 && ` 特定 ${fmtMan(yr.taxableAsset)}`}
-                    {` 現金 ${fmtMan(yr.cashSavings)}`}
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${results.length}, minmax(0, 1fr))` }}>
+            {hoverData.map((yr, si) => {
+              const nameEl = <div className="font-bold" style={{ color: COLORS[si] }}>{results[si].scenario.name}</div>;
+              if (!yr) return <div key={si} className="min-w-0 space-y-0.5">{nameEl}<div className="text-gray-400">—</div></div>;
+              const incomeLine = `年収 ${Math.round(yr.grossMan)}万${yr.spouse.gross > 0 ? ` + 配偶者${Math.round(yr.spouse.gross / 10000)}万` : ""}${(yr.self.pensionIncome > 0 || yr.spouse.pensionIncome > 0) ? ` 年金${fmtMan(yr.self.pensionIncome + yr.spouse.pensionIncome)}` : ""} / 手取り ${fmtMan(yr.takeHomePay)}`;
+              const dcLine = yr.cumulativeDCAsset > 0 ? `DC ${fmtMan(yr.cumulativeDCAsset)}${yr.spouse.dcAsset > 0 ? ` (本人${fmtMan(yr.self.dcAsset)} 配偶者${fmtMan(yr.spouse.dcAsset)})` : ""}` : "DC —";
+              const investLine = [
+                yr.nisaAsset > 0 ? `NISA ${fmtMan(yr.nisaAsset)}${yr.spouse.nisaAsset > 0 ? ` (本人${fmtMan(yr.self.nisaAsset)} 配偶者${fmtMan(yr.spouse.nisaAsset)})` : ""}` : null,
+                yr.taxableAsset > 0 ? `特定 ${fmtMan(yr.taxableAsset)}` : null,
+                `現金 ${fmtMan(yr.cashSavings)}`,
+              ].filter(Boolean).join(" ");
+              const eventsLine = yr.activeEvents.map(e => `${(EVENT_TYPES[e.type] || EVENT_TYPES.custom).icon}${e.label}`).join(" ");
+              return (
+                <div key={si} className="min-w-0 space-y-0.5 [&>div]:truncate">
+                  {nameEl}
+                  <div title={incomeLine}>{incomeLine}</div>
+                  <div className="flex items-center gap-1 overflow-hidden whitespace-nowrap">
+                    <span className="shrink-0 text-gray-400">収入</span>
+                    {yearIncomePcts(yr).map(p => <span key={p.label} style={{ color: p.color }}>{p.label}{p.pct}%</span>)}
                   </div>
-                )}
-                {yr.loanBalance > 0 && <div className="text-red-500">ローン残高 {fmtMan(yr.loanBalance)}</div>}
-                {yr.activeEvents.length > 0 && (
-                  <div className="text-gray-400">
-                    {yr.activeEvents.map(e => `${(EVENT_TYPES[e.type] || EVENT_TYPES.custom).icon}${e.label}`).join(" ")}
+                  <div>支出 {fmtMan(yr.totalExpense)}（基本{fmtMan(yr.baseLivingExpense)} + イベント{fmtMan(yr.eventOngoing + yr.eventOnetime)}）</div>
+                  <div className="flex items-center gap-1 overflow-hidden whitespace-nowrap">
+                    <span className="shrink-0 text-gray-400">支出</span>
+                    {yearExpensePcts(yr).map(p => <span key={p.label} style={{ color: p.color }}>{p.label}{p.pct}%</span>)}
                   </div>
-                )}
-              </div>
-            ))}
+                  <div className="font-bold">総資産 {fmtMan(yr.totalWealth)}</div>
+                  <div className="text-gray-500" title={dcLine}>{dcLine}</div>
+                  <div className="text-green-600" title={investLine}>{investLine}</div>
+                  <div className={yr.loanBalance > 0 ? "text-red-500" : "text-gray-300"}>{yr.loanBalance > 0 ? `ローン残高 ${fmtMan(yr.loanBalance)}` : "ローンなし"}</div>
+                  <div className="text-gray-400" title={eventsLine || "イベントなし"}>{eventsLine || "イベントなし"}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

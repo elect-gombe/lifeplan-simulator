@@ -1,7 +1,7 @@
 import React from "react";
 import type { CarParams } from "../lib/types";
 import { calcMonthlyPaymentEqual } from "../lib/calc";
-import { BarChart, Btns, Inp } from "./ui";
+import { BarChart, Btns, Inp, NumIn, SubGroup, FieldRow } from "./ui";
 import { EventModal, type EventModalBaseProps, type EventModalDef } from "./EventModal";
 
 // ===== 車コストプレビュー =====
@@ -257,57 +257,44 @@ export function CarModal(props: EventModalBaseProps) {
             {/* Left: Settings */}
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block font-semibold text-gray-600 mb-1">購入時年齢</label>
-                  <input type="number" value={age} min={currentAge} max={retirementAge - 1}
-                    onChange={e => setAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
-                </div>
-                <div>
-                  <label className="block font-semibold text-gray-600 mb-1">車両価格（万円）</label>
-                  <input type="number" value={cp.priceMan} step={50}
-                    onChange={e => u({ priceMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
-                </div>
-                <div>
-                  <label className="block font-semibold text-gray-600 mb-1">所有終了年齢</label>
-                  <input type="number" value={cp.endAge ?? 80} min={age + 1} max={100} step={1}
-                    onChange={e => u({ endAge: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
-                </div>
+                <NumIn label="購入時年齢" value={age} onChange={setAge} min={currentAge} max={retirementAge - 1} unit="歳" fill />
+                <NumIn label="車両価格" value={cp.priceMan} onChange={v => u({ priceMan: v })} step={50} min={0} unit="万円" fill presets={[150, 200, 300, 400, 500]} />
               </div>
 
-              {/* Replacement cycle */}
-              <div className="rounded border p-2 space-y-1.5">
-                <label className="block font-semibold text-gray-600 text-[11px]">買い替えサイクル</label>
-                <Btns options={[{value:0,label:"一度のみ"},{value:3,label:"3年毎"},{value:5,label:"5年毎"},{value:7,label:"7年毎"},{value:10,label:"10年毎"}]}
+              <SubGroup title="買い替えサイクル">
+                <Btns options={[{ value: 0, label: "一度のみ" }, { value: 3, label: "3年毎" }, { value: 5, label: "5年毎" }, { value: 7, label: "7年毎" }, { value: 10, label: "10年毎" }]}
                   value={cp.replaceEveryYears} onChange={v => u({ replaceEveryYears: v })} color="green" />
-                {cp.replaceEveryYears > 0 && (
-                  <div className="text-[10px] text-gray-400">
-                    {age}歳から{cp.replaceEveryYears}年ごとに買い替え。同額の車を想定。
-                  </div>
-                )}
-              </div>
-
-              {/* Loan */}
-              <div className="rounded border p-2 space-y-1.5">
-                <label className="block font-semibold text-gray-600 text-[11px]">ローン</label>
-                <Btns options={[{value:0,label:"一括"},{value:3,label:"3年"},{value:5,label:"5年"},{value:7,label:"7年"}]}
-                  value={cp.loanYears} onChange={v => u({ loanYears: v })} color="green" />
-                {cp.loanYears > 0 && (
-                  <div className="flex items-center gap-2">
-                    <Inp label="金利" value={cp.loanRate} onChange={v => u({ loanRate: v })} unit="%" w="w-14" step={0.1} min={0} />
-                    <span className="text-[10px] text-gray-400">月額{(loanMonthly / 10000).toFixed(1)}万</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Running costs */}
-              <div className="rounded border p-2 space-y-1.5">
-                <label className="block font-semibold text-gray-600 text-[11px]">維持費（年額）</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Inp label="車検・整備・税" value={cp.maintenanceAnnualMan} onChange={v => u({ maintenanceAnnualMan: v })} unit="万" w="w-14" step={1} min={0} />
-                  <Inp label="保険料" value={cp.insuranceAnnualMan} onChange={v => u({ insuranceAnnualMan: v })} unit="万" w="w-14" step={1} min={0} />
+                <div className="mt-1 text-[10px] text-gray-400">
+                  {cp.replaceEveryYears > 0 ? `${age}歳から${cp.replaceEveryYears}年ごとに同額の車へ買い替え` : "買い替えなし"}
+                  {`。${cp.endAge ?? 80}歳まで所有`}
                 </div>
-                <div className="text-[10px] text-gray-400">維持費合計: <b>{annualRunningCost}万円/年</b></div>
-              </div>
+              </SubGroup>
+
+              <SubGroup title={<>維持費（年額）<span className="ml-2 font-normal text-gray-400">合計 {annualRunningCost}万円/年</span></>}>
+                <FieldRow>
+                  <NumIn label="車検・整備・税" value={cp.maintenanceAnnualMan} onChange={v => u({ maintenanceAnnualMan: v })} step={1} min={0} unit="万" small />
+                  <NumIn label="保険料" value={cp.insuranceAnnualMan} onChange={v => u({ insuranceAnnualMan: v })} step={1} min={0} unit="万" small />
+                </FieldRow>
+              </SubGroup>
+
+              <>
+                <SubGroup title="所有終了">
+                  <NumIn label="" value={cp.endAge ?? 80} onChange={v => u({ endAge: v })} step={1} min={age + 1} max={100} unit="歳まで" small />
+                </SubGroup>
+              </>
+
+              <>
+                <SubGroup title="ローン">
+                  <FieldRow>
+                    <Btns options={[{ value: 0, label: "一括" }, { value: 3, label: "3年" }, { value: 5, label: "5年" }, { value: 7, label: "7年" }]}
+                      value={cp.loanYears} onChange={v => u({ loanYears: v })} color="green" />
+                    {cp.loanYears > 0 && <>
+                      <Inp label="金利" value={cp.loanRate} onChange={v => u({ loanRate: v })} unit="%" w="w-14" step={0.1} min={0} max={20} />
+                      <span className="self-center text-[10px] text-gray-400">月額 {(loanMonthly / 10000).toFixed(1)}万</span>
+                    </>}
+                  </FieldRow>
+                </SubGroup>
+              </>
             </div>
 
             {/* Right: Preview */}

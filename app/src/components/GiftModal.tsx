@@ -1,7 +1,7 @@
 import React from "react";
 import type { GiftParams } from "../lib/types";
 import { calcGiftTax } from "../lib/tax";
-import { Btns } from "./ui";
+import { Btns, NumIn } from "./ui";
 import { EventModal, type EventModalBaseProps, type EventModalDef } from "./EventModal";
 
 const giftDef: EventModalDef<GiftParams> = {
@@ -24,14 +24,10 @@ export function GiftModal(props: EventModalBaseProps) {
         return (<>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-gray-600 mb-1">贈与年齢</label>
-              <input type="number" value={age} min={currentAge} max={retirementAge - 1}
-                onChange={e => setAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
+              <NumIn label="贈与年齢" value={age} onChange={v => setAge(v)} min={currentAge} max={retirementAge - 1} unit="歳" fill />
             </div>
             <div>
-              <label className="block font-semibold text-gray-600 mb-1">贈与額（万円）<span className="ml-1 cursor-help text-gray-400" title="暦年課税: 年110万以下は非課税。住宅資金贈与は最大1,000万非課税枠あり">ⓘ</span></label>
-              <input type="number" value={gp.amountMan} step={100}
-                onChange={e => u({ amountMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
+              <NumIn label={<>贈与額<span className="ml-1 cursor-help text-gray-400" title="暦年課税: 年110万以下は非課税。住宅資金贈与は最大1,000万非課税枠あり">ⓘ</span></>} value={gp.amountMan} onChange={v => u({ amountMan: v })} step={100} unit="万円" fill />
             </div>
           </div>
 
@@ -47,17 +43,17 @@ export function GiftModal(props: EventModalBaseProps) {
             </div>
           </div>
 
-          {/* 贈受者関係 */}
-          <div className="rounded border p-3 space-y-2">
-            <label className="block font-semibold text-gray-600">贈受者の関係</label>
-            <Btns options={[{value:"lineal" as const,label:"直系尊属"},{value:"other" as const,label:"その他"}]}
-              value={gp.recipientRelation} onChange={v => u({ recipientRelation: v })} />
-            <div className="text-gray-400 text-[10px]">
-              {gp.recipientRelation === "lineal"
-                ? "直系尊属（父母・祖父母）からの贈与は特例税率が適用され、税負担が軽減されます。"
-                : "直系尊属以外（配偶者・兄弟など）からの贈与には一般税率が適用されます。"}
+          {/* 贈与者との関係 */}
+          <>
+            <div className="rounded border p-3 space-y-2">
+              <label className="block font-semibold text-gray-600">贈与者との関係</label>
+              <Btns options={[{ value: "lineal" as const, label: "直系尊属（父母・祖父母）" }, { value: "other" as const, label: "その他" }]}
+                value={gp.recipientRelation} onChange={v => u({ recipientRelation: v })} />
+              <div className="text-gray-400 text-[10px]">
+                {gp.recipientRelation === "lineal" ? "直系尊属からの贈与は特例税率が適用され、税負担が軽減されます。" : "直系尊属以外（配偶者・兄弟など）からの贈与には一般税率が適用されます。"}
+              </div>
             </div>
-          </div>
+          </>
 
           {/* 贈与税プレビュー */}
           <div className="rounded bg-amber-50 p-2 text-amber-800 space-y-0.5">

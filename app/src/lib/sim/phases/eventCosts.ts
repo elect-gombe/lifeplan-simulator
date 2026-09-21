@@ -322,9 +322,10 @@ export function phaseEventCosts(
     addPropertyFixedCosts(pp);
   }
 
-  // --- One-time costs for simple events (non-structured) ---
+  // --- One-time costs for simple events (non-structured, top-level) ---
+  // サブイベント（parentId 付き）は上の分岐で一時費用を計上済みなので、ここでは対象外（二重計上防止）。
   for (const e of onetimeEvts) {
-    if (!e.propertyParams && !e.carParams && !e.insuranceParams && !e.giftParams && !e.relocationParams) {
+    if (!e.parentId && !e.propertyParams && !e.carParams && !e.insuranceParams && !e.giftParams && !e.relocationParams) {
       const onetime = e.oneTimeCostMan * 10000 * inflationFactor;
       if (onetime !== 0) {
         eventCostBreakdown.push({ label: `${e.label}（一時）`, icon: "", color: "#64748b", amount: onetime });

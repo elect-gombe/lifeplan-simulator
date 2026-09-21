@@ -21,7 +21,8 @@ import { phaseDeathInheritance } from "./phases/deathInheritance";
 import { phaseRebalance } from "./phases/rebalance";
 import { phaseDCReception } from "./phases/dcReception";
 import { phaseSurvivor } from "./phases/survivor";
-import { phaseSpouseTax } from "./phases/spouseTax";
+import { phaseSpouseTax, spouseFullGross } from "./phases/spouseTax";
+import { phaseParentalLeave, calcLeaveBenefit } from "./phases/parentalLeave";
 import { assembleYearResult, assembleFinalResult } from "./assemble";
 
 export function computeBase(params: CalcParams): BaseResult {
@@ -108,9 +109,19 @@ function simulateYear(age: number, config: SimConfig, state: SimState, yearResul
   const ageInfo = phaseAgeEvents(ctx, config);
   const { isSelfDead, isDead, selfRetired, spouseAge } = ageInfo;
 
+  // --- 育休（本人/配偶者の就労係数・給付金） ---
+  const leave = phaseParentalLeave(ctx, ageInfo);
+
   // --- 本人の給与 ---
-  const { gross, grownGrossMan } = phaseMemberIncome(isSelfDead, selfRetired, age, config.incomeKF, config.growthRate, config.defaultGrossMan);
-  if (gross > 0) { state.cumulativeSalary += gross; state.salaryYears++; }
+  const selfInc = phaseMemberIncome(isSelfDead, selfRetired, age, config.incomeKF, config.growthRate, config.defaultGrossMan);
+  const grownGrossMan = selfInc.grownGrossMan * leave.self.incomeFactor;
+  const gross = grownGrossMan * 10000;
+  const selfLeaveBenefit = calcLeaveBenefit(selfInc.gross, leave.self);
+  {
+    // 年金記録: 育休中（子3歳未満）は休業前給与で積み上げ（従前標準報酬みなし）
+    const pensionGross = leave.self.protectPension ? selfInc.gross : gross;
+    if (pensionGross > 0) { state.cumulativeSalary += pensionGross; state.salaryYears++; }
+  }
   const retirementBonusNet = retirementBonusNetIncome(age, config, isSelfDead);
 
   // --- 公的年金 + 私的年金 ---
@@ -124,8 +135,13 @@ function simulateYear(age: number, config: SimConfig, state: SimState, yearResul
   const dedInfo = phaseDeductions(ctx, config, ageInfo);
 
   // --- 配偶者の税 ---
-  const spouseTaxResult = phaseSpouseTax(config, ageInfo, dedInfo, spousePensionIncome);
-  if (spouseTaxResult.gross > 0) { state.spouseCumulativeSalary += spouseTaxResult.gross; state.spouseSalaryYears++; }
+  const spouseTaxResult = phaseSpouseTax(config, ageInfo, dedInfo, spousePensionIncome, leave.spouse.incomeFactor);
+  const spouseGrossFull = spouseFullGross(config, ageInfo);
+  const spouseLeaveBenefit = calcLeaveBenefit(spouseGrossFull, leave.spouse);
+  {
+    const pensionGross = leave.spouse.protectPension ? spouseGrossFull : spouseTaxResult.gross;
+    if (pensionGross > 0) { state.spouseCumulativeSalary += pensionGross; state.spouseSalaryYears++; }
+  }
   {
     // 在職老齢年金: 配偶者分
     const red = applyWorkingPensionReduction(pen.spousePensionEmployeeAnnual, spouseTaxResult.gross, spouseAge);
@@ -171,6 +187,7 @@ function simulateYear(age: number, config: SimConfig, state: SimState, yearResul
     state, config, selfTaxResult, spouseTaxResult,
     totalExpense, dedInfo.childAllowance, survivor.survivorIncome, ec.insurancePayoutTotal,
     ec.propertySaleProceeds, spouseTaxResult.dcContribution, yearDCRate,
+    selfLeaveBenefit + spouseLeaveBenefit,
   );
   // Phase 4: 退職一時金（課税後）をキャッシュに加算
   if (retirementBonusNet > 0) state.cumulativeCash += retirementBonusNet;
@@ -189,6 +206,7 @@ function simulateYear(age: number, config: SimConfig, state: SimState, yearResul
     age, state, gross, grownGrossMan, selfPensionIncome, spousePensionIncome, pensionReduction,
     eventOngoing, totalExpense, selfTaxResult, spouseTaxResult, spouseDedAmount, hlDed, selfLifeInsDed,
     dcTotal, companyDC, idecoMonthly, dedInfo, eventCosts: ec, survivor, cashFlow, death, rebalance, dcReception,
+    leave: { selfMonths: leave.self.leaveMonths, spouseMonths: leave.spouse.leaveMonths, selfBenefit: selfLeaveBenefit, spouseBenefit: spouseLeaveBenefit },
   });
 }
 

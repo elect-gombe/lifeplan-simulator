@@ -497,6 +497,9 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
               </>}
               {yrs.some(yr => yr && yr.childAllowance > 0) &&
                 <R l="児童手当" hint="0-2歳:1.5万/月 3-18歳:1万/月 第3子以降:3万/月" graphFn={yr => yr.childAllowance} fn={household(yr => yr.childAllowance)} />}
+              {yrs.some(yr => yr && yr.parentalLeaveBenefit > 0) &&
+                <R l="育児休業給付金" hint="休業180日まで賃金の67%・以降50%（月額上限あり）。非課税・社保対象外" graphFn={yr => yr.parentalLeaveBenefit}
+                  fn={(yr, s) => s === "本人" ? (yr.self.leaveBenefit || "-") : s === "配偶者" ? (yr.spouse.leaveBenefit || "-") : yr.parentalLeaveBenefit} />}
               {yrs.some(yr => yr && yr.tashiWaiver > 0) &&
                 <R l="多子世帯授業料減免" hint="扶養3人以上で大学在学中の子の授業料を減免（国公立54万/私立70万+入学金）" graphFn={yr => yr.tashiWaiver} fn={household(yr => yr.tashiWaiver)} />}
               {yrs.some(yr => yr && yr.hsSupport > 0) &&
@@ -517,6 +520,7 @@ function TaxDetailContent({ age, results, base, sirPct, compact, containerWidth,
                       { label: "年金", value: yr.self.pensionIncome + yr.spouse.pensionIncome, color: "#f59e0b" },
                       { label: "遺族", value: yr.survivorIncome, color: "#8b5cf6" },
                       { label: "手当", value: yr.childAllowance, color: "#10b981" },
+                      { label: "育休給付", value: yr.parentalLeaveBenefit, color: "#f472b6" },
                       { label: "保険金", value: yr.insurancePayoutTotal, color: "#06b6d4" },
                     ].filter(i => i.value > 0);
                     const total = items.reduce((s, i) => s + i.value, 0);

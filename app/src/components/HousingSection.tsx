@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import type { LifeEvent, Scenario, PropertyParams, HousingPhase } from "../lib/types";
 import { Section } from "./Section";
-import { Modal } from "./ui";
+import { Modal, NumIn } from "./ui";
 import { PropertyModal } from "./PropertyModal";
 import { HousingPhaseBar } from "./HousingPhaseBar";
 import { buildLoanSchedule, resolveScenarioField } from "../lib/calc";
@@ -137,12 +137,10 @@ export function HousingSection({ s, onChange, currentAge, retirementAge, open, o
         {editingIdx != null && editPhase?.type === "rent" && (
           <Modal isOpen={true} onClose={() => setEditingIdx(null)} title="🏢 賃貸設定" onSave={() => setEditingIdx(null)} saveLabel="閉じる">
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="block font-semibold text-gray-600 mb-1">開始年齢</label>
-                <input type="number" value={editPhase.startAge} min={currentAge} max={simEnd - 1}
-                  onChange={e => updatePhase(editingIdx, { startAge: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" /></div>
-              <div><label className="block font-semibold text-gray-600 mb-1">月額家賃（万円/月）</label>
-                <input type="number" value={editPhase.rentMonthlyMan ?? 10} step={0.5} min={0}
-                  onChange={e => updatePhase(editingIdx, { rentMonthlyMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" /></div>
+              <NumIn label="開始年齢" value={editPhase.startAge} min={currentAge} max={simEnd - 1} unit="歳" small
+                onChange={v => updatePhase(editingIdx, { startAge: v })} />
+              <NumIn label="月額家賃" value={editPhase.rentMonthlyMan ?? 10} step={0.5} min={0} unit="万円/月" small presets={[5, 8, 10, 12, 15, 20]}
+                onChange={v => updatePhase(editingIdx, { rentMonthlyMan: v })} />
             </div>
             <div className="rounded bg-blue-50 p-2 text-gray-700">年額: <b>{((editPhase.rentMonthlyMan ?? 10) * 12)}万円/年</b></div>
           </Modal>
@@ -152,12 +150,10 @@ export function HousingSection({ s, onChange, currentAge, retirementAge, open, o
           <Modal isOpen={true} onClose={() => { setAddingType(null); setTempPhase(null); }} title="🏢 賃貸追加"
             onSave={() => saveNewPhase(tempPhase)} saveLabel="追加">
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="block font-semibold text-gray-600 mb-1">開始年齢</label>
-                <input type="number" value={tempPhase.startAge} min={currentAge} max={simEnd - 1}
-                  onChange={e => setTempPhase({ ...tempPhase, startAge: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" /></div>
-              <div><label className="block font-semibold text-gray-600 mb-1">月額家賃（万円/月）</label>
-                <input type="number" value={tempPhase.rentMonthlyMan ?? 10} step={0.5} min={0}
-                  onChange={e => setTempPhase({ ...tempPhase, rentMonthlyMan: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" /></div>
+              <NumIn label="開始年齢" value={tempPhase.startAge} min={currentAge} max={simEnd - 1} unit="歳" small
+                onChange={v => setTempPhase({ ...tempPhase, startAge: v })} />
+              <NumIn label="月額家賃" value={tempPhase.rentMonthlyMan ?? 10} step={0.5} min={0} unit="万円/月" small presets={[5, 8, 10, 12, 15, 20]}
+                onChange={v => setTempPhase({ ...tempPhase, rentMonthlyMan: v })} />
             </div>
             <div className="rounded bg-blue-50 p-2 text-gray-700">年額: <b>{((tempPhase.rentMonthlyMan ?? 10) * 12)}万円/年</b></div>
           </Modal>

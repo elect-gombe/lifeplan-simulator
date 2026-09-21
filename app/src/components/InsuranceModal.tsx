@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { InsuranceParams, EventTarget } from "../lib/types";
-import { BarChart } from "./ui";
+import { BarChart, NumIn, NumField } from "./ui";
 import { EventModal, type EventModalBaseProps, type EventModalDef } from "./EventModal";
 
 // ===== 保険コストプレビュー =====
@@ -269,23 +269,17 @@ export function InsuranceModal(props: EventModalBaseProps) {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-semibold text-gray-600 mb-1 text-[11px]">加入時年齢</label>
-                  <input type="number" value={age} min={currentAge} max={retirementAge - 1}
-                    onChange={e => setAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
+                  <NumIn label="加入時年齢" value={age} onChange={v => setAge(v)} min={currentAge} max={retirementAge - 1} unit="歳" fill />
                 </div>
                 <div>
-                  <label className="block font-semibold text-gray-600 mb-1 text-[11px]">保険期間（歳まで）</label>
-                  <input type="number" value={ip.coverageEndAge} min={age + 1} max={80}
-                    onChange={e => u({ coverageEndAge: Number(e.target.value) })} className="w-full rounded border px-2 py-1.5" />
+                  <NumIn label="保険期間" value={ip.coverageEndAge} onChange={v => u({ coverageEndAge: v })} min={age + 1} max={80} unit="歳まで" fill />
                 </div>
               </div>
 
               <div className="rounded border p-2 space-y-1">
                 <label className="block font-semibold text-gray-600 text-[11px]">保険料</label>
                 <div className="flex items-center gap-1">
-                  <input type="number" value={ip.premiumMonthlyMan} step={0.1} min={0}
-                    onChange={e => u({ premiumMonthlyMan: Number(e.target.value) })} className="w-20 rounded border px-2 py-1" />
-                  <span className="text-[10px] text-gray-400">万円/月</span>
+                  <NumField value={ip.premiumMonthlyMan} onChange={v => u({ premiumMonthlyMan: v })} step={0.1} min={0} unit="万円/月" w="w-20" />
                   <span className="text-[10px] text-gray-400 ml-2">= 年{(ip.premiumMonthlyMan * 12).toFixed(1)}万</span>
                 </div>
               </div>
@@ -294,9 +288,7 @@ export function InsuranceModal(props: EventModalBaseProps) {
                 <div className="rounded border p-2 space-y-1">
                   <label className="block font-semibold text-gray-600 text-[11px]">死亡保険金<span className="ml-1 cursor-help text-gray-400" title="目安: 年間生活費×必要年数−遺族年金−貯蓄。子供が小さいほど多めに">ⓘ</span></label>
                   <div className="flex items-center gap-1">
-                    <input type="number" value={ip.lumpSumPayoutMan} step={100} min={0}
-                      onChange={e => u({ lumpSumPayoutMan: Number(e.target.value) })} className="w-24 rounded border px-2 py-1" />
-                    <span className="text-[10px] text-gray-400">万円（一括）</span>
+                    <NumField value={ip.lumpSumPayoutMan} onChange={v => u({ lumpSumPayoutMan: v })} step={100} min={0} unit="万円（一括）" w="w-24" />
                   </div>
                 </div>
               ) : (
@@ -304,15 +296,11 @@ export function InsuranceModal(props: EventModalBaseProps) {
                   <label className="block font-semibold text-gray-600 text-[11px]">月額保障<span className="ml-1 cursor-help text-gray-400" title="目安: 現在の手取月額の6〜7割。遺族年金と合わせて生活費をカバー">ⓘ</span></label>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="flex items-center gap-1">
-                      <input type="number" value={ip.monthlyPayoutMan} step={1} min={0}
-                        onChange={e => u({ monthlyPayoutMan: Number(e.target.value) })} className="w-16 rounded border px-2 py-1" />
-                      <span className="text-[10px] text-gray-400">万/月</span>
+                      <NumField value={ip.monthlyPayoutMan} onChange={v => u({ monthlyPayoutMan: v })} step={1} min={0} unit="万/月" w="w-16" />
                     </div>
                     <div className="flex items-center gap-1">
                       <span className="text-[10px] text-gray-500">〜</span>
-                      <input type="number" value={ip.payoutUntilAge} min={age} max={80}
-                        onChange={e => u({ payoutUntilAge: Number(e.target.value) })} className="w-14 rounded border px-2 py-1" />
-                      <span className="text-[10px] text-gray-400">歳まで</span>
+                      <NumField value={ip.payoutUntilAge} onChange={v => u({ payoutUntilAge: v })} min={age} max={80} unit="歳まで" w="w-14" />
                     </div>
                   </div>
                   <div className="text-[10px] text-gray-400">

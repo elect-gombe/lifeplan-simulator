@@ -120,16 +120,23 @@ function MemberStep({ data, onChange, isSelf }: {
             options={[{ value: "employee" as const, label: "会社員・公務員" }, { value: "self_employed" as const, label: "自営業・その他" }]}
             value={data[typeKey]} onChange={v => u({ [typeKey]: v } as Partial<WizardData>)}
           />
-          <Inp label="退職" value={retirementAge} onChange={v => u({ [retKey]: v, ...(isSelf ? { retirementTouched: true } : {}) } as Partial<WizardData>)} unit="歳" w="w-12" step={1} min={50} max={80} />
-          <Inp label="年金開始" value={data[penKey]} onChange={v => u({ [penKey]: v } as Partial<WizardData>)} unit="歳" w="w-12" step={1} min={60} max={75} />
-          <Inp label="就職" value={data[workKey]} onChange={v => u({ [workKey]: v } as Partial<WizardData>)} unit="歳" w="w-12" step={1} min={18} max={30} />
-          {isSelf && <Inp label="結婚" value={data.marriageAge} onChange={v => u({ marriageAge: v })} unit="歳(0=未設定)" w="w-12" step={1} min={0} max={60} />}
-          <CareerHistoryEditor
-            history={data[careerKey] || []}
-            onChange={h => u({ [careerKey]: h.length > 0 ? h : undefined } as Partial<WizardData>)}
-            workStartAge={data[workKey]}
-            retirementAge={retirementAge}
-          />
+          <>
+            <Inp label="年金開始" value={data[penKey]} onChange={v => u({ [penKey]: v } as Partial<WizardData>)} unit="歳" w="w-12" step={1} min={60} max={75} />
+            <Inp label="就職" value={data[workKey]} onChange={v => u({ [workKey]: v } as Partial<WizardData>)} unit="歳" w="w-12" step={1} min={15} max={40} />
+          </>
+          {isSelf && (
+            
+              <Inp label="結婚" value={data.marriageAge} onChange={v => u({ marriageAge: v })} unit="歳" w="w-12" step={1} min={0} max={60} help="0＝未設定。第3号被保険者期間の計算に使用" />
+            
+          )}
+          <>
+            <CareerHistoryEditor
+              history={data[careerKey] || []}
+              onChange={h => u({ [careerKey]: h.length > 0 ? h : undefined } as Partial<WizardData>)}
+              workStartAge={data[workKey]}
+              retirementAge={retirementAge}
+            />
+          </>
         </>}
       />
     </div>

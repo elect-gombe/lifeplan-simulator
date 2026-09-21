@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import type { LifeEvent, MarketCrashParams } from "../lib/types";
-import { Modal } from "./ui";
+import { Modal, NumIn, Btns, FieldRow } from "./ui";
 import type { EventModalBaseProps } from "./EventModal";
 
 const DEFAULTS: MarketCrashParams = {
@@ -129,42 +129,18 @@ export function CrashModal({ isOpen, onClose, onSave, currentAge, retirementAge,
       <div className="space-y-3">
         {/* 基本設定 */}
         <div className="rounded bg-gray-50 p-3 space-y-2 text-xs">
-          <div className="flex flex-wrap gap-3 items-center">
-            <label className="flex items-center gap-1">
-              <span className="text-gray-500">発生年齢</span>
-              <input type="number" value={age} min={currentAge} max={retirementAge + 20} step={1}
-                onChange={e => setAge(Number(e.target.value))} className="w-14 rounded border px-1 py-0.5" />
-              <span className="text-gray-400">歳</span>
-            </label>
-            <label className="flex items-center gap-1">
-              <span className="text-gray-500">下落率</span>
-              <input type="number" value={dropRate} min={5} max={90} step={5}
-                onChange={e => { setDropRate(Number(e.target.value)); setCustomRates(null); }} className="w-14 rounded border px-1 py-0.5" />
-              <span className="text-gray-400">%</span>
-            </label>
-            <label className="flex items-center gap-1">
-              <span className="text-gray-500">対象</span>
-              <select value={target} onChange={e => setTarget(e.target.value as any)} className="rounded border px-1 py-0.5">
-                <option value="all">全口座</option>
-                <option value="nisa">NISAのみ</option>
-                <option value="taxable">特定口座のみ</option>
-              </select>
-            </label>
-          </div>
-          <div className="flex flex-wrap gap-3 items-center">
-            <label className="flex items-center gap-1">
-              <span className="text-gray-500">回復期間</span>
-              <input type="number" value={recoveryYears} min={1} max={20} step={1}
-                onChange={e => { setRecoveryYears(Number(e.target.value)); setCustomRates(null); }} className="w-14 rounded border px-1 py-0.5" />
-              <span className="text-gray-400">年</span>
-            </label>
-            <label className="flex items-center gap-1">
-              <span className="text-gray-500">目標平均利回り</span>
-              <input type="number" value={targetRR} min={0} max={15} step={0.5}
-                onChange={e => { setTargetRR(Number(e.target.value)); setCustomRates(null); }} className="w-14 rounded border px-1 py-0.5" />
-              <span className="text-gray-400">%</span>
-            </label>
-          </div>
+          <FieldRow>
+            <NumIn label="発生年齢" value={age} onChange={setAge} step={1} min={currentAge} max={retirementAge + 20} unit="歳" small />
+            <NumIn label="下落率" value={dropRate} onChange={v => { setDropRate(v); setCustomRates(null); }} step={5} min={5} max={90} unit="%" small presets={[20, 30, 50]} />
+            <span className="self-end pb-1">
+              <Btns label="対象" options={[{ value: "all" as const, label: "全口座" }, { value: "nisa" as const, label: "NISA" }, { value: "taxable" as const, label: "特定口座" }]}
+                value={target} onChange={setTarget} color="slate" />
+            </span>
+            <>
+              <NumIn label="回復期間" value={recoveryYears} onChange={v => { setRecoveryYears(v); setCustomRates(null); }} step={1} min={1} max={20} unit="年" small />
+              <NumIn label="目標平均利回り" value={targetRR} onChange={v => { setTargetRR(v); setCustomRates(null); }} step={0.5} min={0} max={15} unit="%" small help="暴落後の回復ボーナスで、長期の幾何平均をこの値に合わせます" />
+            </>
+          </FieldRow>
           <div className="text-[10px] text-gray-500 bg-blue-50 rounded p-1.5">
             暴落(-{dropRate}%)後、<b className="text-green-700">{bonusRate}%/年</b>の回復ボーナスを{recoveryYears}年間適用 →
             幾何平均利回り <b className={Math.abs(effectiveCAGR - targetRR) < 0.1 ? "text-green-700" : "text-amber-600"}>{effectiveCAGR.toFixed(1)}%</b>

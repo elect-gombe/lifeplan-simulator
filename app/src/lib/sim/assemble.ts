@@ -46,13 +46,15 @@ export interface YearAssemblyInput {
   death: DeathInheritanceResult;
   rebalance: RebalanceOutput;
   dcReception: DCReceptionOutput;
+  /** 育休: 当年の休業月数と給付金（円） */
+  leave: { selfMonths: number; spouseMonths: number; selfBenefit: number; spouseBenefit: number };
 }
 
 export function assembleYearResult(input: YearAssemblyInput): YearResult {
   const {
     age, state, gross, grownGrossMan, selfPensionIncome, spousePensionIncome, pensionReduction,
     eventOngoing, totalExpense, selfTaxResult, spouseTaxResult, spouseDedAmount, hlDed, selfLifeInsDed,
-    dcTotal, companyDC, idecoMonthly, dedInfo, eventCosts, survivor, cashFlow, death: deathResult, rebalance, dcReception,
+    dcTotal, companyDC, idecoMonthly, dedInfo, eventCosts, survivor, cashFlow, death: deathResult, rebalance, dcReception, leave,
   } = input;
   const {
     baseLivingExpense, eventOnetime, eventCostBreakdown, activeEvts, propertyFixedCostEvts,
@@ -97,6 +99,7 @@ export function assembleYearResult(input: YearAssemblyInput): YearResult {
     taxableContribution, taxableWithdrawal, taxableAsset: state.cumulativeTaxable, taxableGain,
     cashSavings: state.cumulativeCash,
     insurancePremiumTotal, insurancePayoutTotal,
+    parentalLeaveBenefit: leave.selfBenefit + leave.spouseBenefit,
     inheritanceTax, inheritanceEstate,
     dcReceiveTax,
     propertySaleProceeds, propertyCapitalGainsTax, giftTax,
@@ -123,6 +126,7 @@ export function assembleYearResult(input: YearAssemblyInput): YearResult {
       dcReceiveLumpSum: selfDCReceiveLumpSum, dcReceiveAnnuityAnnual: selfDCReceiveAnnuityAnnual,
       dcRetirementDeduction: selfDCRetirementDeduction, dcReceiveTax: selfDCReceiveTax,
       nisaAsset: state.selfNISAAsset, nisaCostBasis: state.selfNISACostBasis, nisaContribution: selfNISAContribution,
+      leaveMonths: leave.selfMonths, leaveBenefit: leave.selfBenefit,
     },
     spouse: {
       gross: sp.gross, employeeDeduction: sp.employeeDeduction,
@@ -147,6 +151,7 @@ export function assembleYearResult(input: YearAssemblyInput): YearResult {
       dcReceiveLumpSum: spouseDCReceiveLumpSum, dcReceiveAnnuityAnnual: spouseDCReceiveAnnuityAnnual,
       dcRetirementDeduction: spouseDCRetirementDeduction, dcReceiveTax: spouseDCReceiveTax,
       nisaAsset: state.spouseNISAAsset, nisaCostBasis: state.spouseNISACostBasis, nisaContribution: spouseNISAContribution,
+      leaveMonths: leave.spouseMonths, leaveBenefit: leave.spouseBenefit,
     },
   };
 }
