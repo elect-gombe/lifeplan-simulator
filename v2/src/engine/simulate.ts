@@ -458,8 +458,13 @@ export function simulate(plan: Plan, opts: SimOptions = {}): SimResult {
         housingLoanCredit: Math.round(hlCredits[i]),
         furusato: m.furusato,
       });
-      // 年金記録の積み上げ（育休中は休業前給与でみなし）
-      if (m.employment === "employee" && p.fullSalary > 0 && mAge < 70) {
+      // 年金記録の積み上げ（育休中は休業前給与でみなし）。
+      // 厚生年金に実際に加入している人だけ積む: 106万未満で第3号（dependent）や
+      // 国民年金1号（self）になった短時間労働者に報酬比例を付けてはいけない。
+      // 育休中（exemptLeave）は保険料免除だが被保険者のままなので積む。
+      const si = tax.breakdown.siStatus;
+      const inEmployeePension = si === "employee" || si === "exemptLeave";
+      if (m.employment === "employee" && p.fullSalary > 0 && mAge < 70 && inEmployeePension) {
         const protect = children.some((c, ci) => childAges[ci] >= 0 && childAges[ci] < 3 && (i === 0 ? c.leaveMonthsSelf : c.leaveMonthsSpouse) > 0);
         // 年金記録は基準年の実質値で積み上げる（再評価率 ≒ 物価と見なす）。受給時に物価＋マクロスライドで名目化するため二重計上を避ける
         s.empMonths += 12; s.salarySum += (protect ? p.fullSalary : salaryForTax) / inflF;

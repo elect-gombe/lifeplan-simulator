@@ -455,6 +455,23 @@ describe("パート収入（106万・130万の壁、住民税の非課税限度�
     expect(t.socialInsurance.total).toBeGreaterThan(0);
     expect(t.socialInsurance.total).toBeLessThan(30_000); // 7割軽減後の均等割
   });
+  it("第3号の短時間労働者は、働き続けても厚生年金が増えない", () => {
+    // 106万未満で被扶養者（第3号）になるパートは厚生年金の被保険者ではない。
+    // 壁の判定を税・社保にだけ適用して年金記録に適用しないと、勤続年数ぶんの報酬比例が
+    // 上乗せされ、老後収入を生涯にわたって過大評価する。
+    // （試算開始前の加入期間は就職年齢からの推定で別途乗るため、増分で比較する）
+    const pensionOf = (income: number, retireAge: number) => {
+      const p = defaultPlan();
+      p.self.age = 40; p.self.income = [{ age: 40, value: 800 }]; p.self.retireAge = 65;
+      p.spouse = defaultMember({ age: 40, employment: "employee", income: [{ age: 40, value: income }], retireAge, incomeGrowthPct: 0 });
+      p.children = []; p.endAge = 90;
+      return simulate(p).rows.find(r => (r.spouse?.publicPension ?? 0) > 0)!.spouse!.pensionEmployee;
+    };
+    // 100万（第3号）: 20 年働いても報酬比例は 1 円も増えない
+    expect(pensionOf(100, 60)).toBe(pensionOf(100, 41));
+    // 400万（加入者）: 20 年ぶんきちんと増える
+    expect(pensionOf(400, 60)).toBeGreaterThan(pensionOf(400, 41) * 1.5);
+  });
   it("60 歳以上の被扶養者の収入要件は 180 万円", () => {
     const inp = (age: number) => ({ age, employment: "none" as const, salary: 0, pension: 1_500_000, otherTaxableIncome: 0, idecoAnnual: 0, lifeInsurancePremium: 0, dependentIt: 0, dependentRt: 0, spouseIncomeForDeduction: null, housingLoanCredit: 0, furusato: false, canBeDependent: true });
     expect(resolveSiStatus(inp(61), 0, 1_500_000)).toBe("dependent");
