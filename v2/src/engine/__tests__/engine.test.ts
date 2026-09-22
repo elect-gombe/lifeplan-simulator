@@ -472,6 +472,23 @@ describe("パート収入（106万・130万の壁、住民税の非課税限度�
     // 400万（加入者）: 20 年ぶんきちんと増える
     expect(pensionOf(400, 60)).toBeGreaterThan(pensionOf(400, 41) * 1.5);
   });
+  it("育休中は保険料が免除でも年金記録は保護される（従前の標準報酬でみなし）", () => {
+    // 加入判定で年金記録の積み上げを絞ったとき、育休（exemptLeave = 保険料免除だが被保険者のまま）
+    // まで除外してしまうと、育休を取った人の厚生年金が静かに目減りする。
+    const pens = (leaveMonths: number) => {
+      const p = defaultPlan();
+      p.self.age = 30; p.self.income = [{ age: 30, value: 700 }]; p.self.retireAge = 65; p.self.incomeGrowthPct = 0;
+      p.spouse = defaultMember({ age: 30, employment: "employee", income: [{ age: 30, value: 500 }], retireAge: 65, incomeGrowthPct: 0 });
+      p.children = [defaultChild(0, 32)];
+      p.children[0].leaveMonthsSpouse = leaveMonths;
+      p.endAge = 90;
+      return simulate(p).rows.find(r => (r.spouse?.publicPension ?? 0) > 0)!.spouse!.pensionEmployee;
+    };
+    const none = pens(0);
+    expect(none).toBeGreaterThan(0);
+    expect(pens(12)).toBe(none);
+    expect(pens(24)).toBe(none);
+  });
   it("60 歳以上の被扶養者の収入要件は 180 万円", () => {
     const inp = (age: number) => ({ age, employment: "none" as const, salary: 0, pension: 1_500_000, otherTaxableIncome: 0, idecoAnnual: 0, lifeInsurancePremium: 0, dependentIt: 0, dependentRt: 0, spouseIncomeForDeduction: null, housingLoanCredit: 0, furusato: false, canBeDependent: true });
     expect(resolveSiStatus(inp(61), 0, 1_500_000)).toBe("dependent");
