@@ -449,11 +449,22 @@ describe("パート収入（106万・130万の壁、住民税の非課税限度�
     expect(over.breakdown.siStatus).toBe("employee");
     expect(over.takeHome).toBeLessThan(under.takeHome); // 手取りが逆転する「壁」
   });
-  it("扶養に入れない単身のパートは国保（均等割は軽減）", () => {
+  it("扶養に入れない単身のパートは国保（均等割は軽減）＋国民年金", () => {
+    // 第2号でも第3号でもない＝国民年金の第1号被保険者。国保だけでなく国民年金も自分で払う。
     const t = base(1_000_000, { canBeDependent: false });
     expect(t.breakdown.siStatus).toBe("self");
-    expect(t.socialInsurance.total).toBeGreaterThan(0);
-    expect(t.socialInsurance.total).toBeLessThan(30_000); // 7割軽減後の均等割
+    expect(t.socialInsurance.health).toBeGreaterThan(0);
+    expect(t.socialInsurance.health).toBeLessThan(30_000);        // 7割軽減後の均等割
+    expect(t.socialInsurance.pension).toBe(17_510 * 12);          // 国民年金（20〜59歳）
+  });
+  it("第1号被保険者の国民年金は働き方ではなく加入区分で決まる", () => {
+    // 無職でも短時間労働者でも、扶養に入れなければ第1号として国民年金がかかる。
+    const noJob = base(0, { employment: "none", canBeDependent: false });
+    const part = base(1_000_000, { canBeDependent: false });
+    const selfEmp = base(0, { employment: "selfEmployed", otherTaxableIncome: 3_000_000 });
+    for (const t of [noJob, part, selfEmp]) expect(t.socialInsurance.pension).toBe(17_510 * 12);
+    // 60 歳以上は国民年金の被保険者ではない
+    expect(base(0, { employment: "selfEmployed", age: 65, otherTaxableIncome: 3_000_000 }).socialInsurance.pension).toBe(0);
   });
   it("第3号の短時間労働者は、働き続けても厚生年金が増えない", () => {
     // 106万未満で被扶養者（第3号）になるパートは厚生年金の被保険者ではない。

@@ -257,7 +257,10 @@ export function computePersonTax(inp: PersonTaxInput): PersonTaxResult {
       // 会社員の育休中 → 社会保険料は免除（厚生年金の被保険者期間は継続）
       si = ZERO_SI;
     } else {
-      si = nonEmployeeSocialInsurance(nhiBase, inp.age, { nationalPension: inp.employment === "selfEmployed" || (inp.employment === "employee" && salary <= 0 && inp.age < 60) });
+      // ここに来るのは siStatus === "self"、つまり第2号でも第3号でもない人＝国民年金の第1号被保険者。
+      // 働き方で絞ると、無職で扶養に入れない人や 106 万未満の短時間労働者の国民年金が抜ける
+      // （README「どちらでもなければ国民健康保険＋国民年金」に反する）。20〜59 歳の判定は呼び先が持つ。
+      si = nonEmployeeSocialInsurance(nhiBase, inp.age, { nationalPension: true });
     }
   }
 
