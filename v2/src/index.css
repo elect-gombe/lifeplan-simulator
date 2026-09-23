@@ -48,38 +48,44 @@
   --warning: #9a6300;
   --critical: #c23434;
 }
-[data-theme="dark"] {
-  color-scheme: dark;
-  --surface-0: #101214;
-  --surface-1: #1a1c1f;
-  --surface-2: #202327;
-  --surface-3: #2a2e33;
-  --line: #2c3036;
-  --line-strong: #3d424a;
-  --ink: #f3f4f6;
-  --ink-2: #c3c6cc;
-  --ink-3: #949aa4;  /* surface-3 上でも 4.5:1 を確保 */
-  --accent: #3987e5;
-  --on-fill-strong: #0d1117;
-  --on-fill-soft: #0d1117;
-  --s-cash-chip: color-mix(in oklab, var(--s-cash) 85%, black);
-  --s-home-chip: color-mix(in oklab, var(--s-home) 85%, black);
-  --accent-soft: #1b2a3f;
-  --seg-on-bg: #3a4049;
-  --seg-on-ring: rgba(57,135,229,.55);
-  --s-cash: #3987e5;
-  --s-taxable: #d95926;
-  --s-nisa: #199e70;
-  --s-dc: #c98500;
-  --s-home: #9a6ae0;
-  --s-alt: #d55181;
-  --s-loan: #e66767;
-  --s-in: #199e70;
-  --s-out: #d95926;
-  --s-net: #3987e5;
-  --good: #0ca30c;
-  --warning: #fab219;
-  --critical: #e66767;
+/* 印刷はつねにライトのトークンで出す。ダークのまま刷ると、ブラウザが背景を落とす
+   設定では白い紙に薄い文字が乗り、背景を刷る設定では暗い面に印刷用の濃い文字（#555）
+   が乗って 2.3:1 まで落ちる。ここを `not print` で囲むと、印刷時は :root の
+   ライト値がそのまま効くので、色の二重定義を増やさずに済む。 */
+@media not print {
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #101214;
+    --surface-1: #1a1c1f;
+    --surface-2: #202327;
+    --surface-3: #2a2e33;
+    --line: #2c3036;
+    --line-strong: #3d424a;
+    --ink: #f3f4f6;
+    --ink-2: #c3c6cc;
+    --ink-3: #949aa4;  /* surface-3 上でも 4.5:1 を確保 */
+    --accent: #3987e5;
+    --on-fill-strong: #0d1117;
+    --on-fill-soft: #0d1117;
+    --s-cash-chip: color-mix(in oklab, var(--s-cash) 85%, black);
+    --s-home-chip: color-mix(in oklab, var(--s-home) 85%, black);
+    --accent-soft: #1b2a3f;
+    --seg-on-bg: #3a4049;
+    --seg-on-ring: rgba(57,135,229,.55);
+    --s-cash: #3987e5;
+    --s-taxable: #d95926;
+    --s-nisa: #199e70;
+    --s-dc: #c98500;
+    --s-home: #9a6ae0;
+    --s-alt: #d55181;
+    --s-loan: #e66767;
+    --s-in: #199e70;
+    --s-out: #d95926;
+    --s-net: #3987e5;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #e66767;
+  }
 }
 
 /* 要素リセットは @layer base に入れる。レイヤー外に置くと、どのレイヤーより強くなり

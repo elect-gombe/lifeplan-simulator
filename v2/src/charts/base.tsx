@@ -92,7 +92,12 @@ export function Tooltip({ x, y, width, children }: { x: number; y: number; width
 export function LegendItem({ color, label, dashed }: { color: string; label: string; dashed?: boolean }) {
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px] ink-2">
-      {dashed ? <span className="inline-block w-3 border-t-2 border-dashed" style={{ borderColor: color }} /> : <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color }} />}
+      {/* 色の見本は SVG で描く。CSS の background だと、ブラウザの印刷が既定で背景を
+          落とすため、紙やPDFでは凡例の色だけが消えて文字しか残らない。fill は内容
+          として扱われるので必ず出る。 */}
+      {dashed
+        ? <svg width="12" height="10" aria-hidden="true" className="shrink-0"><line x1="0" y1="5" x2="12" y2="5" stroke={color} strokeWidth="2" strokeDasharray="3 2" /></svg>
+        : <svg width="10" height="10" aria-hidden="true" className="shrink-0"><rect width="10" height="10" rx="2" fill={color} /></svg>}
       {label}
     </span>
   );
