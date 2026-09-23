@@ -11,11 +11,16 @@ export function ShareDialog({ open, onClose }: { open: boolean; onClose: () => v
   const [copied, setCopied] = useState(false);
   const [paste, setPaste] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
+  // encode は非同期。生成し直している間は古い URL を消し、後着の古い結果で上書きしない。
+  // （消さないと、開いた直後や編集直後に「コピー」を押したとき前回の URL がコピーされる）
   useEffect(() => {
     if (!open) return;
-    encodeShared(state.plans, state.activeId).then(h => setUrl(`${location.origin}${location.pathname}#p=${h}`));
+    let alive = true;
+    setUrl("");
+    encodeShared(state.plans, state.activeId).then(h => { if (alive) setUrl(`${location.origin}${location.pathname}#p=${h}`); });
+    return () => { alive = false; };
   }, [open, state.plans, state.activeId]);
-  const copy = async () => { try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ } };
+  const copy = async () => { if (!url) return; try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ } };
   const importText = () => {
     try {
       const st = parseState(JSON.parse(paste));
@@ -31,9 +36,9 @@ export function ShareDialog({ open, onClose }: { open: boolean; onClose: () => v
           <p className="hint mt-0.5">すべてのプランが URL に圧縮して埋め込まれます（サーバーには送信されません）。アドレスバーの URL も常に最新の状態に同期しています。</p>
           <div className="mt-2 flex gap-2">
             <input readOnly value={url} className="field flex-1 text-xs" onFocus={e => e.target.select()} />
-            <button onClick={copy} className={cx("btn", copied ? "btn-outline" : "btn-primary")}>{copied ? <><Check size={14} />コピー済</> : "コピー"}</button>
+            <button onClick={copy} disabled={!url} className={cx("btn", copied ? "btn-outline" : "btn-primary")}>{copied ? <><Check size={14} />コピー済</> : "コピー"}</button>
           </div>
-          <p className="hint mt-1">{url.length.toLocaleString()} 文字{url.length > 8000 && "（長いURLはメッセンジャー等で切れることがあります。JSON での共有も検討してください）"}</p>
+          <p className="hint mt-1">{url ? <>{url.length.toLocaleString()} 文字{url.length > 8000 && "（長いURLはメッセンジャー等で切れることがあります。JSON での共有も検討してください）"}</> : "生成中…"}</p>
         </section>
         <section>
           <h3 className="text-sm font-medium ink flex items-center gap-2"><Download size={15} />ファイルに保存</h3>
