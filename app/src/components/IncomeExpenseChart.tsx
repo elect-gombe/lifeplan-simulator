@@ -27,13 +27,14 @@ function categorizeExpenses(yr: YearResult): Record<ExpenseCategory, number> {
 }
 
 // 収入カテゴリ
-type IncomeCategory = "selfGross" | "spouseGross" | "pension" | "survivor" | "allowance" | "insurancePayout";
+type IncomeCategory = "selfGross" | "spouseGross" | "pension" | "survivor" | "allowance" | "leaveBenefit" | "insurancePayout";
 const INCOME_CATS: { key: IncomeCategory; label: string; color: string }[] = [
   { key: "selfGross", label: "本人給与", color: "#2563eb" },
   { key: "spouseGross", label: "配偶者給与", color: "#ec4899" },
   { key: "pension", label: "老齢年金", color: "#f59e0b" },
   { key: "survivor", label: "遺族年金・保険", color: "#8b5cf6" },
   { key: "allowance", label: "児童手当", color: "#10b981" },
+  { key: "leaveBenefit", label: "育休給付金", color: "#f472b6" },
   { key: "insurancePayout", label: "保険金", color: "#06b6d4" },
 ];
 
@@ -44,6 +45,7 @@ function categorizeIncome(yr: YearResult): Record<IncomeCategory, number> {
     pension: yr.self.pensionIncome + yr.spouse.pensionIncome,
     survivor: yr.survivorIncome,
     allowance: yr.childAllowance,
+    leaveBenefit: yr.parentalLeaveBenefit,
     insurancePayout: yr.insurancePayoutTotal,
   };
 }

@@ -215,6 +215,18 @@ export interface MarketCrashParams {
   targetRR?: number;       // 目標平均利回り(%)。ボーナスレート算出に使用
 }
 
+// 育休（親の育児休業）— 子供イベント（親）に付与。本人・配偶者それぞれ設定可。
+export interface ParentalLeaveSpec {
+  months: number;        // 休業月数（出生月から連続）
+  benefit: boolean;      // 育児休業給付金を受給（雇用保険加入者）: 180日まで67%、以降50%、非課税・社保対象外
+  returnRatio?: number;  // 復職後の年収比率（%）。時短勤務など。未設定=100
+  returnYears?: number;  // 復職後比率を適用する年数。未設定=0
+}
+export interface ParentalLeaveParams {
+  self?: ParentalLeaveSpec;
+  spouse?: ParentalLeaveSpec;
+}
+
 export interface LifeEvent {
   id: number;
   age: number;
@@ -247,6 +259,7 @@ export interface LifeEvent {
   };
   disabled?: boolean;  // true=計算から除外（UIではグレーアウト表示）
   isPrivate?: boolean; // 教育サブイベント: 私立か（多子世帯減免の上限判定に使用）
+  parentalLeave?: ParentalLeaveParams; // 子供イベント（親）: 出生時の育休
 }
 
 // Computed cost breakdown for a single year from a structured event
@@ -451,6 +464,9 @@ export interface MemberResult {
   nisaAsset: number;
   nisaCostBasis: number;
   nisaContribution: number;
+  // 育休（該当年のみ非0）
+  leaveMonths: number;   // 当年の休業月数
+  leaveBenefit: number;  // 育児休業給付金（円/年、非課税）
 }
 
 export interface YearResult {
@@ -509,6 +525,8 @@ export interface YearResult {
   // Insurance
   insurancePremiumTotal: number;
   insurancePayoutTotal: number;
+  // 育児休業給付金（世帯合計、非課税。手取りに含まれる）
+  parentalLeaveBenefit: number;
   // Inheritance tax (death year)
   inheritanceTax: number;
   inheritanceEstate: number;

@@ -11,14 +11,14 @@ export function Section({ id, title, icon, borderColor, bgOpen, open, onToggle, 
   return (
     <div id={id} className={`rounded-md border-l-[3px] transition-colors duration-150 ${open ? bgOpen || "bg-gray-50/50" : "hover:bg-gray-50/50"}`} style={{ borderLeftColor: borderColor }}>
       <div className={`flex items-center justify-between px-2 py-1.5 cursor-pointer select-none rounded-r-md ${!open ? "hover:bg-gray-100/60" : ""}`} onClick={onToggle}>
-        <div className="flex items-center gap-1.5">
-          <span className={`text-[11px] w-4 text-center transition-transform duration-200 ${open ? "rotate-0" : "-rotate-90"}`} style={{ color: borderColor }}>▼</span>
-          {icon && <span className="text-xs">{icon}</span>}
-          <span className="text-xs font-bold" style={{ color: borderColor }}>{title}</span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className={`w-4 shrink-0 text-center text-[11px] transition-transform duration-200 ${open ? "rotate-0" : "-rotate-90"}`} style={{ color: borderColor }}>▼</span>
+          {icon && <span className="shrink-0 text-xs">{icon}</span>}
+          <span className="shrink-0 whitespace-nowrap text-xs font-bold" style={{ color: borderColor }}>{title}</span>
           <LinkBadge linked={linked} />
-          {badge}
+          {badge && <span className="min-w-0 truncate">{badge}</span>}
         </div>
-        {right && <div onClick={e => e.stopPropagation()}>{right}</div>}
+        {right && <div className="ml-2 shrink-0" onClick={e => e.stopPropagation()}>{right}</div>}
       </div>
       <div className="grid transition-[grid-template-rows] duration-200 ease-in-out" style={{ gridTemplateRows: open ? "1fr" : "0fr" }}>
         <div className="overflow-hidden">

@@ -30,13 +30,6 @@ export function calcMonthlyPaymentPrincipalEqual(principal: number, annualRate: 
   return Math.round(monthlyPrincipal + remaining * (annualRate / 100 / 12));
 }
 
-function calcMonthlyPayment(principal: number, annualRate: number, years: number, repaymentType?: string): number {
-  if (repaymentType === "equal_principal") {
-    return calcMonthlyPaymentPrincipalEqual(principal, annualRate, years, 0);
-  }
-  return calcMonthlyPaymentEqual(principal, annualRate, years);
-}
-
 export function loanBalanceAfterYears(principal: number, annualRate: number, totalYears: number, elapsedYears: number, repaymentType?: string): number {
   if (repaymentType === "equal_principal") {
     const monthlyPrincipal = principal / (totalYears * 12);
@@ -70,41 +63,12 @@ export interface LoanScheduleEntry {
   spouseMonthlyPayment?: number;
 }
 
-// Simulate monthly payments for 12 months and return remaining balance
-function simulateOneYear(balance: number, monthlyPayment: number, annualRate: number, repType: string): number {
-  if (balance <= 0) return 0;
-  const r = annualRate / 100 / 12;
-  let bal = balance;
-  for (let m = 0; m < 12 && bal > 0; m++) {
-    const interest = bal * r;
-    if (repType === "equal_principal") {
-      // 元金均等: 元金部分は月額固定（= 当初balance / 総月数 だが、ここでは monthlyPayment - interest で算出）
-      const principalPart = monthlyPayment - interest; // monthlyPayment = 元金部分 + 初月利息 で渡される想定ではない
-      // 元金均等の場合、元金返済額は balance / (remainingYears * 12) で固定なので別関数で処理
-      bal -= (monthlyPayment > interest ? monthlyPayment - interest : monthlyPayment);
-    } else {
-      // 元利均等: 月額固定、元金部分 = 月額 - 利息
-      const principalPart = monthlyPayment - interest;
-      if (principalPart <= 0) { bal = 0; break; } // 金利0の場合
-      bal -= principalPart;
-    }
-  }
-  return Math.max(Math.round(bal), 0);
-}
-
-// Single sub-loan simulation state
-interface SubLoanState {
-  balance: number;
-  remainingYears: number;
-  monthlyPayment: number; // equal_payment only
-}
-
 function buildSingleLoanSchedule(
   initialBalance: number, loanYears: number, repType: string,
   pp: PropertyParams, startAge: number,
   prepayments: PrepaymentEntry[],
 ): { entries: { balance: number; annualPayment: number; monthlyPayment: number; remainingYears: number; prepaymentAmount: number; isRefinanced: boolean; rate: number }[]; } {
-  const entries: { balance: number; annualPayment: number; monthlyPayment: number; remainingYears: number; prepaymentAmount: number; isRefinanced: boolean }[] = [];
+  const entries: { balance: number; annualPayment: number; monthlyPayment: number; remainingYears: number; prepaymentAmount: number; isRefinanced: boolean; rate: number }[] = [];
   if (initialBalance <= 0) return { entries };
 
   let balance = initialBalance;
@@ -222,7 +186,6 @@ export function buildLoanSchedule(pp: PropertyParams, startAge: number): LoanSch
 
   const isPair = pp.loanStructure === "pair";
   const selfRatio = isPair ? (pp.pairRatio ?? 50) / 100 : 1;
-  const spouseRatio = isPair ? 1 - selfRatio : 0;
   const repType = pp.repaymentType || "equal_payment";
   const prepayments = pp.prepayments || [];
 

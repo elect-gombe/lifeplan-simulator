@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { NumIn } from "./ui";
 import type { DeathParams, EventTarget } from "../lib/types";
 import { EventModal, type EventModalBaseProps, type EventModalDef } from "./EventModal";
 
@@ -52,9 +53,7 @@ export function DeathModal(props: EventModalBaseProps) {
 
           {/* 死亡時年齢 */}
           <div>
-            <label className="block font-semibold text-gray-600 mb-1">死亡時年齢（{targetLabel}）</label>
-            <input type="number" value={age} min={curAge} max={retirementAge - 1}
-              onChange={e => setAge(Number(e.target.value))} className="w-full rounded border px-2 py-1.5" />
+            <NumIn label={<>死亡時年齢（{targetLabel}）</>} value={age} onChange={v => setAge(v)} min={curAge} max={retirementAge - 1} unit="歳" fill />
           </div>
 
           {/* 団信 */}

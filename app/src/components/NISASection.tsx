@@ -1,9 +1,12 @@
 import React from "react";
 import type { Scenario, NISAConfig, BalancePolicy } from "../lib/types";
 import { Section } from "./Section";
-import { Inp, Btns, Lnk } from "./ui";
+import { Inp, Btns, Lnk, Check, FieldRow, SubGroup, MiniBtn, NumField, Help } from "./ui";
 
 // ===== 残高ポリシーエディター（共通コンポーネント） =====
+
+const WITHDRAW_LABELS: Record<string, string> = { taxable: "特定口座", spouseNisa: "配偶者NISA", selfNisa: "本人NISA" };
+const DEFAULT_ORDER: NonNullable<BalancePolicy["withdrawalOrder"]> = ["taxable", "spouseNisa", "selfNisa"];
 
 export function BalancePolicyEditor({ bp, onChange, currentAge, hasSpouse, readOnly, linked, onLinkToggle }: {
   bp: BalancePolicy;
@@ -15,70 +18,63 @@ export function BalancePolicyEditor({ bp, onChange, currentAge, hasSpouse, readO
   onLinkToggle?: () => void;
 }) {
   const disabled = !!readOnly;
+  const order = bp.withdrawalOrder || DEFAULT_ORDER;
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir; if (j < 0 || j >= order.length) return;
+    const o = [...order]; [o[i], o[j]] = [o[j], o[i]];
+    onChange({ withdrawalOrder: o as BalancePolicy["withdrawalOrder"] });
+  };
+  const anchors = bp.cashAnchors || [];
+  const setAnchor = (i: number, patch: Partial<{ age: number; amountMan: number }>) => {
+    const a = [...anchors]; a[i] = { ...a[i], ...patch }; onChange({ cashAnchors: a });
+  };
+  const maxMonths = bp.cashReserveMaxMonths ?? bp.cashReserveMonths;
+
   return (
-    <div className={`space-y-1.5 ${disabled ? "opacity-50 pointer-events-none" : ""}`}>
-      <div className="flex items-center gap-1">
-        <span className="text-[10px] font-semibold text-gray-600">残高ポリシー</span>
-        {onLinkToggle && <Lnk linked={!!linked} onToggle={onLinkToggle} />}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <div className="flex items-center gap-1 flex-wrap">
-          <span className="text-gray-500 text-[10px]">防衛資金<span className="ml-0.5 cursor-help text-gray-400" title="月間支出ベース。下限を下回ったら取り崩し、上限を超えたらNISA/特定へ投資。その間は何もしない(ヒステリシス)">ⓘ</span></span>
-          <Inp label="下限" value={bp.cashReserveMonths} onChange={v => onChange({ cashReserveMonths: v })} w="w-10" step={1} min={0} />
-          <Inp label="〜上限" value={bp.cashReserveMaxMonths ?? bp.cashReserveMonths} onChange={v => onChange({ cashReserveMaxMonths: v })} unit="ヶ月" w="w-10" step={1} min={bp.cashReserveMonths} />
-        </div>
-        <label className="flex items-center gap-1 text-[10px] cursor-pointer">
-          <input type="checkbox" checked={bp.nisaPriority} onChange={e => onChange({ nisaPriority: e.target.checked })} className="accent-green-600" />
-          <span className="text-gray-500">余剰→NISA/特定優先</span>
-        </label>
-      </div>
-      {/* 目標貯金アンカー */}
-      <div className="text-[10px]">
-        <div className="flex items-center gap-1 mb-0.5">
-          <span className="text-gray-500 font-semibold">目標貯金<span className="ml-0.5 cursor-help text-gray-400" title="特定年齢までに現金をX万円確保。目標に向けて投資を抑制し現金を多めに持ちます">ⓘ</span></span>
-          <button onClick={() => onChange({ cashAnchors: [...(bp.cashAnchors || []), { age: currentAge + 5, amountMan: 500 }] })}
-            className="text-blue-500 hover:underline">+ 追加</button>
-        </div>
-        {(bp.cashAnchors || []).map((a, i) => (
-          <div key={i} className="flex items-center gap-1 mb-0.5">
-            <input type="number" value={a.age} min={currentAge + 1} step={1}
-              onChange={e => { const anc = [...(bp.cashAnchors || [])]; anc[i] = { ...a, age: Number(e.target.value) }; onChange({ cashAnchors: anc }); }}
-              className="w-12 rounded border px-1 py-0.5 text-xs" />
-            <span className="text-gray-400">歳までに</span>
-            <input type="number" value={a.amountMan} step={100} min={0}
-              onChange={e => { const anc = [...(bp.cashAnchors || [])]; anc[i] = { ...a, amountMan: Number(e.target.value) }; onChange({ cashAnchors: anc }); }}
-              className="w-16 rounded border px-1 py-0.5 text-xs" />
-            <span className="text-gray-400">万円</span>
-            <button onClick={() => { const anc = [...(bp.cashAnchors || [])]; anc.splice(i, 1); onChange({ cashAnchors: anc }); }}
-              className="text-gray-300 hover:text-red-500">×</button>
+    <SubGroup title={<>生活防衛資金・取り崩し<Help text="現金が下限を下回ったら投資資産を取り崩し、上限を超えた分はNISA/特定口座へ投資。その間は何もしない（ヒステリシス）" /></>}
+      right={onLinkToggle && <Lnk linked={!!linked} onToggle={onLinkToggle} />}
+      className={disabled ? "opacity-50 pointer-events-none" : ""}>
+      <FieldRow>
+        <Inp label="現金の下限" value={bp.cashReserveMonths} onChange={v => onChange({ cashReserveMonths: v })} unit="ヶ月分" w="w-10" step={1} min={0} max={60} help="月間支出の何ヶ月分を現金で確保するか" presets={[3, 6, 12, 24]} />
+        <>
+          <Inp label="上限" value={maxMonths} onChange={v => onChange({ cashReserveMaxMonths: v })} unit="ヶ月分" w="w-10" step={1} min={bp.cashReserveMonths} max={120} help="超えた分を投資へ" />
+          <Check label="余剰は NISA/特定口座 へ投資" checked={bp.nisaPriority} onChange={v => onChange({ nisaPriority: v })} accent="accent-green-600" />
+        </>
+      </FieldRow>
+      <>
+        <div className="mt-1.5 flex flex-wrap gap-x-6 gap-y-1.5 text-[10px]">
+          {/* 目標貯金アンカー */}
+          <div>
+            <div className="mb-0.5 flex items-center gap-1">
+              <span className="font-semibold text-gray-500">目標貯金<Help text="特定年齢までに現金をX万円確保。目標に向けて投資を抑制し現金を多めに持ちます" /></span>
+              <MiniBtn onClick={() => onChange({ cashAnchors: [...anchors, { age: currentAge + 5, amountMan: 500 }] })}>＋ 追加</MiniBtn>
+            </div>
+            {anchors.map((a, i) => (
+              <div key={i} className="mb-0.5 flex items-center gap-1">
+                <NumField value={a.age} min={currentAge + 1} max={110} step={1} unit="歳までに" w="w-10" onChange={v => setAnchor(i, { age: v })} />
+                <NumField value={a.amountMan} step={100} min={0} unit="万円" w="w-16" onChange={v => setAnchor(i, { amountMan: v })} />
+                <button type="button" onClick={() => onChange({ cashAnchors: anchors.filter((_, j) => j !== i) })} className="text-gray-300 hover:text-red-500">×</button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      {/* 引出順序 */}
-      <details className="text-[10px]">
-        <summary className="cursor-pointer text-gray-500">引出順序{bp.withdrawalOrder ? " (カスタム)" : " (デフォルト)"}</summary>
-        <div className="mt-1 space-y-1 bg-gray-50 rounded p-1.5">
-          <div className="text-gray-400">資産取り崩し順序（上から優先）</div>
-          {(() => {
-            const order = bp.withdrawalOrder || ["taxable", "spouseNisa", "selfNisa"];
-            const labels: Record<string, string> = { taxable: "特定口座", spouseNisa: "配偶者NISA", selfNisa: "本人NISA" };
-            const moveUp = (i: number) => { if (i <= 0) return; const o = [...order]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; onChange({ withdrawalOrder: o as any }); };
-            const moveDown = (i: number) => { if (i >= order.length - 1) return; const o = [...order]; [o[i], o[i + 1]] = [o[i + 1], o[i]]; onChange({ withdrawalOrder: o as any }); };
-            return order
-              .filter(src => src !== "spouseNisa" || hasSpouse)
-              .map((src, i) => (
-                <div key={src} className="flex items-center gap-1">
-                  <span className="w-4 text-center text-gray-400">{i + 1}.</span>
-                  <span className="flex-1">{labels[src]}</span>
-                  <button onClick={() => moveUp(i)} className="text-gray-400 hover:text-blue-500" disabled={i === 0}>▲</button>
-                  <button onClick={() => moveDown(i)} className="text-gray-400 hover:text-blue-500" disabled={i === order.length - 1}>▼</button>
-                </div>
-              ));
-          })()}
-          {bp.withdrawalOrder && <button onClick={() => onChange({ withdrawalOrder: undefined })} className="text-blue-500 hover:underline">デフォルトに戻す</button>}
+          {/* 引出順序 */}
+          <div>
+            <div className="mb-0.5 flex items-center gap-1">
+              <span className="font-semibold text-gray-500">取り崩し順序<Help text="上から優先して取り崩します" /></span>
+              {bp.withdrawalOrder && <MiniBtn tone="gray" onClick={() => onChange({ withdrawalOrder: undefined })}>デフォルトに戻す</MiniBtn>}
+            </div>
+            {order.filter(src => src !== "spouseNisa" || hasSpouse).map((src, i) => (
+              <div key={src} className="flex items-center gap-1">
+                <span className="w-4 text-center text-gray-400">{i + 1}.</span>
+                <span className="w-20">{WITHDRAW_LABELS[src]}</span>
+                <button type="button" onClick={() => move(i, -1)} className="text-gray-400 hover:text-blue-500 disabled:opacity-30" disabled={i === 0}>▲</button>
+                <button type="button" onClick={() => move(i, 1)} className="text-gray-400 hover:text-blue-500 disabled:opacity-30" disabled={i === order.length - 1}>▼</button>
+              </div>
+            ))}
+          </div>
         </div>
-      </details>
-    </div>
+      </>
+    </SubGroup>
   );
 }
 
@@ -93,90 +89,56 @@ export function NISASection({ s, onChange, currentAge, isLinked, baseScenario, o
   const defaultBP: BalancePolicy = { cashReserveMonths: 6, cashReserveMaxMonths: 18, nisaPriority: true };
   const bpInherited = !s.balancePolicy && !!baseS?.balancePolicy;
   const bp = s.balancePolicy || baseS?.balancePolicy || defaultBP;
-  const bpReadOnly = bpInherited;
   const setNISA = (patch: Partial<NISAConfig>) => onChange({ ...s, nisa: { ...ni, ...patch } });
   const setBP = (patch: Partial<BalancePolicy>) => onChange({ ...s, balancePolicy: { ...bp, ...patch } });
+  const hasIndividualRR = s.dcReturnRate != null || s.nisaReturnRate != null || s.taxableReturnRate != null || s.cashInterestRate != null;
+  const rrField = (label: string, key: "dcReturnRate" | "nisaReturnRate" | "taxableReturnRate") => (
+    <span className="inline-flex items-center gap-1">
+      <span className="text-[10px] text-gray-500">{label}</span>
+      <NumField value={s[key] ?? null} step={0.5} min={0} max={30} unit="%" w="w-12" placeholder="共通" title="空欄＝シナリオ設定の運用利回りを使用"
+        onChange={v => onChange({ ...s, [key]: v })} onClear={() => onChange({ ...s, [key]: undefined })} />
+    </span>
+  );
 
+  const summary = effNi.enabled ? `NISA ${effNi.accounts === 2 ? "夫婦2口座" : "本人1口座"} / 現金${bp.cashReserveMonths}ヶ月` : `NISAなし / 現金${bp.cashReserveMonths}ヶ月`;
   return (
     <Section title="NISA / 投資" icon="📈" borderColor="#16a34a" bgOpen="bg-green-50/30" open={open} onToggle={onToggle}
       linked={!!inheritedFromBase}
-      badge={effNi.enabled ? <span className="font-normal text-gray-400 text-[10px]">(有効)</span> : undefined}
-      right={
-        <label className="flex items-center gap-1 text-[10px] cursor-pointer">
-          <input type="checkbox" checked={ni.enabled || !!inheritedFromBase} onChange={e => setNISA({ enabled: e.target.checked })} className="accent-green-600" />
-          <span className="text-gray-500">有効</span>
-        </label>
-      }>
-      {ni.enabled && (
-        <div className="space-y-1.5 text-xs">
-          <div className="flex flex-wrap gap-2">
-            <div className="flex items-center gap-1">
-              <span className="text-gray-500 text-[10px]">口座</span>
-              <Btns options={[{value:1 as const,label:"本人"},{value:2 as const,label:"夫婦2"}]}
-                value={ni.accounts} onChange={v => setNISA({ accounts: v })} color="green" />
-            </div>
-            <Inp label="年間枠" value={ni.annualLimitMan} onChange={v => setNISA({ annualLimitMan: v })} unit="万/人" step={10} />
-            <Inp label="生涯枠" value={ni.lifetimeLimitMan} onChange={v => setNISA({ lifetimeLimitMan: v })} unit="万/人" step={100} />
-          </div>
-          <div className="text-[10px] text-gray-400">合計: 年{ni.annualLimitMan * (ni.accounts || 1)}万 / 生涯{ni.lifetimeLimitMan * (ni.accounts || 1)}万 ｜ NISA非課税、超過→特定口座(20.315%課税)</div>
-          {/* Phase 3: 個別利回り */}
-          <div className="border-t border-green-100 pt-1">
-            <details className="text-[10px]">
-              <summary className="cursor-pointer font-semibold text-gray-600">
-                利回り設定
-                <span className="font-normal text-gray-400 ml-1">
-                  {(s.dcReturnRate != null || s.nisaReturnRate != null || s.taxableReturnRate != null || s.cashInterestRate != null)
-                    ? `(個別: DC${s.dcReturnRate ?? "共通"}% NISA${s.nisaReturnRate ?? "共通"}% 特定${s.taxableReturnRate ?? "共通"}% 現金${s.cashInterestRate ?? 0}%)`
-                    : "(共通利回りを使用)"}
-                </span>
-              </summary>
-              <div className="mt-1 space-y-1 bg-green-50 rounded p-1.5">
-                <div className="text-gray-500">未設定の場合、グローバル運用利回り(rr)が適用されます</div>
-                <div className="flex flex-wrap gap-2">
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-500">DC</span>
-                    <input type="number" value={s.dcReturnRate ?? ""} step={0.5} placeholder="共通"
-                      onChange={e => onChange({ ...s, dcReturnRate: e.target.value ? Number(e.target.value) : undefined })}
-                      className="w-14 rounded border px-1 py-0.5" />
-                    <span className="text-gray-400">%</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-500">NISA</span>
-                    <input type="number" value={s.nisaReturnRate ?? ""} step={0.5} placeholder="共通"
-                      onChange={e => onChange({ ...s, nisaReturnRate: e.target.value ? Number(e.target.value) : undefined })}
-                      className="w-14 rounded border px-1 py-0.5" />
-                    <span className="text-gray-400">%</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-500">特定口座</span>
-                    <input type="number" value={s.taxableReturnRate ?? ""} step={0.5} placeholder="共通"
-                      onChange={e => onChange({ ...s, taxableReturnRate: e.target.value ? Number(e.target.value) : undefined })}
-                      className="w-14 rounded border px-1 py-0.5" />
-                    <span className="text-gray-400">%</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-500">現金</span>
-                    <input type="number" value={s.cashInterestRate ?? 0} step={0.1} min={0}
-                      onChange={e => onChange({ ...s, cashInterestRate: Number(e.target.value) || undefined })}
-                      className="w-14 rounded border px-1 py-0.5" />
-                    <span className="text-gray-400">%</span>
-                  </div>
-                </div>
-              </div>
-            </details>
-          </div>
-        </div>
-      )}
-      {/* 残高ポリシー — NISA有効/無効に関係なく常に表示 */}
-      <div className="border-t border-green-100 pt-1 mt-1">
+      badge={<span className="font-normal text-gray-400 text-[10px]">({summary})</span>}
+      right={<Check label="NISAを使う" checked={ni.enabled || !!inheritedFromBase} onChange={v => setNISA({ enabled: v })} accent="accent-green-600" />}>
+      <div className="space-y-1.5 text-xs">
+        {ni.enabled && (
+          <FieldRow>
+            <Btns label="口座" options={[{ value: 1 as const, label: "本人のみ" }, { value: 2 as const, label: "夫婦2口座" }]}
+              value={ni.accounts} onChange={v => setNISA({ accounts: v })} color="green" />
+            <>
+              <Inp label="年間枠" value={ni.annualLimitMan} onChange={v => setNISA({ annualLimitMan: v })} unit="万/人" w="w-12" step={10} min={0} />
+              <Inp label="生涯枠" value={ni.lifetimeLimitMan} onChange={v => setNISA({ lifetimeLimitMan: v })} unit="万/人" w="w-14" step={100} min={0} />
+            </>
+            <span className="self-center text-[10px] text-gray-400">合計 年{ni.annualLimitMan * (ni.accounts || 1)}万 / 生涯{(ni.lifetimeLimitMan * (ni.accounts || 1)).toLocaleString()}万。超過分は特定口座（20.315%課税）</span>
+          </FieldRow>
+        )}
+
+        
+        <>
+          <SubGroup title={<>口座別の利回り<Help text="未入力の口座は「シナリオ設定」の運用利回りを使用" /></>}>
+            <FieldRow>
+              {rrField("DC", "dcReturnRate")}
+              {rrField("NISA", "nisaReturnRate")}
+              {rrField("特定口座", "taxableReturnRate")}
+              <Inp label="現金" value={s.cashInterestRate ?? 0} onChange={v => onChange({ ...s, cashInterestRate: v || undefined })} unit="%" w="w-12" step={0.1} min={0} max={10} />
+            </FieldRow>
+          </SubGroup>
+        </>
+
         <BalancePolicyEditor
           bp={bp}
           onChange={setBP}
           currentAge={currentAge}
-          hasSpouse={s.spouse?.enabled}
-          readOnly={bpReadOnly}
-          linked={bpReadOnly}
-          onLinkToggle={baseS ? () => bpReadOnly ? setBP({}) : onChange({ ...s, balancePolicy: undefined }) : undefined}
+          hasSpouse={s.spouse?.enabled || !!baseS?.spouse?.enabled}
+          readOnly={bpInherited}
+          linked={bpInherited}
+          onLinkToggle={baseS ? () => (bpInherited ? setBP({}) : onChange({ ...s, balancePolicy: undefined })) : undefined}
         />
       </div>
     </Section>
