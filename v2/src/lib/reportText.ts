@@ -123,7 +123,7 @@ function detailDump(rows: YearRow[], plan: Plan, interval = 5): string {
 function summarySection(rows: YearRow[], s: Summary, plan: Plan): string {
   const last = rows[rows.length - 1];
   const L = ["### 総括"];
-  L.push(`- 総合スコア ${s.healthScore}/100。${s.depletionAge != null ? `**${s.depletionAge}歳で流動資産がマイナス**` : `${plan.endAge}歳まで流動資産はプラスを維持`}`);
+  L.push(`- 総合スコア ${s.healthScore}/100。${s.depletionAge != null ? `**${s.depletionAge}歳で流動資産がマイナス**` : `${plan.endAge}歳まで流動資産はプラスを維持する結果`}`);
   L.push(`- 最終年（${last.age}歳）: 純資産 ${oku(last.balances.netWorth)}、流動資産 ${oku(last.balances.liquid)}（現金 ${man(last.balances.cash)} / NISA ${man(last.balances.nisa)} / 特定 ${man(last.balances.taxable)}）、DC ${man(last.balances.dc)}、住宅 ${man(last.balances.home)}、ローン ${man(-last.balances.loan)}`);
   if (s.retirementNetWorth != null) L.push(`- 退職時（${plan.self.retireAge}歳）: 純資産 ${oku(s.retirementNetWorth)}、流動資産 ${oku(s.retirementLiquid ?? 0)}`);
   L.push(`- 流動資産の最低: ${s.minLiquid.age}歳 ${oku(s.minLiquid.value)}／最高: ${s.peakLiquid.age}歳 ${oku(s.peakLiquid.value)}`);
@@ -148,6 +148,7 @@ export function generateTextReport(items: ReportInput[], allPlans: Plan[], opts:
   const parts: string[] = [];
   parts.push("# ライフプラン・シミュレーション レポート");
   parts.push(`生成: ${new Date().toISOString().slice(0, 10)}。金額は名目（インフレ込み）。`);
+  parts.push("※ 以下はすべて、入力された前提のもとでのシミュレーション結果です。将来の家計や制度を予測・保証するものではなく、前提を変えれば結果も変わります。断定的な結論ではなく、前提と結果の関係として読んでください。");
   parts.push("※ 税・社会保険は 2025 年度改正後の恒久ルールを簡略化（基礎控除 58 万、給与所得控除 最低 65 万、協会けんぽ平均料率）。公的年金は現在の水準（基礎年金満額 83.2 万）を基準に加入月数と平均年収から見込み、インフレ率＋マクロスライド調整率で名目改定。国保・後期高齢者医療・介護保険は所得比例の概算。相続税・譲渡税は簡易計算。");
   parts.push("※ 「手取り」= 額面 − 所得税 − 住民税 − 社会保険料 − ふるさと納税寄附。iDeCo・選択制 DC の拠出は支出「その他」または給与から控除。NISA/特定口座への積立は収支の後の運用フロー。");
   if (items.length > 1) parts.push(`※ 比較対象 ${items.length} プラン: ${items.map(i => i.plan.name).join(" / ")}。リンクしているプランは、上書きしていないセクションがベースプランと同一です。`);

@@ -134,10 +134,10 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
         <ul className="text-xs ink-2 space-y-1 list-disc pl-5">
           <li>今年の世帯収入（手取り）は {fmtMan(summary.currentYear.takeHome)}、支出は {fmtMan(summary.currentYear.out)} で、年間 {fmtMan(summary.currentYear.net, { sign: true })}（貯蓄率 {fmtPct(summary.currentYear.savingsRate, 0)}）です。</li>
           <li>{summary.depletionAge != null
-            ? `現在の前提では ${summary.depletionAge}歳で流動資産（現金・NISA・特定口座）がマイナスになります。生活費・住居費の見直し、収入の延長、運用方針の調整が必要です。`
-            : `最終年（${plan.endAge}歳）まで流動資産は持続し、最終年の純資産は ${fmtMan(summary.finalNetWorth)} です。最も資産が少なくなるのは ${summary.minLiquid.age}歳（${fmtMan(summary.minLiquid.value)}）です。`}</li>
+            ? `入力された前提のもとでは ${summary.depletionAge}歳で流動資産（現金・NISA・特定口座）がマイナスになる結果です。生活費・住居費、働く期間、運用方針などの見直しが考えられます。`
+            : `この試算では最終年（${plan.endAge}歳）まで流動資産が持続し、最終年の純資産は ${fmtMan(summary.finalNetWorth)} です。最も資産が少なくなるのは ${summary.minLiquid.age}歳（${fmtMan(summary.minLiquid.value)}）です。`}</li>
           <li>生涯の税・社会保険料は {fmtMan(summary.lifetime.taxAndSi)}（生涯の手取り収入 {fmtMan(summary.lifetime.income)} に対して {fmtPct(summary.lifetime.taxAndSi / Math.max(summary.lifetime.income, 1), 0)}）。生活費 {fmtMan(summary.lifetime.living)}、住居費 {fmtMan(summary.lifetime.housing)}、教育・養育費 {fmtMan(summary.lifetime.education)}。</li>
-          {risk.map(rk => <li key={rk.who}>{rk.name} に万一の場合（翌年）、遺族の流動資産の最低は {rk.min.age}歳時点で {fmtMan(rk.min.balances.liquid)}。{Math.max(...rk.curve.map(c => c.shortfall), 0) > 0 ? `追加で必要な死亡保障は最大 ${fmtMan(Math.max(...rk.curve.map(c => c.shortfall)))}（${rk.curve.reduce((m, c) => (c.shortfall > m.shortfall ? c : m), rk.curve[0]).deathAge}歳で亡くなった場合）です。` : "現在の保障・遺族年金・資産で遺族の生活は維持できます。"}</li>)}
+          {risk.map(rk => <li key={rk.who}>{rk.name} に万一の場合（翌年）、遺族の流動資産の最低は {rk.min.age}歳時点で {fmtMan(rk.min.balances.liquid)}。{Math.max(...rk.curve.map(c => c.shortfall), 0) > 0 ? `追加で必要な死亡保障は最大 ${fmtMan(Math.max(...rk.curve.map(c => c.shortfall)))}（${rk.curve.reduce((m, c) => (c.shortfall > m.shortfall ? c : m), rk.curve[0]).deathAge}歳で亡くなった場合）です。` : "この試算では、現在の保障・遺族年金・資産で遺族の生活が維持される結果です。"}</li>)}
         </ul>
         <p className="hint">この試算は入力された前提に基づく概算であり、将来の結果を保証するものではありません。税制・社会保険・年金制度は簡略化しています。金額は特記のない限り名目・万円。</p>
       </Page>
@@ -394,10 +394,10 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
             ["(イ) その時点の死亡保険金（既存の保険）", ...rk.checkpoints.map(c => `${man(c.cover)}万`)],
             ["(ウ) 死亡退職金・弔慰金", ...rk.checkpoints.map(c => `${man(c.deathBenefit)}万`)],
           ]} />
-          <p className="hint">(ア) は既存の保険・団信・遺族年金・死亡退職金・生活費 {plan.living.survivorPct}% を織り込んだうえで、遺族の流動資産が最も減る時点のマイナス分。0 なら追加の保障は不要です。年齢別の推移は「万一・リスク」ビューで確認できます。</p>
+          <p className="hint">(ア) は既存の保険・団信・遺族年金・死亡退職金・生活費 {plan.living.survivorPct}% を織り込んだうえで、遺族の流動資産が最も減る時点のマイナス分。0 は、この試算の前提では追加の保障がなくても不足しないことを示します。年齢別の推移は「万一・リスク」ビューで確認できます。</p>
           {rk.curve.some(p => p.shortfall > 0)
             ? <div className="px-1 pb-2"><LineCompare height={180} unitLabel="追加で必要な死亡保障" series={[{ id: "gap", label: "必要保障額（不足額）", color: "var(--warning)", points: rk.curve.map(p => ({ age: p.deathAge, value: p.shortfall })) }]} /></div>
-            : <p className="text-xs ink-2 rounded-lg p-2.5" style={{ background: "var(--accent-soft)" }}>{plan.self.age + 1}〜{rk.curve[rk.curve.length - 1]?.deathAge ?? plan.endAge}歳のどの時点で亡くなっても、遺族の流動資産はマイナスになりません。追加の死亡保障は不要です。</p>}
+            : <p className="text-xs ink-2 rounded-lg p-2.5" style={{ background: "var(--accent-soft)" }}>{plan.self.age + 1}〜{rk.curve[rk.curve.length - 1]?.deathAge ?? plan.endAge}歳のどの時点で亡くなっても、遺族の流動資産はマイナスにならない結果です。あくまでこの試算の前提のもとでは、追加の死亡保障は不要という結果になります。</p>}
         </Page>
       ))}
 

@@ -52,12 +52,12 @@ export function Dashboard() {
           <div className="grid place-items-center h-12 w-12 rounded-full shrink-0 text-lg font-bold" style={{ background: `var(--${tone})`, color: "var(--on-fill-strong)" }}>{summary.healthScore}</div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-semibold ink">
-              {depletion != null ? <><AlertTriangle size={16} className="text-[var(--critical)]" />{depletion}歳で資産が底をつく見込みです</> : <><CheckCircle2 size={16} className="text-[var(--good)]" />{plan.endAge}歳まで資産は持続します</>}
+              {depletion != null ? <><AlertTriangle size={16} className="text-[var(--critical)]" />この試算では {depletion} 歳で資産が底をつく結果です</> : <><CheckCircle2 size={16} className="text-[var(--good)]" />この試算では {plan.endAge} 歳まで資産が持続する結果です</>}
             </div>
             <p className="hint mt-0.5">
               {depletion != null
-                ? `流動資産（現金・NISA・特定口座）が ${depletion} 歳でマイナスになります。生活費・住居費の見直し、収入の延長、運用方針の調整を検討してください。`
-                : `最終年（${plan.endAge}歳）の純資産は ${fmtMan(summary.finalNetWorth)}、流動資産は ${fmtMan(summary.finalLiquid)}。最も資産が少なくなるのは ${summary.minLiquid.age} 歳（${fmtMan(summary.minLiquid.value)}）です。`}
+                ? `入力された前提のもとでは、流動資産（現金・NISA・特定口座）が ${depletion} 歳でマイナスになります。生活費・住居費、働く期間、運用方針などを変えると結果も変わります。`
+                : `この試算では、最終年（${plan.endAge}歳）の純資産は ${fmtMan(summary.finalNetWorth)}、流動資産は ${fmtMan(summary.finalLiquid)}。最も資産が少なくなるのは ${summary.minLiquid.age} 歳（${fmtMan(summary.minLiquid.value)}）です。`}
             </p>
           </div>
         </div>

@@ -54,13 +54,13 @@ export function RiskView() {
             <div>
               <div className="text-sm font-semibold ink">
                 {maxPoint && maxPoint.shortfall > 0
-                  ? `最大で ${fmtMan(maxPoint.shortfall)} の保障が不足（${target?.name} が ${ageLabel(maxPoint.deathAge)}に亡くなった場合）`
-                  : `どの年齢で亡くなっても、遺族の資産は ${plan.endAge} 歳まで持続します`}
+                  ? `この試算では最大 ${fmtMan(maxPoint.shortfall)} の保障が不足する結果（${target?.name} が ${ageLabel(maxPoint.deathAge)}に亡くなった場合）`
+                  : `この試算では、どの年齢で亡くなっても遺族の資産が ${plan.endAge} 歳まで持続する結果です`}
               </div>
               <p className="hint mt-1">
                 {maxPoint && maxPoint.shortfall > 0
-                  ? `不足額は、遺族の流動資産が最も少なくなる時点（${maxPoint.minLiquidAge}歳）のマイナス分。この金額を死亡保険金でカバーすると資産が枯渇しません。掛け捨ての収入保障保険なら、年齢とともに必要額が減るカーブに合わせやすいです。`
-                  : "追加の死亡保障は必須ではありません。保険料を減らして貯蓄・投資に回す選択も検討できます。"}
+                  ? `不足額は、遺族の流動資産が最も少なくなる時点（${maxPoint.minLiquidAge}歳）のマイナス分。この金額を死亡保険金でカバーすれば、この試算上は資産が枯渇しない計算になります。掛け捨ての収入保障保険は、年齢とともに必要額が減るカーブに合わせやすい商品です。`
+                  : "あくまでこの試算の前提のもとでは、追加の死亡保障がなくても遺族の資産は不足しない結果です。実際に必要な保障は、公的保障の見込みやご家族の状況によって変わります。"}
               </p>
             </div>
           </div>
@@ -90,8 +90,8 @@ export function RiskView() {
       ) : (
         <Card title="年齢別の必要保障額（追加で必要な死亡保障）">
           <p className="text-sm ink-2">
-            {plan.self.age + 1}〜{curve[curve.length - 1]?.deathAge ?? plan.endAge}歳のどの時点で亡くなっても、遺族の流動資産はマイナスになりません（不足額 0）。
-            <span className="hint block mt-1">保障を減らす、あるいは保険料を貯蓄・投資に回す余地があります。下のシナリオで各年齢の遺族の家計を確認できます。</span>
+            {plan.self.age + 1}〜{curve[curve.length - 1]?.deathAge ?? plan.endAge}歳のどの時点で亡くなっても、遺族の流動資産はマイナスにならない結果です（不足額 0）。
+            <span className="hint block mt-1">この結果だけを見れば保障を減らす余地がありますが、前提の置き方によって変わります。下のシナリオで各年齢の遺族の家計を確認できます。</span>
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="hint">シナリオの年齢:</span>
