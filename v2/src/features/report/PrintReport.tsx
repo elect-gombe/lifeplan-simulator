@@ -5,7 +5,7 @@
  *  12 万一時の備え / 13 プラン比較
  * すべて既存のシミュレーション結果（YearRow）から導出し、レポート専用の計算ロジックは持たない。
  */
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { Printer } from "lucide-react";
 import type { Plan, Child, InsuranceEvent } from "@/domain/model";
 import { STAGE_ORDER } from "@/domain/model";
@@ -21,6 +21,7 @@ import { runSim } from "@/state/useSim";
 import { WealthChart } from "@/charts/WealthChart";
 import { CashflowChart } from "@/charts/CashflowChart";
 import { LineCompare } from "@/charts/LineCompare";
+import { MiniStackedBars, MiniLine } from "@/charts/Mini";
 import { buildTaxGroups } from "@/features/dashboard/TaxDetail";
 import { fmtMan, fmtManFine, fmtPct, fmtYen } from "@/lib/format";
 import { cx } from "@/ui/primitives";
@@ -322,8 +323,37 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
         const sc = res.loanSchedules[h.id]; if (!sc || sc.years.length === 0) return null;
         const noPrepay = h.property.prepayments.length ? buildLoanSchedule({ ...h.property, prepayments: [] }, h.startAge, plan.endAge) : null;
         const totalPay = sc.years.reduce((a, y) => a + y.payment + y.prepayment + y.refinanceCost, 0);
+        // 返済が終わった後の空の年は落とす（表と同じ範囲）
+        const lnYears = sc.years.filter(y => y.closingBalance > 0 || y.payment > 0 || y.prepayment > 0);
+        const lnAges = lnYears.map(y => y.age);
+        const hasPrepay = lnYears.some(y => y.prepayment > 0);
+        // 返済の内訳（元金・利息・繰上返済）と残高は単位が違うので、軸を分けて 2 図にする
+        const lnSeries = [
+          { label: "元金", color: "var(--s-home)", values: lnYears.map(y => y.principal) },
+          { label: "利息", color: "var(--s-loan)", values: lnYears.map(y => y.interest) },
+          ...(hasPrepay ? [{ label: "繰上返済", color: "var(--s-cash)", values: lnYears.map(y => y.prepayment) }] : []),
+        ];
+        const halfIdx = lnYears.findIndex(y => y.principal >= y.interest);
+        const intShare = (y: typeof lnYears[number]) => (y.payment > 0 ? y.interest / y.payment : 0);
+        const lastPaid = [...lnYears].reverse().find(y => y.payment > 0) ?? lnYears[0];
         return (
-          <Page key={h.id} title={`住宅ローンの返済推移（${h.startAge}歳〜取得）`} plan={plan}>
+          <Fragment key={`${h.id}-fig`}>
+          <Page title={`住宅ローンの返済内訳と残高（${h.startAge}歳〜取得）`} plan={plan}>
+            <Sub>年ごとの返済の内訳</Sub>
+            <div className="px-1 pb-6"><MiniStackedBars ages={lnAges} series={lnSeries} height={200} /></div>
+            <p className="hint">
+              返済額に占める利息の割合は、初年度 {fmtPct(intShare(lnYears[0]), 0)} から最終年 {fmtPct(intShare(lastPaid), 0)} に下がります。元金が減るほど利息も減るためです。
+              {halfIdx > 0 ? ` この試算では ${lnYears[halfIdx].age} 歳（借入から ${halfIdx} 年目）に元金が利息を上回ります。` : ""}
+              {hasPrepay ? " 繰上返済をした年は、その分だけ棒が高くなります。" : ""}
+            </p>
+            <Sub>ローン残高の推移</Sub>
+            <div className="px-1 pb-6"><MiniLine ages={lnAges} values={lnYears.map(y => y.closingBalance)} color="var(--s-loan)" height={170} label="年末残高" /></div>
+            <p className="hint">
+              残高は {sc.payoffAge != null ? `${sc.payoffAge} 歳で完済する結果です。` : `試算の最終年まで残る結果です。`}
+              借入 {man(sc.principal)}万に対し、今後の返済総額は {man(totalPay)}万（うち利息 {man(sc.totalInterest)}万）です。
+            </p>
+          </Page>
+          <Page title={`住宅ローンの返済推移（${h.startAge}歳〜取得）`} plan={plan}>
             <div className="grid md:grid-cols-[1fr_260px] gap-3">
               <T head={["年", "年齢", "返済額", "元金", "利息", "繰上返済", "年末残高", "金利", "備考"]} rows={sc.years.filter(y => y.closingBalance > 0 || y.openingBalance > 0).map(y => [y.yearIndex + 1, y.age, man(y.payment), man(y.principal), man(y.interest), y.prepayment ? man(y.prepayment) : "", man(y.closingBalance), `${y.ratePct}%`, y.events.join("・")])} />
               <div className="space-y-2 text-xs">
@@ -338,6 +368,7 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
               </div>
             </div>
           </Page>
+          </Fragment>
         );
       })}
 

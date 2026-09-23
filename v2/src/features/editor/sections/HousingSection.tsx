@@ -121,7 +121,7 @@ function PhaseEditor({ h, index, end, plan, onChange }: { h: HousingPhase; index
       { label: "頭金・諸費用", color: "var(--ink-3)", values: down },
       { label: "返済（元本）", color: "var(--s-home)", values: principal },
       { label: "返済（利息）", color: "var(--s-loan)", values: interest },
-      { label: "繰上返済", color: "#9085e9", values: pre },
+      { label: "繰上返済", color: "var(--s-cash)", values: pre },
       { label: "管理費・税", color: "var(--s-dc)", values: maint },
       { label: "ローン控除", color: "var(--s-nisa)", values: deduction },
     ];
