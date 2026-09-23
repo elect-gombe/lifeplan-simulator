@@ -278,6 +278,12 @@ export function Collapsible({ title, summary, defaultOpen = false, children, rig
 export function Modal({ open, onClose, title, children, width = "max-w-lg", footer }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; width?: string; footer?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // onClose は呼び出し側がインライン関数で渡すため、依存に入れると親が再描画するたびに
+  // この effect が張り直され、後片付けの focus 復帰と rAF の初期フォーカスが毎回走る。
+  // モーダル内で入力すると（ストア更新 → 親が再描画）先頭の入力欄にフォーカスが飛ぶので、
+  // PlanWizard / Onboarding と同じく ref 経由で参照して依存から外す。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -286,7 +292,7 @@ export function Modal({ open, onClose, title, children, width = "max-w-lg", foot
     requestAnimationFrame(() => { const f = focusables(); (f.find(el => el.tagName === "INPUT") ?? f[0])?.focus(); });
     const onKey = (e: KeyboardEvent) => {
       if (!isTopmostDialog(ref.current)) return;  // 上に別のモーダルが乗っているときは触らない
-      if (e.key === "Escape") { if (hasTransientOverlay()) return; onClose(); return; }
+      if (e.key === "Escape") { if (hasTransientOverlay()) return; onCloseRef.current(); return; }
       if (e.key !== "Tab") return;
       const f = focusables(); if (!f.length) return;
       const first = f[0], last = f[f.length - 1];
@@ -299,7 +305,7 @@ export function Modal({ open, onClose, title, children, width = "max-w-lg", foot
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow; document.body.style.overflow = "hidden";
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; previouslyFocused?.focus?.(); };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   // sticky/fixed な祖先（入力パネル）のスタッキングコンテキストに閉じ込められないよう body 直下に描画
   return createPortal(
