@@ -24,6 +24,38 @@ export function inheritanceBracket(share: number): { rate: number; deduction: nu
   return { rate: 0.55, deduction: 72_000_000 };
 }
 
+export const SMALL_LOT_MAX_SQM = 330;
+export const SMALL_LOT_RELIEF_PCT = 80;
+
+export interface HomeTaxValue {
+  market: number; land: number; building: number; relief: number; value: number;
+  /** 表示用に、どの前提で引き直したかを持ち回る */
+  landRatioPct: number; landValuationPct: number; buildingValuationPct: number;
+  coveredPct: number;      // 小規模宅地の対象になった土地の割合（%）
+  reliefApplied: boolean;
+}
+
+/**
+ * 住宅の相続税評価額。時価ではなく、土地は路線価水準・建物は固定資産税評価額水準に引き直し、
+ * 小規模宅地等の特例（330㎡ まで 80% 減額）をかける。面積が 330㎡ を超える分は減額されない。
+ */
+export function homeInheritanceValue(
+  market: number,
+  p: { landRatioPct: number; landAreaSqm: number; smallLotRelief: boolean },
+  ec: { landValuationPct: number; buildingValuationPct: number },
+): HomeTaxValue {
+  const landMarket = market * Math.min(Math.max(p.landRatioPct, 0), 100) / 100;
+  const land = landMarket * ec.landValuationPct / 100;
+  const building = (market - landMarket) * ec.buildingValuationPct / 100;
+  const covered = p.landAreaSqm > 0 ? Math.min(SMALL_LOT_MAX_SQM / p.landAreaSqm, 1) : 1;
+  const relief = p.smallLotRelief ? land * covered * SMALL_LOT_RELIEF_PCT / 100 : 0;
+  return {
+    market, land, building, relief, value: land + building - relief,
+    landRatioPct: Math.min(Math.max(p.landRatioPct, 0), 100), landValuationPct: ec.landValuationPct,
+    buildingValuationPct: ec.buildingValuationPct, coveredPct: covered * 100, reliefApplied: p.smallLotRelief,
+  };
+}
+
 /** 計算過程をそのまま画面・レポートに出すための内訳。金額はすべて円。 */
 export interface InheritanceDetail {
   who: "self" | "spouse";
@@ -38,7 +70,12 @@ export interface InheritanceDetail {
   insuranceExempt: number;     // その非課税枠
   deemedRetirement: number;    // 死亡退職金・DC死亡一時金
   retirementExempt: number;    // その非課税枠
-  debts: number;               // 債務控除（葬儀費用）
+  liquid: number;              // 現金・有価証券・NISA（按分後）
+  home: HomeTaxValue | null;   // 住宅の相続税評価（按分後）。持ち家でなければ null
+  landAreaSqm: number;         // 小規模宅地の上限判定に使った面積
+  debts: number;               // 債務控除の合計
+  debtFuneral: number;         // うち葬儀費用
+  debtLoan: number;            // うち住宅ローン残高（団信で消えた分は含まない）
   danshinForgiven: number;     // 団信で消えたローン残高（債務控除できない・保険金にも含めない）
   total: number;               // 課税価格の合計額
   basicDeduction: number;      // 基礎控除
@@ -55,7 +92,12 @@ export interface InheritanceDetail {
 export function inheritanceTax(
   estate: number, deemedInsurance: number, deemedRetirement: number,
   childCount: number, hasSpouse: boolean,
-  debts = 0, meta: { who: "self" | "spouse"; name: string; age: number; danshinForgiven?: number } = { who: "self", name: "", age: 0 },
+  debts = 0,
+  meta: {
+    who: "self" | "spouse"; name: string; age: number;
+    danshinForgiven?: number; liquid?: number; home?: HomeTaxValue | null; landAreaSqm?: number;
+    debtFuneral?: number; debtLoan?: number;
+  } = { who: "self", name: "", age: 0 },
 ): InheritanceDetail {
   const heirs = Math.max(childCount + (hasSpouse ? 1 : 0), 1);
   // みなし相続財産: 死亡保険金・死亡退職金（DC死亡一時金）はそれぞれ 500万×法定相続人 まで非課税
@@ -68,7 +110,10 @@ export function inheritanceTax(
   const spouseShare = hasSpouse ? (kids > 0 ? 0.5 : 1) : 0;
   const childShare = kids > 0 ? (1 - spouseShare) / kids : 0;
   const base = {
-    who: meta.who, name: meta.name, age: meta.age, heirs, hasSpouse, childCount, kids, danshinForgiven: meta.danshinForgiven ?? 0,
+    who: meta.who, name: meta.name, age: meta.age, heirs, hasSpouse, childCount, kids,
+    danshinForgiven: meta.danshinForgiven ?? 0, liquid: meta.liquid ?? Math.max(estate, 0),
+    home: meta.home ?? null, landAreaSqm: meta.landAreaSqm ?? 0,
+    debtFuneral: meta.debtFuneral ?? debts, debtLoan: meta.debtLoan ?? 0,
     estate: Math.max(estate, 0), deemedInsurance, insuranceExempt, deemedRetirement, retirementExempt,
     debts, total, basicDeduction, taxableEstate: taxable, spouseShare, childShare,
   };

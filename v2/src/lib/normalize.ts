@@ -59,6 +59,9 @@ function normHousing(v: unknown, selfAge: number): HousingPhase | null {
       maintenanceMonthly: num(p.maintenanceMonthly, dp.maintenanceMonthly), propertyTaxAnnual: num(p.propertyTaxAnnual, dp.propertyTaxAnnual), earthquakePremiumAnnual: num(p.earthquakePremiumAnnual, 0),
       deduction: ["none", "certified", "zeh", "energy", "other", "existing"].includes(String(p.deduction)) ? (p.deduction as Plan["housing"][number]["property"]["deduction"]) : dp.deduction,
       loanShareSelfPct: num(p.loanShareSelfPct, 100), danshin: bool(p.danshin, true), appreciationPct: num(p.appreciationPct, dp.appreciationPct),
+    landRatioPct: num(p.landRatioPct, dp.landRatioPct),
+    landAreaSqm: num(p.landAreaSqm, dp.landAreaSqm),
+    smallLotRelief: bool(p.smallLotRelief, dp.smallLotRelief),
       salePrice: typeof p.salePrice === "number" ? p.salePrice : null,
     },
   };
@@ -123,7 +126,9 @@ export function normalizePlan(raw: unknown): Plan | null {
       withdrawal: (() => { const w = isObj(inv.withdrawal) ? inv.withdrawal : {}; return { mode: (["asNeeded", "fixedRate", "fixedAmount"] as const).find(m => m === w.mode) ?? "asNeeded", startAge: num(w.startAge, Math.max(self.retireAge, self.pensionStartAge)), ratePct: num(w.ratePct, 4), amount: num(w.amount, 120), stopInvesting: bool(w.stopInvesting, true) }; })(),
     },
     events: Array.isArray(raw.events) ? (raw.events as unknown[]).map(normEvent).filter((e): e is LifeEvent => !!e) : [],
-    economy: { inflationPct: num(eco.inflationPct, 1.5), macroSlidePct: num(eco.macroSlidePct, -0.8), stressTest: { enabled: bool(st.enabled, false), age: num(st.age, 50), dropPct: num(st.dropPct, 40), recoveryYears: num(st.recoveryYears, 4) } },
+    economy: { inflationPct: num(eco.inflationPct, 1.5), macroSlidePct: num(eco.macroSlidePct, -0.8),
+    landValuationPct: num(eco.landValuationPct, 80),
+    buildingValuationPct: num(eco.buildingValuationPct, 60), stressTest: { enabled: bool(st.enabled, false), age: num(st.age, 50), dropPct: num(st.dropPct, 40), recoveryYears: num(st.recoveryYears, 4) } },
     funeralCost: num(raw.funeralCost, 200),
   };
 }

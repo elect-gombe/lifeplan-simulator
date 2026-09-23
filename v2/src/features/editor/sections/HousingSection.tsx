@@ -176,6 +176,16 @@ function PhaseEditor({ h, index, end, plan, onChange }: { h: HousingPhase; index
                 { value: "existing", label: "中古", title: "10年・2,000万" }, { value: "none", label: "なし" }]} />
               <p className="hint mt-1">年末残高の 0.7% を所得税（＋住民税 最大 9.75 万）から控除。子育て・若者夫婦世帯の上乗せは含みません。</p>
             </div>
+            <Collapsible title="相続時の評価（土地の割合・小規模宅地等の特例）" summary={`土地 ${p.landRatioPct}%・${p.landAreaSqm}㎡${p.smallLotRelief ? "・特例あり" : ""}`}>
+              <div className="space-y-3">
+                <Row className="grid-cols-3">
+                  <NumField label="土地の割合" value={p.landRatioPct} unit="%" step={5} min={0} max={100} onChange={v => onChange(x => { x.property.landRatioPct = v; })} help="価格のうち土地が占める割合。都市部のマンションは 20〜40%、郊外の戸建ては 50〜70% が目安。相続税の評価と小規模宅地等の特例にだけ使います。" />
+                  <NumField label="土地面積" value={p.landAreaSqm} unit="㎡" step={10} min={0} onChange={v => onChange(x => { x.property.landAreaSqm = v; })} help="小規模宅地等の特例は 330㎡ までが対象。超えた分は減額されません。マンションは敷地権の持ち分面積。" />
+                  <div className="flex items-end pb-1"><Toggle checked={p.smallLotRelief} onChange={v => onChange(x => { x.property.smallLotRelief = v; })} label="小規模宅地等の特例" help="配偶者が取得する場合は無条件、同居親族なら継続居住・保有が条件。330㎡ までの土地の評価額が 80% 減額されます。この試算は要件を満たす前提でオン。" /></div>
+                </Row>
+                <p className="hint">相続税を計算するときだけ使う項目です。時価ではなく相続税評価額（土地は路線価、建物は固定資産税評価額の水準）に引き直します。水準は「前提」セクションで変えられます。</p>
+              </div>
+            </Collapsible>
             <Collapsible title="ペアローン・団信・売却・繰上返済・借換" summary={[p.loanShareSelfPct < 100 && `ペア ${p.loanShareSelfPct}:${100 - p.loanShareSelfPct}`, p.danshin && "団信あり", p.prepayments.length > 0 && `繰上 ${p.prepayments.length}件`, p.refinance && "借換"].filter(Boolean).join("・") || "詳細設定"}>
               <div className="space-y-3">
                 <Row>

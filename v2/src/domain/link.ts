@@ -56,7 +56,7 @@ export function copyGroup(group: LinkGroup, from: Plan, to: Plan): void {
       break;
     case "settings":
       to.endAge = from.endAge; to.baseYear = from.baseYear;
-      to.economy = { ...to.economy, inflationPct: from.economy.inflationPct, macroSlidePct: from.economy.macroSlidePct };
+      to.economy = { ...to.economy, inflationPct: from.economy.inflationPct, macroSlidePct: from.economy.macroSlidePct, landValuationPct: from.economy.landValuationPct, buildingValuationPct: from.economy.buildingValuationPct };
       break;
   }
 }

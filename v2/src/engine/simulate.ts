@@ -10,7 +10,7 @@ import { computePersonTax, retirementLumpTax, propertySaleTax, dependentDeductio
 import { estimateOldAgePension, workingPensionReduction, macroSlideFactor, survivorPension } from "./pension";
 import { buildLoanSchedule, type LoanSchedule } from "./mortgage";
 import { childCostAt, childAllowanceAnnual, highSchoolSupport, tashiWaiver, leaveMonthsInYear, leaveBenefit } from "./education";
-import { inheritanceTax, type InheritanceDetail } from "./inheritance";
+import { inheritanceTax, homeInheritanceValue, type InheritanceDetail } from "./inheritance";
 
 // ─────────────────────────────────────────────────────────────
 // Output types
@@ -526,11 +526,21 @@ export function simulate(plan: Plan, opts: SimOptions = {}): SimResult {
       // 相続税（世帯資産の半分を故人の遺産とみなす）。同年に両者が亡くなる場合は 1 回だけ課税
       if (i === 1 && otherDiedSameYear) continue;
       const estateShare = survivorAlive ? 0.5 : 1;
-      const estate = Math.max((cash + taxable) * estateShare + nisaDeath + (homeValue - loanBalance) * estateShare, 0);
-      // 葬儀費用は債務控除として課税価格から引く（現金支出としては別に計上済み）。
-      const debts = plan.funeralCost * MAN * inflF;
+      // 住宅は時価ではなく相続税評価額（路線価・固定資産税評価額の水準＋小規模宅地等の特例）で数える。
+      const own = phase && (phase as HousingPhase).kind === "own" ? (phase as HousingPhase) : null;
+      const hv = own && homeValue > 0 ? homeInheritanceValue(homeValue, own.property, plan.economy) : null;
+      const home = hv ? { ...hv, market: hv.market * estateShare, land: hv.land * estateShare, building: hv.building * estateShare, relief: hv.relief * estateShare, value: hv.value * estateShare } : null;
+      const liquid = (cash + taxable) * estateShare + nisaDeath;
+      const estate = Math.max(liquid + (home?.value ?? 0), 0);
+      // 債務控除: 葬儀費用と、残っている住宅ローン（団信で消えた分は債務にならない）。
+      const debtFuneral = plan.funeralCost * MAN * inflF;
+      const debtLoan = loanBalance * estateShare;
       const detail = inheritanceTax(estate, insurancePayout, dcDeath + deathBenefit, childAges.filter(a => a >= 0).length, survivorAlive,
-        debts, { who: i === 0 ? "self" : "spouse", name: s.m.name, age, danshinForgiven: loanBeforeDanshin - loanBalance });
+        debtFuneral + debtLoan, {
+          who: i === 0 ? "self" : "spouse", name: s.m.name, age,
+          danshinForgiven: loanBeforeDanshin - loanBalance, liquid, home, landAreaSqm: own?.property.landAreaSqm ?? 0,
+          debtFuneral, debtLoan,
+        });
       inheritances.push(detail);
       if (detail.tax > 0) addOut("tax", `相続税（${s.m.name}）`, detail.tax, undefined, true);
     }

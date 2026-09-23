@@ -23,12 +23,18 @@ export function SettingsSection() {
           <NumField label="基準年（西暦）" value={plan.baseYear} unit="年" min={2000} max={2100} onChange={v => update(d => { d.baseYear = v; })} help="本人が上の年齢である暦年。年表やレポートの「年」の表示、児童手当・就学支援金などの制度年に使います。" />
         </Row>
       </Card>
+      <Card title="相続税の評価水準" subtitle="住宅を時価から相続税評価額に引き直すときの割合。土地の割合・面積・小規模宅地等の特例は住まいセクション。">
+        <Row>
+          <NumField label="土地（時価に対する路線価の水準）" value={plan.economy.landValuationPct} unit="%" step={5} min={30} max={100} onChange={v => update(d => { d.economy.landValuationPct = v; })} help="相続税の土地評価は路線価が基準で、公示地価の 80%、実勢価格に対してはそれより低くなることが多い。" />
+          <NumField label="建物（時価に対する固定資産税評価額の水準）" value={plan.economy.buildingValuationPct} unit="%" step={5} min={20} max={100} onChange={v => update(d => { d.economy.buildingValuationPct = v; })} help="建物の相続税評価は固定資産税評価額。新築なら建築費の 5〜6 割、築年が進むとさらに下がる。" />
+        </Row>
+      </Card>
       <Card title="計算の前提（この試算の限界）">
         <ul className="text-xs ink-2 space-y-1 list-disc pl-4">
           <li>税・社会保険は 2025 年度改正後の恒久ルールを簡略化して適用（基礎控除 58 万、給与所得控除の最低 65 万、協会けんぽ平均料率など）。自治体・健保組合により実際は異なります。</li>
           <li>公的年金は現在の水準（基礎年金満額 83.2 万）を基準に、加入月数と平均年収から見込額を算出。ねんきん定期便の見込額とは差が出ます。</li>
           <li>国民健康保険・後期高齢者医療・介護保険は所得比例の概算です。</li>
-          <li>相続税・譲渡所得税は簡易計算。贈与税・住民税の均等割以外の非課税判定などは省略。</li>
+          <li>相続税は法定相続分どおりに分ける前提の簡易計算。小規模宅地等の特例は要件を満たすものとして 330㎡ まで 80% 減額。二世帯住宅・貸付事業用宅地・家なき子などの個別要件、贈与税・相続時精算課税は扱いません。譲渡所得税も簡易計算です。</li>
           <li>金額はすべて名目（インフレ込み）で表示しています。</li>
         </ul>
       </Card>

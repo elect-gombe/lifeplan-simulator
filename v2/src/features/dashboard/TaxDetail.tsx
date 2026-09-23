@@ -54,12 +54,29 @@ const man = (v: number) => `${Math.round(v / 10000).toLocaleString()}万`;
 export function buildInheritanceGroups(d: InheritanceDetail): Group[] {
   const heirText = `配偶者${d.hasSpouse ? "あり" : "なし"}・子 ${d.childCount} 人 → 法定相続人 ${d.heirs} 人`;
   const groups: Group[] = [];
+  const h = d.home;
+  if (h) {
+    groups.push({
+      title: "住宅の相続税評価額", cols: ["金額"],
+      rows: [
+        { label: "時価（この試算の資産価値）", values: [h.market], formula: d.hasSpouse ? "世帯の 1/2 を故人の持ち分とみなした額" : undefined },
+        { label: `土地（時価の ${h.landRatioPct}%）`, values: [h.land], sub: true, formula: `路線価はおおむね時価の ${h.landValuationPct}%` },
+        { label: `建物（時価の ${100 - h.landRatioPct}%）`, values: [h.building], sub: true, formula: `固定資産税評価額はおおむね時価の ${h.buildingValuationPct}%` },
+        ...(h.reliefApplied
+          ? [{ label: "小規模宅地等の特例", values: [-h.relief], sub: true, formula: `土地の評価額 × ${Math.round(h.coveredPct)}% × 80% 減額（330㎡ まで。土地 ${d.landAreaSqm}㎡${h.coveredPct < 100 ? ` のうち 330㎡ 分` : ""}）` }]
+          : [{ label: "小規模宅地等の特例", values: ["適用なし" as string], sub: true, formula: "配偶者・同居親族が取得しない前提（住まいセクションで切り替え）" }]),
+        { label: "相続税評価額", values: [h.value], strong: true },
+      ],
+      note: h.market > 0 ? `時価の ${Math.round(h.value / h.market * 100)}% として相続財産に計上します。` : undefined,
+    });
+  }
   groups.push({
     title: "課税価格の合計額", cols: ["金額"],
     rows: [
-      { label: "現金・有価証券・住宅（時価 − ローン残高）", values: [d.estate],
-        formula: (d.hasSpouse ? "配偶者が存命のため、世帯の資産の 1/2 を故人の遺産とみなす。NISA は全額（名義人の資産）" : "世帯の資産の全額")
-          + (d.danshinForgiven > 0 ? `。団信で消えたローン ${man(d.danshinForgiven)} は債務として引けない（保険金も遺族が受け取らないため相続財産に含めない）` : "") },
+      { label: "現金・有価証券・NISA", values: [d.liquid],
+        formula: d.hasSpouse ? "配偶者が存命のため、世帯の現金・特定口座の 1/2 を故人の遺産とみなす。NISA は全額（名義人の資産）" : "世帯の資産の全額" },
+      ...(h ? [{ label: "住宅（相続税評価額）", values: [h.value],
+        formula: d.danshinForgiven > 0 ? `団信で消えたローン ${man(d.danshinForgiven)} は債務として引けない（保険金も遺族が受け取らないため相続財産に含めない）` : undefined }] : []),
       ...(d.deemedInsurance > 0 ? [
         { label: "死亡保険金（みなし相続財産）", values: [d.deemedInsurance] },
         { label: "非課税枠", values: [-d.insuranceExempt], sub: true, formula: `500万 × 法定相続人 ${d.heirs} 人 = ${man(C.INHERITANCE_INSURANCE_EXEMPT_PER_HEIR * d.heirs)}（受取額が上限）` },
@@ -68,7 +85,8 @@ export function buildInheritanceGroups(d: InheritanceDetail): Group[] {
         { label: "死亡退職金・DC 死亡一時金（みなし相続財産）", values: [d.deemedRetirement] },
         { label: "非課税枠", values: [-d.retirementExempt], sub: true, formula: `500万 × 法定相続人 ${d.heirs} 人 = ${man(C.INHERITANCE_INSURANCE_EXEMPT_PER_HEIR * d.heirs)}（受取額が上限）` },
       ] : []),
-      ...(d.debts > 0 ? [{ label: "債務控除（葬儀費用）", values: [-d.debts], sub: true, formula: "葬儀費用は遺産から差し引ける" }] : []),
+      ...(d.debtFuneral > 0 ? [{ label: "債務控除（葬儀費用）", values: [-d.debtFuneral], sub: true, formula: "葬儀費用は遺産から差し引ける" }] : []),
+      ...(d.debtLoan > 0 ? [{ label: "債務控除（住宅ローン残高）", values: [-d.debtLoan], sub: true, formula: "団信がないため債務として残る" }] : []),
       { label: "課税価格の合計額", values: [d.total], strong: true },
     ],
   });

@@ -143,6 +143,9 @@ export interface Property {
   loanShareSelfPct: number;    // 100 = 本人単独。50 = ペアローン等分
   danshin: boolean;            // 団体信用生命保険（死亡時にローン免除）
   appreciationPct: number;     // 資産価値の年変動率（%）
+  landRatioPct: number;        // 価格に占める土地の割合（%）。相続税評価と小規模宅地等の特例に使う
+  landAreaSqm: number;         // 土地面積（㎡）。小規模宅地等の特例の 330㎡ 上限判定に使う
+  smallLotRelief: boolean;     // 小規模宅地等の特例（配偶者・同居親族が取得する前提）
   salePrice: number | null;    // 売却価格（万円）。null なら価格×変動率
 }
 
@@ -254,6 +257,8 @@ export type LifeEvent = CashEvent | CarEvent | InsuranceEvent | DeathEvent;
 export interface Economy {
   inflationPct: number;     // 物価上昇率（生活費・教育費など）
   macroSlidePct: number;    // 年金のマクロ経済スライド調整率（負）
+  landValuationPct: number;     // 土地の相続税評価額 ÷ 時価（%）。路線価はおおむね時価の 8 割
+  buildingValuationPct: number; // 建物の相続税評価額 ÷ 時価（%）。固定資産税評価額はおおむね 6 割
   stressTest: { enabled: boolean; age: number; dropPct: number; recoveryYears: number };
 }
 
@@ -362,6 +367,9 @@ export function defaultProperty(partial: Partial<Property> = {}): Property {
     loanShareSelfPct: 100,
     danshin: true,
     appreciationPct: -1.5,
+    landRatioPct: 60,
+    landAreaSqm: 100,
+    smallLotRelief: true,
     salePrice: null,
     ...partial,
   };
@@ -420,7 +428,7 @@ export function defaultPlan(partial: Partial<Plan> = {}): Plan {
       cashGoals: [],
     },
     events: [],
-    economy: { inflationPct: 1.5, macroSlidePct: -0.8, stressTest: { enabled: false, age: 50, dropPct: 40, recoveryYears: 4 } },
+    economy: { inflationPct: 1.5, macroSlidePct: -0.8, landValuationPct: 80, buildingValuationPct: 60, stressTest: { enabled: false, age: 50, dropPct: 40, recoveryYears: 4 } },
     funeralCost: 200,
     ...partial,
   };

@@ -217,7 +217,7 @@ describe("regression (review findings)", () => {
     expect(rows.find(x => x.age === 65)!.self.ideco).toBe(0);
   });
   it("下落率 100% でも数値が発散しない", () => {
-    const p = defaultPlan({ economy: { inflationPct: 1, macroSlidePct: -0.8, stressTest: { enabled: true, age: 40, dropPct: 100, recoveryYears: 3 } } });
+    const p = defaultPlan({ economy: { inflationPct: 1, macroSlidePct: -0.8, landValuationPct: 80, buildingValuationPct: 60, stressTest: { enabled: true, age: 40, dropPct: 100, recoveryYears: 3 } } });
     expect(simulate(p).rows.every(r => Number.isFinite(r.balances.netWorth))).toBe(true);
   });
   it("働いていない配偶者に社会保険料は発生しない", () => {

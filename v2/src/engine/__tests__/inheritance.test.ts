@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inheritanceTax } from "../inheritance";
+import { inheritanceTax, homeInheritanceValue } from "../inheritance";
 import { defaultPlan, defaultMember, defaultChild, defaultHousingPhase, defaultProperty } from "@/domain/model";
 import { simulate } from "../simulate";
 
@@ -77,18 +77,57 @@ describe("団信と相続財産", () => {
     return row.inheritance[0];
   };
 
-  it("団信ありなら、免除されたローン残高は遺産から差し引かない（保険金としても課税しない）", () => {
-    const on = detailAt(true), off = detailAt(false);
-    expect(on.estate).toBeGreaterThan(off.estate);          // ローンを債務として引いていない
-    expect(on.deemedInsurance).toBe(off.deemedInsurance);   // 弁済額をみなし相続財産に足していない
-    expect(on.deemedInsurance).toBe(0);
+  it("団信ありなら、免除されたローンは債務控除にならず、保険金としても課税しない", () => {
+    const on = detailAt(true);
+    expect(on.danshinForgiven).toBeGreaterThan(0);
+    expect(on.debtLoan).toBe(0);          // 消えた債務は引けない
+    expect(on.deemedInsurance).toBe(0);   // 弁済額をみなし相続財産に足していない
   });
 
-  it("団信なしならローン残高が住宅の評価から引かれる", () => {
+  it("団信なしなら残ローンが債務控除に入り、課税価格はその分小さい", () => {
     const on = detailAt(true), off = detailAt(false);
-    // 差は「死亡時点のローン残高 × 配偶者存命の按分 1/2」。9 年返済後の残高は 4,000 万台。
-    const gap = on.estate - off.estate;
-    expect(gap).toBeGreaterThan(1800 * 10_000);
-    expect(gap).toBeLessThan(2600 * 10_000);
+    expect(off.danshinForgiven).toBe(0);
+    expect(off.debtLoan).toBeGreaterThan(1800 * 10_000);   // 残高 × 按分 1/2
+    expect(off.debtLoan).toBeLessThan(2600 * 10_000);
+    expect(on.estate).toBe(off.estate);                     // 住宅の評価そのものは同じ
+    expect(on.total - off.total).toBeCloseTo(off.debtLoan, 0);
+  });
+
+});
+
+describe("住宅の相続税評価額", () => {
+  const ec = { landValuationPct: 80, buildingValuationPct: 60 };
+  const market = man(6_000);
+
+  it("土地は路線価水準・建物は固定資産税評価額水準に引き直す", () => {
+    const v = homeInheritanceValue(market, { landRatioPct: 60, landAreaSqm: 100, smallLotRelief: false }, ec);
+    expect(v.land).toBe(man(2_880));      // 6,000 × 60% × 80%
+    expect(v.building).toBe(man(1_440));  // 6,000 × 40% × 60%
+    expect(v.relief).toBe(0);
+    expect(v.value).toBe(man(4_320));     // 時価の 72%
+  });
+
+  it("小規模宅地等の特例は土地だけを 80% 減額する", () => {
+    const v = homeInheritanceValue(market, { landRatioPct: 60, landAreaSqm: 100, smallLotRelief: true }, ec);
+    expect(v.relief).toBe(man(2_304));    // 2,880 × 80%
+    expect(v.value).toBe(man(2_016));     // 時価の 33.6%
+  });
+
+  it("330㎡ を超える分は減額されない", () => {
+    const v = homeInheritanceValue(market, { landRatioPct: 60, landAreaSqm: 660, smallLotRelief: true }, ec);
+    expect(v.relief).toBe(man(1_152));    // 2,880 × (330/660) × 80%
+    expect(v.value).toBe(man(3_168));
+    const small = homeInheritanceValue(market, { landRatioPct: 60, landAreaSqm: 330, smallLotRelief: true }, ec);
+    expect(small.relief).toBe(man(2_304)); // ちょうど 330㎡ なら全部が対象
+  });
+
+  it("土地の割合が 0 なら建物だけ、100 なら土地だけで評価する", () => {
+    const allBuilding = homeInheritanceValue(market, { landRatioPct: 0, landAreaSqm: 100, smallLotRelief: true }, ec);
+    expect(allBuilding.land).toBe(0);
+    expect(allBuilding.relief).toBe(0);
+    expect(allBuilding.value).toBe(man(3_600));
+    const allLand = homeInheritanceValue(market, { landRatioPct: 100, landAreaSqm: 100, smallLotRelief: true }, ec);
+    expect(allLand.building).toBe(0);
+    expect(allLand.value).toBe(man(960));  // 4,800 − 3,840
   });
 });
