@@ -7,7 +7,7 @@
  */
 import { Fragment, useMemo } from "react";
 import { Printer } from "lucide-react";
-import type { Plan, Child, InsuranceEvent } from "@/domain/model";
+import type { Plan, Child, InsuranceEvent, CarEvent } from "@/domain/model";
 import { STAGE_ORDER } from "@/domain/model";
 import type { SimResult, YearRow } from "@/engine/simulate";
 import { simulate } from "@/engine/simulate";
@@ -408,7 +408,44 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
         );
       })}
 
-      {/* 10 リタイア後の必要資金 */}
+      {/* 10 車 */}
+      {(() => {
+        const carRows = rows.filter(r => r.byCategory.car > 0);
+        if (carRows.length === 0) return null;
+        const from = rows.indexOf(carRows[0]), to = rows.indexOf(carRows[carRows.length - 1]);
+        const figRows = rows.slice(from, to + 1);
+        const ages = figRows.map(r => r.age);
+        const carOut = (r: YearRow, running: boolean) => r.outflows.filter(f => f.category === "car" && f.label.endsWith("維持費") === running).reduce((a, f) => a + f.amount, 0);
+        const buy = figRows.map(r => carOut(r, false)), run = figRows.map(r => carOut(r, true));
+        const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
+        const total = sum(buy) + sum(run);
+        const cum: number[] = []; figRows.forEach((_, i) => cum.push((cum[i - 1] ?? 0) + buy[i] + run[i]));
+        const cars = plan.events.filter((e): e is CarEvent => e.kind === "car" && e.enabled);
+        const buyYears = figRows.filter((_, i) => buy[i] > 0 && (i === 0 || buy[i] > buy[i - 1] * 1.5));
+        return (
+          <Page title="車にかかる費用" plan={plan}>
+            <Sub>年ごとの車の費用</Sub>
+            <div className="px-1 pb-6"><MiniStackedBars ages={ages} series={[
+              { label: "購入・ローン返済", color: "var(--s-cash)", values: buy },
+              { label: "維持費（税・保険・駐車場・燃料）", color: "var(--s-dc)", values: run },
+            ].filter(x => x.values.some(v => v > 0))} height={200} /></div>
+            <p className="hint">
+              対象は{cars.map(c => c.label).join("・")}（{cars.map(c => `${c.startAge}〜${c.endAge}歳${c.replaceEveryYears > 0 ? `・${c.replaceEveryYears}年ごとに買い替え` : ""}`).join("、")}）。
+              {buyYears.length > 1 ? ` 買い替えの年に棒が高くなります（${buyYears.map(r => `${r.age}歳`).join("・")}）。` : ""}
+              {sum(run) > 0 ? ` 維持費は初年度 ${man(run[0])}万、最終年 ${man(run[run.length - 1])}万（インフレ率を反映）で、期間合計は ${man(sum(run))}万です。` : ""}
+            </p>
+            <Sub>支払いの累計</Sub>
+            <div className="px-1 pb-6"><MiniLine ages={ages} values={cum} color="var(--s-cash)" height={170} label="累計" /></div>
+            <p className="hint">
+              {ages[0]}〜{ages[ages.length - 1]} 歳の {ages.length} 年間で、車にかかる費用は合計 {man(total)}万（購入・ローン {man(sum(buy))}万、維持費 {man(sum(run))}万）です。
+              比較のために並べると、同じ試算の生涯の住居費は {fmtMan(summary.lifetime.housing)}、教育・養育費は {fmtMan(summary.lifetime.education)}です。
+              いずれも入力した購入価格・維持費にインフレ率を反映した見込みで、売却額や残価は織り込んでいません。
+            </p>
+          </Page>
+        );
+      })()}
+
+      {/* 14 リタイア後の必要資金 */}
       {retireChecks.length > 0 && (
         <Page title="リタイア後の必要資金" plan={plan}>
           <p className="hint">本人 {plan.self.retireAge}歳のリタイア以降、{plan.endAge}歳までに必要となる資金と、見込める収入・準備済み資産を各時点で累計したものです（名目・万円）。マイナスは不足を示します。</p>
