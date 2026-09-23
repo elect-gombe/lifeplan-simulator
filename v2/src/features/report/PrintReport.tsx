@@ -23,6 +23,7 @@ import { CashflowChart } from "@/charts/CashflowChart";
 import { LineCompare } from "@/charts/LineCompare";
 import { MiniStackedBars, MiniLine } from "@/charts/Mini";
 import { buildTaxGroups } from "@/features/dashboard/TaxDetail";
+import { CHILD_COLORS } from "@/features/editor/sections/ChildrenSection";
 import { fmtMan, fmtManFine, fmtPct, fmtYen } from "@/lib/format";
 import { cx } from "@/ui/primitives";
 
@@ -295,7 +296,40 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
       {/* 8 子ども */}
       {plan.children.length > 0 && (() => {
         const kidRows = rows.filter(r => plan.children.some((_, i) => r.childAges[i] >= 0 && r.childAges[i] <= plan.childrenCommon.independenceAge + 4));
-        return chunk(kidRows, YEARS_PER_PAGE).map((block, bi) => (
+        if (kidRows.length === 0) return null;
+        // 図は費用が発生する年だけに詰める（表の範囲は独立生計後の数年も含むため、末尾が空になる）。
+        const kdCost = (r: YearRow) => plan.children.reduce((a, c) => a + childCost(r, c), 0);
+        const kdFrom = kidRows.findIndex(r => kdCost(r) > 0);
+        const kdTo = kidRows.length - 1 - [...kidRows].reverse().findIndex(r => kdCost(r) > 0);
+        const figRows = kdFrom < 0 ? kidRows : kidRows.slice(kdFrom, kdTo + 1);
+        const kdAges = figRows.map(r => r.age);
+        // 支援（就学支援金・授業料減免）は棒にせず本文で示す。グレーの系列は子どもの識別色と見分けにくい（ΔE が基準未満）。
+        const kdSeries = plan.children.map((c, i) => ({ label: c.name, color: CHILD_COLORS[i % CHILD_COLORS.length], values: figRows.map(r => childCost(r, c)) }));
+        const kdGross = figRows.map(kdCost);
+        const peakNet = Math.max(...kdGross);
+        const peak = figRows[kdGross.indexOf(peakNet)];
+        const kdSupport = kidRows.reduce((a, r) => a + r.support.hsSupport + r.support.tashiWaiver, 0);
+        const drivers = plan.children.filter(c => childCost(peak, c) > 0);
+        const overlap = figRows.filter(r => plan.children.filter(c => childCost(r, c) > 0).length >= 2);
+        return (
+          <Fragment>
+            <Page title="お子さまのための支出（年ごと）" plan={plan}>
+              <Sub>年ごとの教育費・養育費（支援を差し引く前）</Sub>
+              <div className="px-1 pb-6"><MiniStackedBars ages={kdAges} series={kdSeries} height={210} /></div>
+              <p className="hint">
+                支出が最も大きくなるのは {plan.self.name} が {peak.age} 歳（{peak.year}年）の {man(peakNet)}万で、その年の手取り収入の {fmtPct(peak.totalIn > 0 ? peakNet / peak.totalIn : 0, 0)} にあたります
+                {drivers.length ? `（${drivers.map(c => `${c.name} ${peak.childAges[plan.children.indexOf(c)]}歳`).join("・")}）` : ""}。
+                {plan.children.length > 1 ? (overlap.length ? ` 複数のお子さまの費用が重なるのは ${overlap[0].age}〜${overlap[overlap.length - 1].age} 歳の ${overlap.length} 年です。` : " 複数のお子さまの費用が重なる年はありません。") : ""}
+                {" "}期間全体では {man(kdGross.reduce((a, v) => a + v, 0))}万で、{kdSupport > 0 ? `ここから高校就学支援金・授業料減免 ${man(kdSupport)}万が差し引かれます（内訳は次ページ以降の表）。` : "この試算の前提では高校就学支援金・授業料減免の対象になりません。"}
+              </p>
+              <Sub>同じ期間の年間収支（貯蓄・投資に回せる額）</Sub>
+              <div className="px-1 pb-6"><MiniLine ages={kdAges} values={figRows.map(r => r.net)} color="var(--s-net)" height={170} label="年間収支" /></div>
+              <p className="hint">
+                収入から生活費・住居費・教育費などを引いた、その年に手元に残る額です。子どもの費用が最も大きい {peak.age} 歳では {manS(peak.net)}万
+                {(() => { const neg = figRows.filter(r => r.net < 0); return neg.length ? `、この期間では ${neg.length} 年（${neg[0].age}〜${neg[neg.length - 1].age}歳）がマイナスになる結果です。取り崩しでまかなう形になります。` : `で、この期間はマイナスにならない結果です。`; })()}
+              </p>
+            </Page>
+            {chunk(kidRows, YEARS_PER_PAGE).map((block, bi) => (
           <Page key={bi} title={`お子さまのための支出推移表（${bi + 1}／${Math.ceil(kidRows.length / YEARS_PER_PAGE)}）`} plan={plan}>
             <T head={["西暦", ...block.map(r => String(r.year))]} rows={[
               [`${plan.self.name}（歳）`, ...block.map(r => r.age)],
@@ -315,7 +349,9 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
               </>
             )}
           </Page>
-        ));
+            ))}
+          </Fragment>
+        );
       })()}
 
       {/* 9 住宅ローン */}

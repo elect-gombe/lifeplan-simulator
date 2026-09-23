@@ -14,7 +14,7 @@ const PRESETS: { key: "public" | "privateUniv" | "private"; label: string }[] = 
 ];
 /** 子どもの識別色。隣どうしが色覚異常でも見分けられる並びにしてある（青→橙→緑→紫→黄→桃）。
  *  上に載せる Baby アイコンは、どの色でも 3:1 を満たす濃色（--on-fill-soft）で統一。 */
-const CHILD_COLORS = ["var(--s-cash)", "var(--s-taxable)", "var(--s-nisa)", "var(--s-home)", "var(--s-dc)", "var(--s-alt)"];
+export const CHILD_COLORS = ["var(--s-cash)", "var(--s-taxable)", "var(--s-nisa)", "var(--s-home)", "var(--s-dc)", "var(--s-alt)"];
 
 export function pathSummary(c: Child): string {
   return STAGE_ORDER.filter(k => c.education[k].enabled).map(k => `${STAGE_TABLE[k].label}${c.education[k].kind === "private" ? "(私)" : ""}`).join("→") || "進学なし";
