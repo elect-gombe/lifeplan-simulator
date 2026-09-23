@@ -309,18 +309,19 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
         const peakNet = Math.max(...kdGross);
         const peak = figRows[kdGross.indexOf(peakNet)];
         const kdSupport = kidRows.reduce((a, r) => a + r.support.hsSupport + r.support.tashiWaiver, 0);
+        const kdAllowance = kidRows.reduce((a, r) => a + r.support.childAllowance, 0);
         const drivers = plan.children.filter(c => childCost(peak, c) > 0);
         const overlap = figRows.filter(r => plan.children.filter(c => childCost(r, c) > 0).length >= 2);
         return (
-          <Fragment>
-            <Page title="お子さまのための支出（年ごと）" plan={plan}>
+            <Page title="お子さまのための支出" plan={plan}>
               <Sub>年ごとの教育費・養育費（支援を差し引く前）</Sub>
               <div className="px-1 pb-6"><MiniStackedBars ages={kdAges} series={kdSeries} height={210} /></div>
               <p className="hint">
                 支出が最も大きくなるのは {plan.self.name} が {peak.age} 歳（{peak.year}年）の {man(peakNet)}万で、その年の手取り収入の {fmtPct(peak.totalIn > 0 ? peakNet / peak.totalIn : 0, 0)} にあたります
                 {drivers.length ? `（${drivers.map(c => `${c.name} ${peak.childAges[plan.children.indexOf(c)]}歳`).join("・")}）` : ""}。
                 {plan.children.length > 1 ? (overlap.length ? ` 複数のお子さまの費用が重なるのは ${overlap[0].age}〜${overlap[overlap.length - 1].age} 歳の ${overlap.length} 年です。` : " 複数のお子さまの費用が重なる年はありません。") : ""}
-                {" "}期間全体では {man(kdGross.reduce((a, v) => a + v, 0))}万で、{kdSupport > 0 ? `ここから高校就学支援金・授業料減免 ${man(kdSupport)}万が差し引かれます（内訳は次ページ以降の表）。` : "この試算の前提では高校就学支援金・授業料減免の対象になりません。"}
+                {" "}期間全体では {man(kdGross.reduce((a, v) => a + v, 0))}万で、{kdSupport > 0 ? `ここから高校就学支援金・授業料減免 ${man(kdSupport)}万が差し引かれます。` : "この試算の前提では高校就学支援金・授業料減免の対象になりません。"}
+                {kdAllowance > 0 ? ` 別に児童手当を ${man(kdAllowance)}万受け取る見込みです（収入として計上）。` : ""}
               </p>
               <Sub>同じ期間の年間収支（貯蓄・投資に回せる額）</Sub>
               <div className="px-1 pb-6"><MiniLine ages={kdAges} values={figRows.map(r => r.net)} color="var(--s-net)" height={170} label="年間収支" /></div>
@@ -328,29 +329,10 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
                 収入から生活費・住居費・教育費などを引いた、その年に手元に残る額です。子どもの費用が最も大きい {peak.age} 歳では {manS(peak.net)}万
                 {(() => { const neg = figRows.filter(r => r.net < 0); return neg.length ? `、この期間では ${neg.length} 年（${neg[0].age}〜${neg[neg.length - 1].age}歳）がマイナスになる結果です。取り崩しでまかなう形になります。` : `で、この期間はマイナスにならない結果です。`; })()}
               </p>
+              <Sub>進路と教育費の合計（現在価格）</Sub>
+              <T head={["お子さま", "進路", "教育費合計（現在価格）", "大学の住まい", "育休（本人／配偶者）"]} align="left" rows={plan.children.map(c => [c.name, STAGE_ORDER.filter(k => c.education[k].enabled).map(k => `${STAGE_TABLE[k].label}${c.education[k].kind === "private" ? "(私)" : ""}`).join("→"), `${totalEducationCost(c).toLocaleString()}万`, c.education.university.enabled ? ({ home: "自宅", rural: "地方で一人暮らし", urban: "都市で一人暮らし" })[c.education.university.away ?? "home"] : "—", `${c.leaveMonthsSelf}ヶ月／${c.leaveMonthsSpouse}ヶ月`])} />
+              <p className="hint">養育費は 1 人あたり月 {plan.childrenCommon.careMonthly}万（{plan.childrenCommon.independenceAge}歳まで）、出産費用 {plan.childrenCommon.birthCost}万。教育費は文科省調査ベースの標準額にインフレ率を適用。年ごとの金額は前掲のキャッシュフロー表（子ども関連費の行）にあります。</p>
             </Page>
-            {chunk(kidRows, YEARS_PER_PAGE).map((block, bi) => (
-          <Page key={bi} title={`お子さまのための支出推移表（${bi + 1}／${Math.ceil(kidRows.length / YEARS_PER_PAGE)}）`} plan={plan}>
-            <T head={["西暦", ...block.map(r => String(r.year))]} rows={[
-              [`${plan.self.name}（歳）`, ...block.map(r => r.age)],
-              ...plan.children.map((c, i) => [`${c.name}（歳）`, ...block.map(r => (r.childAges[i] >= 0 ? r.childAges[i] : ""))]),
-              ...plan.children.map(c => [`${c.name} 教育費・養育費`, ...block.map(r => man(childCost(r, c)))]),
-              ["高校就学支援金・授業料減免（控除）", ...block.map(r => (r.support.hsSupport + r.support.tashiWaiver ? `▲${man(r.support.hsSupport + r.support.tashiWaiver)}` : ""))],
-              [<b key="t">子ども関連費計</b>, ...block.map(r => <b key={r.age}>{man(r.byCategory.education + r.byCategory.childcare)}</b>)],
-              ["収入計（手取り）", ...block.map(r => man(r.totalIn))],
-              ["収入に占める割合", ...block.map(r => (r.totalIn > 0 ? fmtPct((r.byCategory.education + r.byCategory.childcare) / r.totalIn, 1) : "—"))],
-              ["（参考）児童手当", ...block.map(r => (r.support.childAllowance ? man(r.support.childAllowance) : ""))],
-            ]} />
-            {bi === 0 && (
-              <>
-                <Sub>進路と教育費の合計（現在価格）</Sub>
-                <T head={["お子さま", "進路", "教育費合計（現在価格）", "大学の住まい", "育休（本人／配偶者）"]} align="left" rows={plan.children.map(c => [c.name, STAGE_ORDER.filter(k => c.education[k].enabled).map(k => `${STAGE_TABLE[k].label}${c.education[k].kind === "private" ? "(私)" : ""}`).join("→"), `${totalEducationCost(c).toLocaleString()}万`, c.education.university.enabled ? ({ home: "自宅", rural: "地方で一人暮らし", urban: "都市で一人暮らし" })[c.education.university.away ?? "home"] : "—", `${c.leaveMonthsSelf}ヶ月／${c.leaveMonthsSpouse}ヶ月`])} />
-                <p className="hint">養育費は 1 人あたり月 {plan.childrenCommon.careMonthly}万（{plan.childrenCommon.independenceAge}歳まで）、出産費用 {plan.childrenCommon.birthCost}万。教育費は文科省調査ベースの標準額にインフレ率を適用。</p>
-              </>
-            )}
-          </Page>
-            ))}
-          </Fragment>
         );
       })()}
 
