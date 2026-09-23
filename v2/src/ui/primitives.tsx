@@ -85,8 +85,16 @@ export function NumField({ label, value, onChange, unit, step = 1, min, max, hel
     v = Number(v.toFixed(Math.max(decimals, 2)));
     if (v !== value) onChange(v);
   };
+  /** 入力途中の文字列があればそれを起点にする（打った数字を捨てて確定値から増減しない） */
+  const bumpBase = (): number => {
+    if (text == null) return value;
+    const t = toHalfWidth(text).trim();
+    if (t === "" || t === "-") return value;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : value;
+  };
   const bump = (dir: 1 | -1, mult = 1) => {
-    let v = value + dir * step * mult;
+    let v = bumpBase() + dir * step * mult;
     if (min != null) v = Math.max(min, v);
     if (max != null) v = Math.min(max, v);
     const decimals = String(step).includes(".") ? String(step).split(".")[1].length : 0;
