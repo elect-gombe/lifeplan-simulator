@@ -1,16 +1,18 @@
 /** 万一・リスク: 必要保障額の年齢別カーブ、現在の保障、死亡シナリオの遺族キャッシュフロー。 */
 import { useDeferredValue, useMemo, useState } from "react";
-import { ShieldAlert, ShieldCheck } from "lucide-react";
+import { ShieldAlert, ShieldCheck, Calculator } from "lucide-react";
 import { useActivePlan, useStore } from "@/state/store";
 import { coverageCurve } from "@/engine/coverage";
 import { simulate } from "@/engine/simulate";
 import { LineCompare } from "@/charts/LineCompare";
 import { WealthChart } from "@/charts/WealthChart";
-import { Card, Segmented, Pill, NumField } from "@/ui/primitives";
+import { Card, Segmented, Pill, NumField, Collapsible } from "@/ui/primitives";
+import { buildInheritanceGroups, GroupTables } from "@/features/dashboard/TaxDetail";
+import { newId } from "@/domain/model";
 import { fmtMan } from "@/lib/format";
 
 export function RiskView() {
-  const { plan: livePlan } = useActivePlan();
+  const { plan: livePlan, update } = useActivePlan();
   const plan = useDeferredValue(livePlan);
   const { dispatch } = useStore();
   const [who, setWho] = useState<"self" | "spouse">("self");
@@ -22,6 +24,7 @@ export function RiskView() {
   const maxPoint = curve.reduce((m, p) => (p.shortfall > (m?.shortfall ?? -1) ? p : m), curve[0]);
   const insurances = plan.events.filter(e => e.kind === "insurance" && e.enabled && e.member === who);
   const scenarioAge = deathAge ?? maxPoint?.deathAge ?? plan.self.age + 10;
+  const applied = plan.events.some(e => e.kind === "death" && e.member === who && e.age === scenarioAge);
   const scenario = useMemo(() => {
     if (!plan.spouse) return null;
     const events = [...plan.events.filter(e => !(e.kind === "death" && e.member === who)), { id: "__d", kind: "death" as const, member: who, age: scenarioAge, label: "", enabled: true }];
@@ -80,6 +83,18 @@ export function RiskView() {
           <button className="tap mt-3 text-[11px] underline ink-2" onClick={() => dispatch({ type: "ui/section", section: "events" })}>保険を追加・編集 →</button>
         </Card>
       </div>
+      <Card title="シナリオの条件" subtitle="プランは書き換えずに、この年齢で亡くなった場合を重ねて計算します。">
+        <div className="flex flex-wrap items-end gap-3">
+          <NumField label={`${target?.name} が亡くなる年齢（本人年齢で指定）`} value={scenarioAge} unit="歳" min={plan.self.age + 1} max={plan.endAge - 1} size="sm" className="w-44" onChange={v => setDeathAge(v)} help="この年に亡くなった前提で、遺族年金・保険金・団信・遺族の生活費・相続税をまとめて反映します。" />
+          {applied ? <Pill tone="good">このプランに反映済み</Pill> : (
+            <button className="btn btn-outline" onClick={() => update(d => {
+              d.events = d.events.filter(e => !(e.kind === "death" && e.member === who));
+              d.events.push({ id: newId("ev"), kind: "death", member: who, label: "死亡", enabled: true, age: scenarioAge });
+            })}>この前提をプランに反映</button>
+          )}
+        </div>
+        <p className="hint mt-2">{applied ? "このプランは全ビュー・レポートがこの前提で計算されています。解除は「保障」セクションから。" : "反映すると、ダッシュボード・年表・レポートもこの前提で計算されます。試すだけならこのままで構いません。"}</p>
+      </Card>
       {curve.some(p => p.shortfall > 0) ? (
         <Card title="年齢別の必要保障額（追加で必要な死亡保障）" subtitle={`横軸: 亡くなる時点の本人の年齢${offset ? `（${target?.name} は ${offset > 0 ? "+" : ""}${offset} 歳）` : ""}。縦軸: その場合に不足する金額。クリックで下のシナリオに反映。`} padded={false}>
           <div className="px-2 pt-2 pb-2">
@@ -93,10 +108,6 @@ export function RiskView() {
             {plan.self.age + 1}〜{curve[curve.length - 1]?.deathAge ?? plan.endAge}歳のどの時点で亡くなっても、遺族の流動資産はマイナスにならない結果です（不足額 0）。
             <span className="hint block mt-1">この結果だけを見れば保障を減らす余地がありますが、前提の置き方によって変わります。下のシナリオで各年齢の遺族の家計を確認できます。</span>
           </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="hint">シナリオの年齢:</span>
-            <NumField value={scenarioAge} unit="歳" min={plan.self.age + 1} max={plan.endAge - 1} size="sm" className="w-32" onChange={v => setDeathAge(v)} />
-          </div>
         </Card>
       )}
       {scenario && (
@@ -118,6 +129,19 @@ export function RiskView() {
               </>;
             })()}
           </div>
+          {(() => {
+            const inh = scenario.rows.find(r => r.age === scenarioAge)?.inheritance ?? [];
+            if (!inh.length) return null;
+            return <div className="px-4 pb-4 space-y-3">
+              {inh.map(d => (
+                <Collapsible key={d.who} title={<span className="inline-flex items-center gap-2"><Calculator size={14} />{d.name} の相続税の計算根拠</span>}
+                  summary={d.tax > 0 ? `納付税額 ${fmtMan(d.tax)}（課税価格 ${fmtMan(d.total)}）` : `相続税はかからない結果（課税価格 ${fmtMan(d.total)} ≦ 基礎控除 ${fmtMan(d.basicDeduction)}）`}>
+                  <GroupTables groups={buildInheritanceGroups(d)} formula />
+                  <p className="hint mt-3">住宅は時価で評価しています。実際は路線価・固定資産税評価額（時価の 7〜8 割）が基準で、小規模宅地等の特例が使えるとさらに下がるため、この試算は持ち家がある場合の相続税を多めに見積もります。遺産分割は法定相続分どおりと仮定し、贈与・相続時精算課税は扱いません。</p>
+                </Collapsible>
+              ))}
+            </div>;
+          })()}
         </Card>
       )}
     </div>

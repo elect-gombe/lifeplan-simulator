@@ -118,6 +118,15 @@ export function InvestSection() {
           <SliderField label="リスク（年率の標準偏差）" value={inv.volatilityPct} min={0} max={30} step={1} unit="%" onChange={v => update(d => { d.invest.volatilityPct = v; })} help="ダッシュボードの「運用のぶれ幅」で使います。全世界株式なら 15〜18%、株式50%なら 8〜10% 程度。" />
         </div>
       </Card>
+      <Card title="市場の急落（ストレステスト）" subtitle="指定した年に運用資産が一度だけ大きく下がるシナリオを重ねます。" right={<Toggle checked={plan.economy.stressTest.enabled} onChange={v => update(d => { d.economy.stressTest.enabled = v; })} label="適用" help="ダッシュボードの「運用のぶれ幅」（モンテカルロ）とは別の、決まった 1 回の下落です。" />}>
+        {plan.economy.stressTest.enabled ? (
+          <Row>
+            <NumField label="いつ" value={plan.economy.stressTest.age} unit="歳" min={plan.self.age} max={plan.endAge} onChange={v => update(d => { d.economy.stressTest.age = v; })} help="下落が起きる本人の年齢。NISA・特定口座・DC の残高がこの年に一気に減ります。" />
+            <NumField label="下落率" value={plan.economy.stressTest.dropPct} unit="%" step={5} min={5} max={90} onChange={v => update(d => { d.economy.stressTest.dropPct = v; })} help="運用資産の時価がこの割合だけ下がります。リーマン級なら 40〜50%。" />
+            <NumField label="回復にかかる年数" value={plan.economy.stressTest.recoveryYears} unit="年" min={0} max={20} onChange={v => update(d => { d.economy.stressTest.recoveryYears = v; })} help="この年数で元の成長軌道に戻ると仮定（0 なら回復なし）。" />
+          </Row>
+        ) : <p className="hint">NISA・特定口座・DC の残高が指定の年に一気に下落し、その後回復するシナリオを重ねます。</p>}
+      </Card>
       </LinkedSection>
     </>
   );

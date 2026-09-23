@@ -13,7 +13,7 @@ export const LINK_GROUPS: { key: LinkGroup; label: string }[] = [
   { key: "children", label: "子ども" },
   { key: "invest", label: "運用" },
   { key: "events", label: "イベント" },
-  { key: "risk", label: "万一" },
+  { key: "risk", label: "保障" },
   { key: "settings", label: "前提" },
 ];
 
@@ -47,12 +47,12 @@ export function copyGroup(group: LinkGroup, from: Plan, to: Plan): void {
     case "living": to.living = from.living; to.assets = from.assets; break;
     case "housing": to.housing = from.housing; break;
     case "children": to.children = from.children; to.childrenCommon = from.childrenCommon; break;
-    case "invest": to.invest = from.invest; break;
+    // ストレステストは運用資産への一度の下落なので、UI と同じく運用グループが持つ。
+    case "invest": to.invest = from.invest; to.economy = { ...to.economy, stressTest: from.economy.stressTest }; break;
     case "events": to.events = [...from.events.filter(e => e.kind !== "death"), ...to.events.filter(e => e.kind === "death")]; break;
     case "risk":
       to.events = [...to.events.filter(e => e.kind !== "death"), ...from.events.filter(e => e.kind === "death")];
       to.funeralCost = from.funeralCost;
-      to.economy = { ...to.economy, stressTest: from.economy.stressTest };
       break;
     case "settings":
       to.endAge = from.endAge; to.baseYear = from.baseYear;

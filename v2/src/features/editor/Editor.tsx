@@ -23,7 +23,7 @@ export const SECTIONS: { key: SectionKey; label: string; icon: React.ReactNode }
   { key: "children", label: "子ども", icon: <Baby size={15} /> },
   { key: "invest", label: "運用", icon: <TrendingUp size={15} /> },
   { key: "events", label: "イベント", icon: <CalendarDays size={15} /> },
-  { key: "risk", label: "万一", icon: <ShieldAlert size={15} /> },
+  { key: "risk", label: "保障", icon: <ShieldAlert size={15} /> },
   { key: "settings", label: "前提", icon: <Settings2 size={15} /> },
 ];
 

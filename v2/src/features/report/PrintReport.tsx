@@ -22,7 +22,7 @@ import { WealthChart } from "@/charts/WealthChart";
 import { CashflowChart } from "@/charts/CashflowChart";
 import { LineCompare } from "@/charts/LineCompare";
 import { MiniStackedBars, MiniLine } from "@/charts/Mini";
-import { buildTaxGroups } from "@/features/dashboard/TaxDetail";
+import { buildTaxGroups, buildInheritanceGroups, type Group as TaxGroup } from "@/features/dashboard/TaxDetail";
 import { CHILD_COLORS } from "@/features/editor/sections/ChildrenSection";
 import { fmtMan, fmtManFine, fmtPct, fmtYen } from "@/lib/format";
 import { cx } from "@/ui/primitives";
@@ -30,6 +30,28 @@ import { cx } from "@/ui/primitives";
 const man = (yen: number) => Math.round(yen / MAN).toLocaleString();
 const manS = (yen: number) => (yen < 0 ? "▲" : "") + Math.round(Math.abs(yen) / MAN).toLocaleString();
 const EMP = { employee: "会社員・公務員", selfEmployed: "自営業", none: "無職" } as const;
+
+/** 計算根拠のテーブル（所得税・相続税で共用）。 */
+function Groups({ groups }: { groups: TaxGroup[] }) {
+  return (
+    <div className="columns-1 md:columns-2 gap-4 [&>*]:break-inside-avoid">
+            {groups.map(g => (
+              <div key={g.title} className="mb-3">
+                <table className="w-full text-[11px] tabular">
+                  <thead><tr className="border-b line"><th className="text-left py-0.5 font-semibold ink">{g.title}</th>{g.cols.map(c => <th key={c} className="text-right py-0.5 font-medium ink-3 w-24">{c}</th>)}</tr></thead>
+                  <tbody>{g.rows.map((r, j) => (
+                    <tr key={j} className={cx("border-b line last:border-0 align-top", r.strong && "surface-2")}>
+                      <td className={cx("py-0.5 pr-2", r.sub && "pl-3", r.strong ? "font-semibold ink" : "ink-2")}>{r.label}{r.formula && <div className="ink-3 font-normal text-[10px] leading-snug">{r.formula}</div>}</td>
+                      {r.values.map((v, k) => <td key={k} className={cx("py-0.5 text-right whitespace-nowrap", r.strong ? "font-semibold ink" : "ink")}>{v == null ? "—" : typeof v === "string" ? v : `${v < 0 ? "−" : ""}${fmtYen(Math.abs(Math.round(v)))}`}</td>)}
+                    </tr>
+                  ))}</tbody>
+                </table>
+                {g.note && <p className="hint mt-0.5">{g.note}</p>}
+              </div>
+            ))}
+    </div>
+  );
+}
 
 function Page({ title, plan, children, first }: { title: string; plan: Plan; children: React.ReactNode; first?: boolean }) {
   return (
@@ -82,6 +104,7 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
     const sc = simulate(plan, { events });
     const after = sc.rows.filter(r => r.age >= d);
     const min = after.reduce((m, r) => (r.balances.liquid < m.balances.liquid ? r : m), after[0]);
+    const inh = sc.rows.find(r => r.age === d)?.inheritance ?? [];
     const survivorPension = after.find(r => (who === "self" ? r.spouse?.survivorPension : r.self.survivorPension))?.[who === "self" ? "spouse" : "self"]?.survivorPension ?? 0;
     const payout = after.reduce((a, r) => a + sumIn(r, ["insurance"]), 0);
     const checkpoints = [d, d + 10, d + 20].filter(a => a <= plan.endAge - 1).map(a => {
@@ -91,7 +114,7 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
       const deathBenefit = a < member.retireAge && member.employment !== "none" ? member.deathBenefit * MAN : 0;
       return { age: a, shortfall: pt?.shortfall ?? 0, cover, deathBenefit };
     });
-    return { who, name: who === "self" ? plan.self.name : plan.spouse!.name, curve, scenario: sc, min, survivorPension, payout, checkpoints };
+    return { who, name: who === "self" ? plan.self.name : plan.spouse!.name, curve, scenario: sc, min, survivorPension, payout, checkpoints, inh };
   }), [plan, insurances]);
 
   // ── リタイア後の必要資金 ──
@@ -220,22 +243,7 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
       {/* 4 税金 */}
       {[first.self, first.spouse].map((m, i) => m && m.alive && m.tax && m.tax.gross > 0 && (
         <Page key={i} title={`所得税／住民税の計算（${i === 0 ? plan.self.name : plan.spouse?.name}・${m.age}歳・${first.year}年）`} plan={plan}>
-          <div className="columns-1 md:columns-2 gap-4 [&>*]:break-inside-avoid">
-            {buildTaxGroups(m, m.tax).map(g => (
-              <div key={g.title} className="mb-3">
-                <table className="w-full text-[11px] tabular">
-                  <thead><tr className="border-b line"><th className="text-left py-0.5 font-semibold ink">{g.title}</th>{g.cols.map(c => <th key={c} className="text-right py-0.5 font-medium ink-3 w-24">{c}</th>)}</tr></thead>
-                  <tbody>{g.rows.map((r, j) => (
-                    <tr key={j} className={cx("border-b line last:border-0 align-top", r.strong && "surface-2")}>
-                      <td className={cx("py-0.5 pr-2", r.sub && "pl-3", r.strong ? "font-semibold ink" : "ink-2")}>{r.label}{r.formula && <div className="ink-3 font-normal text-[10px] leading-snug">{r.formula}</div>}</td>
-                      {r.values.map((v, k) => <td key={k} className={cx("py-0.5 text-right whitespace-nowrap", r.strong ? "font-semibold ink" : "ink")}>{v == null ? "—" : typeof v === "string" ? v : `${v < 0 ? "−" : ""}${fmtYen(Math.abs(Math.round(v)))}`}</td>)}
-                    </tr>
-                  ))}</tbody>
-                </table>
-                {g.note && <p className="hint mt-0.5">{g.note}</p>}
-              </div>
-            ))}
-          </div>
+          <Groups groups={buildTaxGroups(m, m.tax)} />
           <p className="hint">※ 本ページの税額は今年の所得に対する課税額で、住民税は翌年に納付するものです。社会保険料は協会けんぽ平均の料率で概算しています。</p>
         </Page>
       ))}
@@ -480,14 +488,28 @@ export function PrintReport({ plan, res, summary, comparePlans }: { plan: Plan; 
             ["(イ) その時点の死亡保険金（既存の保険）", ...rk.checkpoints.map(c => `${man(c.cover)}万`)],
             ["(ウ) 死亡退職金・弔慰金", ...rk.checkpoints.map(c => `${man(c.deathBenefit)}万`)],
           ]} />
-          <p className="hint">(ア) は既存の保険・団信・遺族年金・死亡退職金・生活費 {plan.living.survivorPct}% を織り込んだうえで、遺族の流動資産が最も減る時点のマイナス分。0 は、この試算の前提では追加の保障がなくても不足しないことを示します。年齢別の推移は「万一・リスク」ビューで確認できます。</p>
+          <p className="hint">(ア) は既存の保険・団信・遺族年金・死亡退職金・生活費 {plan.living.survivorPct}% を織り込んだうえで、遺族の流動資産が最も減る時点のマイナス分。0 は、この試算の前提では追加の保障がなくても不足しないことを示します。年齢別の推移は「万一の分析」ビューで確認できます。</p>
+          {rk.inh.map(d => (
+            <p key={d.who} className="hint">
+              相続税は、課税価格 {fmtMan(d.total)}（葬儀費用 {fmtMan(d.debts)} を債務控除したあと）に対して基礎控除 {fmtMan(d.basicDeduction)}（3,000万＋600万×法定相続人 {d.heirs}人）。
+              {d.tax > 0 ? `納付税額は ${fmtMan(d.tax)} の見込みで、計算の内訳は次ページにあります。` : "基礎控除の範囲に収まるため、この試算では相続税はかかりません。"}
+            </p>
+          ))}
           {rk.curve.some(p => p.shortfall > 0)
             ? <div className="px-1 pb-2"><LineCompare height={180} unitLabel="追加で必要な死亡保障" series={[{ id: "gap", label: "必要保障額（不足額）", color: "var(--warning)", points: rk.curve.map(p => ({ age: p.deathAge, value: p.shortfall })) }]} /></div>
             : <p className="text-xs ink-2 rounded-lg p-2.5" style={{ background: "var(--accent-soft)" }}>{plan.self.age + 1}〜{rk.curve[rk.curve.length - 1]?.deathAge ?? plan.endAge}歳のどの時点で亡くなっても、遺族の流動資産はマイナスにならない結果です。あくまでこの試算の前提のもとでは、追加の死亡保障は不要という結果になります。</p>}
         </Page>
       ))}
 
-      {/* 13 プラン比較 */}
+      {/* 13 相続税の計算（課税されるときだけ） */}
+      {risk.flatMap(rk => rk.inh.filter(d => d.tax > 0).map(d => (
+        <Page key={`inh-${rk.who}`} title={`${d.name} に万一の場合の相続税の計算（本人 ${d.age}歳時）`} plan={plan}>
+          <Groups groups={buildInheritanceGroups(d)} />
+          <p className="hint">住宅は時価で評価しています。実際は路線価・固定資産税評価額（時価の 7〜8 割）が基準で、小規模宅地等の特例が使えるとさらに下がるため、この試算は持ち家がある場合の相続税を多めに見積もります。遺産分割は法定相続分どおりと仮定し、贈与・相続時精算課税は扱いません。実際の申告額は税理士にご確認ください。</p>
+        </Page>
+      )))}
+
+      {/* 14 プラン比較 */}
       {compareSims.length > 1 && (
         <Page title="プラン比較" plan={plan}>
           <T head={["", ...compareSims.map(s => s.plan.name)]} rows={[

@@ -18,7 +18,7 @@ const VIEWS: { key: View; label: string; icon: React.ReactNode }[] = [
   { key: "dashboard", label: "ダッシュボード", icon: <LayoutDashboard size={16} /> },
   { key: "table", label: "年表", icon: <Table2 size={16} /> },
   { key: "compare", label: "比較", icon: <GitCompareArrows size={16} /> },
-  { key: "risk", label: "万一・リスク", icon: <ShieldAlert size={16} /> },
+  { key: "risk", label: "万一の分析", icon: <ShieldAlert size={16} /> },
   { key: "report", label: "レポート", icon: <FileText size={16} /> },
 ];
 

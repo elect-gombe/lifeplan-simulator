@@ -98,7 +98,7 @@ export function EventForm({ e, plan, onChange }: { e: LifeEvent; plan: { self: {
             <div className="flex flex-col gap-2 justify-end col-span-2">
               <Toggle checked={e.inflate} onChange={v => onChange(x => { (x as CashEvent).inflate = v; })} label="インフレに連動" help="オンなら前提セクションのインフレ率で毎年増やします。ローン返済など固定額の支出はオフに。" />
               {e.kind === "income" && <Toggle checked={e.taxable} onChange={v => onChange(x => { (x as CashEvent).taxable = v; })} label="課税対象（雑所得など）" help="本人の所得に加算して所得税・住民税を計算します。" />}
-              <Toggle checked={e.stopOnSelfDeath} onChange={v => onChange(x => { (x as CashEvent).stopOnSelfDeath = v; })} label="本人が亡くなったら止める" help="万一セクションで本人の死亡を設定したとき、この収支をその年から止めます。" />
+              <Toggle checked={e.stopOnSelfDeath} onChange={v => onChange(x => { (x as CashEvent).stopOnSelfDeath = v; })} label="本人が亡くなったら止める" help="「万一の分析」で本人の死亡を重ねたとき、この収支をその年から止めます。" />
             </div>
           </Row>
         </>
@@ -132,10 +132,10 @@ export function EventForm({ e, plan, onChange }: { e: LifeEvent; plan: { self: {
           <div><span className="label block mb-1">生命保険料控除の区分</span><Segmented size="sm" wrap value={e.deductionType ?? "general"} onChange={v => onChange(x => { (x as InsuranceEvent).deductionType = v; })} options={[{ value: "general", label: "一般生命保険料", title: "死亡保険・収入保障・養老など" }, { value: "medical", label: "介護医療保険料", title: "医療・がん・介護保険" }, { value: "pension", label: "個人年金保険料", title: "税制適格の個人年金" }]} /><p className="hint mt-1">区分ごとに所得税 4 万・住民税 2.8 万が上限（3 区分合計 12 万・7 万）。</p></div>
           <Row>
             {e.type === "term"
-              ? <NumField label="死亡保険金" value={e.payout} unit="万円" step={100} min={0} onChange={v => onChange(x => { (x as InsuranceEvent).payout = v; })} help="被保険者が亡くなった年に一括で受け取る額。万一セクションで死亡シナリオを設定すると収支に反映されます。" />
+              ? <NumField label="死亡保険金" value={e.payout} unit="万円" step={100} min={0} onChange={v => onChange(x => { (x as InsuranceEvent).payout = v; })} help="被保険者が亡くなった年に一括で受け取る額。「万一の分析」で死亡シナリオを重ねると収支に反映されます。" />
               : <><NumField label="年金月額" value={e.payout} unit="万円/月" step={1} min={0} onChange={v => onChange(x => { (x as InsuranceEvent).payout = v; })} help="被保険者が亡くなったあと、下の年齢まで毎月受け取る額。" /><NumField label="何歳まで" value={e.payoutUntilAge} unit="歳" min={e.startAge} max={aEnd} onChange={v => onChange(x => { (x as InsuranceEvent).payoutUntilAge = v; })} help="収入保障を受け取り続ける本人の年齢。末子が独立するころまでが目安です。" /></>}
           </Row>
-          <p className="hint">保険料は生命保険料控除（最大 4 万円）に自動反映。給付は「万一」セクションの死亡シナリオと必要保障額の分析で使われます。</p>
+          <p className="hint">保険料は生命保険料控除（最大 4 万円）に自動反映。給付は「万一の分析」ビューの死亡シナリオと必要保障額で使われます。</p>
         </>
       )}
       <div className="flex gap-1.5"><Pill>{describe(e)}</Pill></div>
@@ -160,7 +160,7 @@ function EventPreview({ e, plan }: { e: LifeEvent; plan: Plan }) {
         <div className="text-xs font-medium ink mb-1">年ごとの金額</div>
         <div><MiniStackedBars ages={ages} series={[{ label: isIncome ? "収入" : e.kind === "insurance" ? "保険料" : "支出", color: isIncome ? "var(--s-in)" : e.kind === "car" ? "#4a3aa7" : e.kind === "insurance" ? "#9085e9" : "var(--s-out)", values: pts.map(p => Math.abs(p.amount)) }]} height={180} /></div>
       </div>
-      {e.kind === "insurance" && <p className="hint">給付（死亡保険金・収入保障）は「万一」セクションで死亡シナリオを設定すると収支に反映されます。</p>}
+      {e.kind === "insurance" && <p className="hint">給付（死亡保険金・収入保障）は「万一の分析」ビューで死亡シナリオを重ねると収支に反映されます。</p>}
     </div>
   );
 }

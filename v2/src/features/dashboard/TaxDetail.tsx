@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Calculator } from "lucide-react";
 import type { MemberYear } from "@/engine/simulate";
 import { computePersonTax, type PersonTaxResult, type PersonTaxInput } from "@/engine/tax";
+import { inheritanceBracket, type InheritanceDetail } from "@/engine/inheritance";
 import * as C from "@/engine/constants";
 import { Collapsible, Toggle, cx } from "@/ui/primitives";
 import { fmtMan, fmtYen } from "@/lib/format";
@@ -16,8 +17,8 @@ const yen = (v: number) => fmtYen(Math.round(v));
 const pct = (r: number, d = 1) => `${(r * 100).toFixed(d)}%`;
 const EMP_LABEL = { employee: "会社員・公務員", selfEmployed: "自営業", none: "働いていない" } as const;
 
-interface Row { label: string; values: (number | string | null)[]; formula?: string; strong?: boolean; sub?: boolean; sign?: "minus" | "plus" }
-interface Group { title: string; cols: string[]; rows: Row[]; note?: string }
+export interface Row { label: string; values: (number | string | null)[]; formula?: string; strong?: boolean; sub?: boolean; sign?: "minus" | "plus" }
+export interface Group { title: string; cols: string[]; rows: Row[]; note?: string }
 
 /** 給与所得控除の速算式（2025 年度改正後） */
 function empDedFormula(salary: number): string {
@@ -45,6 +46,64 @@ function lifeFormula(p: number): string {
 function bracketOf(taxable: number) {
   const t = Math.floor(taxable / 1000) * 1000;
   return { t, b: C.INCOME_TAX_BRACKETS.find(b => t <= b.upTo) ?? C.INCOME_TAX_BRACKETS[C.INCOME_TAX_BRACKETS.length - 1] };
+}
+
+const man = (v: number) => `${Math.round(v / 10000).toLocaleString()}万`;
+
+/** 相続税の計算根拠。所得税と同じ「行＋計算式」の形で返す。 */
+export function buildInheritanceGroups(d: InheritanceDetail): Group[] {
+  const heirText = `配偶者${d.hasSpouse ? "あり" : "なし"}・子 ${d.childCount} 人 → 法定相続人 ${d.heirs} 人`;
+  const groups: Group[] = [];
+  groups.push({
+    title: "課税価格の合計額", cols: ["金額"],
+    rows: [
+      { label: "現金・有価証券・住宅（時価 − ローン残高）", values: [d.estate],
+        formula: d.hasSpouse ? "配偶者が存命のため、世帯の資産の 1/2 を故人の遺産とみなす。NISA は全額（名義人の資産）" : "世帯の資産の全額" },
+      ...(d.deemedInsurance > 0 ? [
+        { label: "死亡保険金（みなし相続財産）", values: [d.deemedInsurance] },
+        { label: "非課税枠", values: [-d.insuranceExempt], sub: true, formula: `500万 × 法定相続人 ${d.heirs} 人 = ${man(C.INHERITANCE_INSURANCE_EXEMPT_PER_HEIR * d.heirs)}（受取額が上限）` },
+      ] : []),
+      ...(d.deemedRetirement > 0 ? [
+        { label: "死亡退職金・DC 死亡一時金（みなし相続財産）", values: [d.deemedRetirement] },
+        { label: "非課税枠", values: [-d.retirementExempt], sub: true, formula: `500万 × 法定相続人 ${d.heirs} 人 = ${man(C.INHERITANCE_INSURANCE_EXEMPT_PER_HEIR * d.heirs)}（受取額が上限）` },
+      ] : []),
+      ...(d.debts > 0 ? [{ label: "債務控除（葬儀費用）", values: [-d.debts], sub: true, formula: "葬儀費用は遺産から差し引ける" }] : []),
+      { label: "課税価格の合計額", values: [d.total], strong: true },
+    ],
+  });
+  groups.push({
+    title: "課税遺産総額", cols: ["金額"],
+    rows: [
+      { label: "課税価格の合計額", values: [d.total] },
+      { label: "基礎控除", values: [-d.basicDeduction], sub: true, formula: `3,000万 + 600万 × ${d.heirs} 人（${heirText}）` },
+      { label: "課税遺産総額", values: [d.taxableEstate], strong: true },
+    ],
+    note: d.taxableEstate <= 0 ? "課税価格が基礎控除以下のため、相続税はかかりません。" : undefined,
+  });
+  if (d.taxableEstate > 0) {
+    const share = (r: number) => d.taxableEstate * r;
+    const brk = (v: number) => { const b = inheritanceBracket(v); return `${yen(v)} × ${pct(b.rate, 0)} − ${man(b.deduction)}`; };
+    groups.push({
+      title: "相続税の総額（法定相続分で按分）", cols: ["按分額", "税額"],
+      rows: [
+        ...(d.hasSpouse ? [{ label: `配偶者（法定相続分 ${d.kids > 0 ? "1/2" : "全部"}）`, values: [share(d.spouseShare), d.spouseTax], formula: brk(share(d.spouseShare)) }] : []),
+        ...(d.kids > 0 ? [{ label: `子 1 人あたり（法定相続分 ${d.hasSpouse ? "1/2" : "全部"} ÷ ${d.kids} 人）`, values: [share(d.childShare), d.childTax], formula: brk(share(d.childShare)) }] : []),
+        ...(d.kids > 1 ? [{ label: `子 ${d.kids} 人分`, values: [null, d.childTax * d.kids], sub: true }] : []),
+        { label: "相続税の総額", values: [null, d.totalTax], strong: true },
+      ],
+      note: "実際の分け方ではなく、いったん法定相続分どおりに分けたものとして総額を出す方式です。",
+    });
+    groups.push({
+      title: "納付税額", cols: ["金額"],
+      rows: [
+        { label: "相続税の総額", values: [d.totalTax] },
+        ...(d.spouseCredit > 0 ? [{ label: "配偶者の税額軽減", values: [-d.spouseCredit], sub: true, formula: `総額 × 配偶者の取得割合 ${pct(d.spouseShare, 0)}。法定相続分（または 1.6 億）までは配偶者に税がかからない` }] : []),
+        { label: "納付税額", values: [d.tax], strong: true },
+      ],
+      note: d.hasSpouse ? "この試算は法定相続分どおりに分ける前提です。配偶者が多く取ると今回は軽くなりますが、その分が二次相続で課税されます。" : undefined,
+    });
+  }
+  return groups;
 }
 
 export function buildTaxGroups(m: MemberYear, t: PersonTaxResult): Group[] {
@@ -209,6 +268,42 @@ export function TaxBracketChart({ taxable, incomeTax, totalIncome }: { taxable: 
   );
 }
 
+/** 計算根拠のテーブル（所得税・相続税で共用）。 */
+export function GroupTables({ groups, formula }: { groups: Group[]; formula: boolean }) {
+  return (
+    <>
+        {groups.map(g => (
+        <div key={g.title}>
+          <table className="w-full text-xs tabular">
+            <thead>
+              <tr className="border-b line">
+                <th className="text-left py-1 font-semibold ink">{g.title}</th>
+                {g.cols.map(c => <th key={c} className="text-right py-1 font-medium ink-3 w-28 whitespace-nowrap">{c}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {g.rows.map((r, i) => (
+                <tr key={`${r.label}${i}`} className={cx("border-b line last:border-0 align-top", r.strong && "surface-2")}>
+                  <td className={cx("py-1 pr-2", r.sub && "pl-3", r.strong ? "font-semibold ink" : "ink-2")}>
+                    {r.label}
+                    {formula && r.formula && <div className="ink-3 font-normal text-[11px] leading-snug mt-0.5 whitespace-pre-wrap">{r.formula}</div>}
+                  </td>
+                  {r.values.map((v, j) => (
+                    <td key={j} className={cx("py-1 text-right whitespace-nowrap", r.strong ? "font-semibold ink" : typeof v === "number" && v < 0 ? "text-[var(--good)]" : "ink")}>
+                      {v == null ? <span className="ink-3">—</span> : typeof v === "string" ? v : `${v < 0 ? "−" : ""}${yen(Math.abs(v))}`}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {formula && g.note && <p className="hint mt-1">{g.note}</p>}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function TaxDetail({ m, name }: { m: MemberYear; name: string }) {
   const [formula, setFormula] = useState<boolean>(() => { try { return localStorage.getItem(KEY) !== "0"; } catch { return true; } });
   useEffect(() => { try { localStorage.setItem(KEY, formula ? "1" : "0"); } catch { /* ignore */ } }, [formula]);
@@ -220,34 +315,7 @@ export function TaxDetail({ m, name }: { m: MemberYear; name: string }) {
     <Collapsible title={<span className="inline-flex items-center gap-2"><Calculator size={14} />{name}（{m.age}歳）の税・社会保険の計算根拠</span>} summary={`手取り ${fmtMan(t.takeHome)} / 額面 ${fmtMan(t.gross)}・限界税率 ${Math.round(t.marginalRate * 100)}%`}
       right={<Toggle checked={formula} onChange={setFormula} label={<span className="text-xs">計算式を表示</span>} />}>
       <div className="space-y-4">
-        {groups.map(g => (
-          <div key={g.title}>
-            <table className="w-full text-xs tabular">
-              <thead>
-                <tr className="border-b line">
-                  <th className="text-left py-1 font-semibold ink">{g.title}</th>
-                  {g.cols.map(c => <th key={c} className="text-right py-1 font-medium ink-3 w-28 whitespace-nowrap">{c}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {g.rows.map((r, i) => (
-                  <tr key={`${r.label}${i}`} className={cx("border-b line last:border-0 align-top", r.strong && "surface-2")}>
-                    <td className={cx("py-1 pr-2", r.sub && "pl-3", r.strong ? "font-semibold ink" : "ink-2")}>
-                      {r.label}
-                      {formula && r.formula && <div className="ink-3 font-normal text-[11px] leading-snug mt-0.5 whitespace-pre-wrap">{r.formula}</div>}
-                    </td>
-                    {r.values.map((v, j) => (
-                      <td key={j} className={cx("py-1 text-right whitespace-nowrap", r.strong ? "font-semibold ink" : typeof v === "number" && v < 0 ? "text-[var(--good)]" : "ink")}>
-                        {v == null ? <span className="ink-3">—</span> : typeof v === "string" ? v : `${v < 0 ? "−" : ""}${yen(Math.abs(v))}`}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {formula && g.note && <p className="hint mt-1">{g.note}</p>}
-          </div>
-        ))}
+        <GroupTables groups={groups} formula={formula} />
         <TaxBracketChart taxable={t.taxableIt} incomeTax={t.incomeTax} totalIncome={t.totalIncome} />
         {m.companyDc > 0 && <p className="hint">企業型DC の事業主掛金 {fmtMan(m.companyDc)}/年 は給与ではないため、上の額面・社会保険料・税のいずれにも含まれません（DC 残高に直接積み立て）。</p>}
       </div>

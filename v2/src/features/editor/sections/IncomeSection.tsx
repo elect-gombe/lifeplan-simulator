@@ -43,7 +43,7 @@ function MemberIncome({ m, color, onChange, takeHome, pension, planEnd, selfAge,
           <Row>
             <NumField label="年金の受給開始" value={m.pensionStartAge} unit="歳" min={60} max={75} onChange={v => onChange(x => { x.pensionStartAge = v; })} help="65歳より早いと月0.4%減額、遅いと月0.7%増額。" />
             <NumField label="退職金" value={m.severancePay} unit="万円" step={100} min={0} onChange={v => onChange(x => { x.severancePay = v; })} help="退職年に受け取り、退職所得として課税。" />
-            <NumField label="死亡退職金・弔慰金" value={m.deathBenefit} unit="万円" step={100} min={0} onChange={v => onChange(x => { x.deathBenefit = v; })} help="在職中に亡くなった場合に遺族へ支払われる額。万一シナリオと必要保障額に反映。相続税では退職手当金として非課税枠（500 万×法定相続人）の対象。" />
+            <NumField label="死亡退職金・弔慰金" value={m.deathBenefit} unit="万円" step={100} min={0} onChange={v => onChange(x => { x.deathBenefit = v; })} help="在職中に亡くなった場合に遺族へ支払われる額。「万一の分析」のシナリオと必要保障額に反映。相続税では退職手当金として非課税枠（500 万×法定相続人）の対象。" />
             <div>
               <span className="label block mb-1">社会保険</span>
               <Segmented size="sm" wrap value={m.socialInsurance} onChange={v => onChange(x => { x.socialInsurance = v; })}

@@ -10,7 +10,7 @@ import { computePersonTax, retirementLumpTax, propertySaleTax, dependentDeductio
 import { estimateOldAgePension, workingPensionReduction, macroSlideFactor, survivorPension } from "./pension";
 import { buildLoanSchedule, type LoanSchedule } from "./mortgage";
 import { childCostAt, childAllowanceAnnual, highSchoolSupport, tashiWaiver, leaveMonthsInYear, leaveBenefit } from "./education";
-import { inheritanceTax } from "./inheritance";
+import { inheritanceTax, type InheritanceDetail } from "./inheritance";
 
 // ─────────────────────────────────────────────────────────────
 // Output types
@@ -69,6 +69,8 @@ export interface YearRow {
   net: number;                 // totalIn − totalOut（投資前）
   byCategory: Record<CostCategory, number>;
   support: { childAllowance: number; hsSupport: number; tashiWaiver: number; leaveBenefit: number };
+  /** その年に発生した相続の計算内訳（死亡がない年は空） */
+  inheritance: InheritanceDetail[];
   flows: { nisaIn: number; nisaOut: number; taxableIn: number; taxableOut: number; taxableTax: number; dcIn: number; planned: number /* 計画的取り崩しで現金化した額（税引後） */; goalReserve: number /* 目標貯蓄のためにこの年キープすべき現金（上限に加算） */ };
   balances: Balances;
   housing: { kind: "rent" | "own" | null; loanBalance: number; loanPayment: number; homeValue: number };
@@ -500,7 +502,7 @@ export function simulate(plan: Plan, opts: SimOptions = {}): SimResult {
     }
 
     // ── 6. 死亡処理: DC死亡一時金・NISA現金化・団信・相続税 ───────────────
-    let inheritanceTaxPaid = 0; void inheritanceTaxPaid;
+    const inheritances: InheritanceDetail[] = [];
     for (let i = 0 as 0 | 1; i < 2; i = (i + 1) as 0 | 1) {
       const s = members[i];
       if (!s || s.deathAge !== age) continue;
@@ -523,8 +525,12 @@ export function simulate(plan: Plan, opts: SimOptions = {}): SimResult {
       if (i === 1 && otherDiedSameYear) continue;
       const estateShare = survivorAlive ? 0.5 : 1;
       const estate = Math.max((cash + taxable) * estateShare + nisaDeath + (homeValue - loanBalance) * estateShare, 0);
-      const { tax } = inheritanceTax(estate, insurancePayout, dcDeath + deathBenefit, childAges.filter(a => a >= 0).length, survivorAlive);
-      if (tax > 0) { inheritanceTaxPaid += tax; addOut("tax", `相続税（${s.m.name}）`, tax, undefined, true); }
+      // 葬儀費用は債務控除として課税価格から引く（現金支出としては別に計上済み）。
+      const debts = plan.funeralCost * MAN * inflF;
+      const detail = inheritanceTax(estate, insurancePayout, dcDeath + deathBenefit, childAges.filter(a => a >= 0).length, survivorAlive,
+        debts, { who: i === 0 ? "self" : "spouse", name: s.m.name, age });
+      inheritances.push(detail);
+      if (detail.tax > 0) addOut("tax", `相続税（${s.m.name}）`, detail.tax, undefined, true);
     }
 
     // ── 7. 生活費 ─────────────────────────────────────────────────────────
@@ -665,6 +671,7 @@ export function simulate(plan: Plan, opts: SimOptions = {}): SimResult {
       self: memberYears[0]!, spouse: memberYears[1],
       childAges, inflows, outflows, totalIn, totalOut: totalOutFinal, net: totalIn - totalOutFinal, byCategory: byCat,
       support: { childAllowance, hsSupport, tashiWaiver: tashi, leaveBenefit: totalLeaveBenefit },
+      inheritance: inheritances,
       flows, balances,
       housing: { kind: phase ? (phase as HousingPhase).kind : null, loanBalance, loanPayment, homeValue },
       markers: markers.filter(Boolean), ended,
