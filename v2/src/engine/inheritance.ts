@@ -39,6 +39,7 @@ export interface InheritanceDetail {
   deemedRetirement: number;    // 死亡退職金・DC死亡一時金
   retirementExempt: number;    // その非課税枠
   debts: number;               // 債務控除（葬儀費用）
+  danshinForgiven: number;     // 団信で消えたローン残高（債務控除できない・保険金にも含めない）
   total: number;               // 課税価格の合計額
   basicDeduction: number;      // 基礎控除
   taxableEstate: number;       // 課税遺産総額
@@ -54,7 +55,7 @@ export interface InheritanceDetail {
 export function inheritanceTax(
   estate: number, deemedInsurance: number, deemedRetirement: number,
   childCount: number, hasSpouse: boolean,
-  debts = 0, meta: { who: "self" | "spouse"; name: string; age: number } = { who: "self", name: "", age: 0 },
+  debts = 0, meta: { who: "self" | "spouse"; name: string; age: number; danshinForgiven?: number } = { who: "self", name: "", age: 0 },
 ): InheritanceDetail {
   const heirs = Math.max(childCount + (hasSpouse ? 1 : 0), 1);
   // みなし相続財産: 死亡保険金・死亡退職金（DC死亡一時金）はそれぞれ 500万×法定相続人 まで非課税
@@ -67,7 +68,7 @@ export function inheritanceTax(
   const spouseShare = hasSpouse ? (kids > 0 ? 0.5 : 1) : 0;
   const childShare = kids > 0 ? (1 - spouseShare) / kids : 0;
   const base = {
-    who: meta.who, name: meta.name, age: meta.age, heirs, hasSpouse, childCount, kids,
+    who: meta.who, name: meta.name, age: meta.age, heirs, hasSpouse, childCount, kids, danshinForgiven: meta.danshinForgiven ?? 0,
     estate: Math.max(estate, 0), deemedInsurance, insuranceExempt, deemedRetirement, retirementExempt,
     debts, total, basicDeduction, taxableEstate: taxable, spouseShare, childShare,
   };

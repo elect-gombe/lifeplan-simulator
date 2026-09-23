@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { inheritanceTax } from "../inheritance";
+import { defaultPlan, defaultMember, defaultChild, defaultHousingPhase, defaultProperty } from "@/domain/model";
+import { simulate } from "../simulate";
 
 const MAN = 10_000;
 const man = (v: number) => v * MAN;
@@ -52,5 +54,41 @@ describe("相続税", () => {
     expect(d.taxableEstate).toBe(0);
     expect(d.totalTax).toBe(0);
     expect(d.tax).toBe(0);
+  });
+});
+
+describe("団信と相続財産", () => {
+  const build = (danshin: boolean) => {
+    const p = defaultPlan();
+    p.self.age = 45; p.self.income = [{ age: 45, value: 800 }];
+    p.spouse = defaultMember({ name: "配偶者", age: 43 }); p.spouse.income = [{ age: 43, value: 400 }];
+    p.children = [defaultChild(0, 30), defaultChild(1, 33)];
+    p.assets = { ...p.assets, cash: 2000 };
+    const own = defaultHousingPhase(46, "own");
+    own.property = { ...defaultProperty(), price: 6000, downPayment: 500, loanYears: 35, rate: { kind: "fixed", pct: 1.5 }, danshin };
+    p.housing = [p.housing[0], own];
+    p.events = [{ id: "d", kind: "death", member: "self", label: "死亡", enabled: true, age: 55 }];
+    return simulate(p);
+  };
+  const detailAt = (danshin: boolean) => {
+    const row = build(danshin).rows.find(r => r.age === 55)!;
+    expect(row.inheritance).toHaveLength(1);
+    expect(Number.isFinite(row.inheritance[0].estate)).toBe(true);
+    return row.inheritance[0];
+  };
+
+  it("団信ありなら、免除されたローン残高は遺産から差し引かない（保険金としても課税しない）", () => {
+    const on = detailAt(true), off = detailAt(false);
+    expect(on.estate).toBeGreaterThan(off.estate);          // ローンを債務として引いていない
+    expect(on.deemedInsurance).toBe(off.deemedInsurance);   // 弁済額をみなし相続財産に足していない
+    expect(on.deemedInsurance).toBe(0);
+  });
+
+  it("団信なしならローン残高が住宅の評価から引かれる", () => {
+    const on = detailAt(true), off = detailAt(false);
+    // 差は「死亡時点のローン残高 × 配偶者存命の按分 1/2」。9 年返済後の残高は 4,000 万台。
+    const gap = on.estate - off.estate;
+    expect(gap).toBeGreaterThan(1800 * 10_000);
+    expect(gap).toBeLessThan(2600 * 10_000);
   });
 });

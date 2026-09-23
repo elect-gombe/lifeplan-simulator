@@ -58,7 +58,8 @@ export function buildInheritanceGroups(d: InheritanceDetail): Group[] {
     title: "課税価格の合計額", cols: ["金額"],
     rows: [
       { label: "現金・有価証券・住宅（時価 − ローン残高）", values: [d.estate],
-        formula: d.hasSpouse ? "配偶者が存命のため、世帯の資産の 1/2 を故人の遺産とみなす。NISA は全額（名義人の資産）" : "世帯の資産の全額" },
+        formula: (d.hasSpouse ? "配偶者が存命のため、世帯の資産の 1/2 を故人の遺産とみなす。NISA は全額（名義人の資産）" : "世帯の資産の全額")
+          + (d.danshinForgiven > 0 ? `。団信で消えたローン ${man(d.danshinForgiven)} は債務として引けない（保険金も遺族が受け取らないため相続財産に含めない）` : "") },
       ...(d.deemedInsurance > 0 ? [
         { label: "死亡保険金（みなし相続財産）", values: [d.deemedInsurance] },
         { label: "非課税枠", values: [-d.insuranceExempt], sub: true, formula: `500万 × 法定相続人 ${d.heirs} 人 = ${man(C.INHERITANCE_INSURANCE_EXEMPT_PER_HEIR * d.heirs)}（受取額が上限）` },

@@ -508,7 +508,9 @@ export function simulate(plan: Plan, opts: SimOptions = {}): SimResult {
       if (!s || s.deathAge !== age) continue;
       const survivorAlive = alive[1 - i];
       const otherDiedSameYear = !!members[1 - i] && members[1 - i]!.deathAge === age;
-      // 団信
+      // 団信。弁済額は保険金として遺族が受け取るわけではないので、みなし相続財産に入れない。
+      // 同時に、死亡時点で債務が消えるため相続税の債務控除にもならない（残高を引かずに住宅を評価する）。
+      const loanBeforeDanshin = loanBalance;
       if (phase && (phase as HousingPhase).kind === "own" && (phase as HousingPhase).property.danshin) {
         const ph = phase as HousingPhase; const share = i === 0 ? ph.property.loanShareSelfPct / 100 : 1 - ph.property.loanShareSelfPct / 100;
         if (share > 0 && loanBalance > 0) { loanForgiven[ph.id] = Math.min((loanForgiven[ph.id] ?? 0) + share, 1); markers.push("団信でローン免除"); loanBalance = Math.round(loanBalance * (1 - share)); }
@@ -528,7 +530,7 @@ export function simulate(plan: Plan, opts: SimOptions = {}): SimResult {
       // 葬儀費用は債務控除として課税価格から引く（現金支出としては別に計上済み）。
       const debts = plan.funeralCost * MAN * inflF;
       const detail = inheritanceTax(estate, insurancePayout, dcDeath + deathBenefit, childAges.filter(a => a >= 0).length, survivorAlive,
-        debts, { who: i === 0 ? "self" : "spouse", name: s.m.name, age });
+        debts, { who: i === 0 ? "self" : "spouse", name: s.m.name, age, danshinForgiven: loanBeforeDanshin - loanBalance });
       inheritances.push(detail);
       if (detail.tax > 0) addOut("tax", `相続税（${s.m.name}）`, detail.tax, undefined, true);
     }
